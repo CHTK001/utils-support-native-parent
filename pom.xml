@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.chua</groupId>
+    <artifactId>utils-support-native-parent</artifactId>
+    <version>4.0.0.41</version>
+    <packaging>pom</packaging>
+    <description>预编译 native 二进制库（Rust cdylib），独立于 Java 代码分发</description>
+
+    <modules>
+        <module>utils-support-native-rust-proxy</module>
+        <module>utils-support-native-perf</module>
+        <module>utils-support-native-ffmpeg</module>
+        <module>utils-support-native-filesystem</module>
+        <module>utils-support-native-nmap</module>
+    </modules>
+</project>
