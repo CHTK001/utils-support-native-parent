@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.41</version>
+    </parent>
+    <artifactId>utils-support-native-sqlite</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native SQLite</name>
+    <description>
+        SQLite update_hook 原生动态库。
+        封装 sqlite3_update_hook() 回调机制，以环形缓冲区 + JSON 事件格式暴露给 Java FFI 侧消费。
+    </description>
+</project>
