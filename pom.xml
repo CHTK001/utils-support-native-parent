@@ -15,6 +15,7 @@
         <module>utils-support-native-ffmpeg</module>
         <module>utils-support-native-filesystem</module>
         <module>utils-support-native-nmap</module>
+        <module>utils-support-native-sqlite</module>
     </modules>
 
     <distributionManagement>
