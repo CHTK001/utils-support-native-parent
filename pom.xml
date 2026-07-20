@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.chua</groupId>
     <artifactId>utils-support-native-parent</artifactId>
-    <version>4.0.0.41</version>
+    <version>4.0.0.42</version>
     <packaging>pom</packaging>
     <description>预编译 native 二进制库（Rust cdylib），独立于 Java 代码分发</description>
 
