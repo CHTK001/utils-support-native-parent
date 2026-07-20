@@ -16,6 +16,8 @@
         <module>utils-support-native-filesystem</module>
         <module>utils-support-native-nmap</module>
         <module>utils-support-native-sqlite</module>
+        <module>utils-support-native-datarecovery</module>
+        <module>utils-support-native-video-processor</module>
     </modules>
 
     <distributionManagement>
