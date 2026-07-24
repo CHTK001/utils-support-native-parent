@@ -22,9 +22,12 @@
 
     <distributionManagement>
         <repository>
-            <id>github</id>
-            <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/CHTK001/utils-support-native-parent</url>
+            <id>2676178-release-jmLEdB</id>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-release-jmledb</url>
         </repository>
+        <snapshotRepository>
+            <id>2676178-snapshot-FwAJpk</id>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-snapshot-fwajpk</url>
+        </snapshotRepository>
     </distributionManagement>
 </project>
