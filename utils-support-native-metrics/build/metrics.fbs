@@ -1,0 +1,123 @@
+namespace metrics;
+
+struct CpuCore {
+    id: int;
+    usage: float;
+    frequency: long;
+    name: string;
+}
+
+struct MemorySlot {
+    slot: int;
+    total: long;
+    used: long;
+    available: long;
+    memory_type: string;
+}
+
+struct DiskInfo {
+    name: string;
+    mount_point: string;
+    total: long;
+    used: long;
+    available: long;
+    file_system: string;
+}
+
+struct DiskIo {
+    name: string;
+    read_bytes: long;
+    write_bytes: long;
+    read_count: long;
+    write_count: long;
+}
+
+struct NetworkInterface {
+    name: string;
+    received_bytes: long;
+    transmitted_bytes: long;
+    received_packets: long;
+    transmitted_packets: long;
+    errors_in: int;
+    errors_out: int;
+}
+
+struct ProcessInfo {
+    pid: int;
+    name: string;
+    cpu_usage: float;
+    memory_bytes: long;
+    thread_count: int;
+}
+
+struct GpuInfo {
+    id: int;
+    name: string;
+    usage: float;
+    memory_used: long;
+    memory_total: long;
+    temperature: float;
+}
+
+struct BatteryInfo {
+    index: int;
+    charge_percent: int;
+    status: string;
+    time_remaining_minutes: int;
+    is_plugged_in: bool;
+}
+
+struct SystemLoad {
+    load_1: float;
+    load_5: float;
+    load_15: float;
+}
+
+table CpuData {
+    cores: [CpuCore];
+}
+
+table MemoryData {
+    slots: [MemorySlot];
+    swap_total: long;
+    swap_used: long;
+}
+
+table DiskData {
+    disks: [DiskInfo];
+    io: [DiskIo];
+}
+
+table NetworkData {
+    interfaces: [NetworkInterface];
+}
+
+table ProcessData {
+    processes: [ProcessInfo];
+}
+
+table GpuData {
+    gpus: [GpuInfo];
+}
+
+table BatteryData {
+    batteries: [BatteryInfo];
+}
+
+table LoadData {
+    load: SystemLoad;
+}
+
+table MetricsSnapshot {
+    timestamp: long;
+    cpu: CpuData;
+    memory: MemoryData;
+    disk: DiskData;
+    network: NetworkData;
+    process: ProcessData;
+    gpu: GpuData;
+    battery: BatteryData;
+    load: LoadData;
+}
+
+root_type MetricsSnapshot;

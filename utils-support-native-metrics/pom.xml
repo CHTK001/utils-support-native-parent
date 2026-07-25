@@ -6,9 +6,10 @@
     <parent>
         <groupId>com.chua</groupId>
         <artifactId>utils-support-native-parent</artifactId>
-        <version>4.0.0.41</version>
+        <version>4.0.0.42</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
-    <artifactId>utils-support-native-perf</artifactId>
+    <artifactId>utils-support-native-metrics</artifactId>
     <packaging>jar</packaging>
-    <description>性能计数器 Rust native 库</description>
+    <description>系统指标 Rust native 库</description>
 </project>
