@@ -8,7 +8,7 @@
         <artifactId>utils-support-native-parent</artifactId>
         <version>4.0.0.42</version>
     </parent>
-    <artifactId>utils-support-native-rust-proxy</artifactId>
+    <artifactId>utils-support-native-filestorage</artifactId>
     <packaging>jar</packaging>
-    <description>Rust 代理协议 native 库（HTTP/SOCKS5/RDP/SSH/VNC/FTP）</description>
+    <description>文件存储 Rust native 库（高性能 URL 参数解析 + 图片滤镜）</description>
 </project>
