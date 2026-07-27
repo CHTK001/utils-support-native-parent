@@ -106,6 +106,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "jwalk",
+ "rayon",
  "walkdir",
  "windows-sys 0.59.0",
 ]
