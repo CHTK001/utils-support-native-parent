@@ -1,9 +1,2 @@
-[target.x86_64-unknown-linux-gnu]
-# zigbuild handles everything via its own linker
-
-[target.x86_64-unknown-linux-musl]
-linker = "C:\\Users\\yemen\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\bin\\rust-lld.exe"
-rustflags = [
-  "-C", "target-feature=-crt-static",
-  "-C", "link-args=-L C:\\Users\\yemen\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-unknown-linux-musl\\lib\\self-contained -lunwind",
-]
+[target.x86_64-pc-windows-msvc]
+linker = "C:\\Users\\Administrator\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib\\rustlib\\x86_64-pc-windows-msvc\\bin\\rust-lld.exe"
