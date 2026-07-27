@@ -18,6 +18,7 @@ path = "src/bin/bench.rs"
 walkdir = "2.5"
 jwalk = "0.8"
 byteorder = "1.4"
+rayon = "1.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

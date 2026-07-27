@@ -44,11 +44,11 @@ const NTFS_BLOCK_SIZE: usize = 512;
 mod platform {
     use super::*;
     use byteorder::{ByteOrder, LittleEndian};
-    use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
-    use walkdir::WalkDir;
+    use jwalk::WalkDir;
+    use rayon::prelude::*;
 
     struct MftEntry {
         name: String,
@@ -295,6 +295,8 @@ mod platform {
     }
 
     /// 从内存中的 MFT 数据解析文件记录，过滤并回调
+    /// Phase 1: rayon 并行解析所有记录
+    /// Phase 2: BFS 拓扑排序计算完整路径
     fn parse_mft_records<F>(
         mft_data: &mut [u8],
         record_size: usize,
@@ -308,189 +310,189 @@ mod platform {
     where
         F: FnMut(*const c_char, *const c_char, c_longlong, c_longlong, u64, u64, u64, c_int, c_int, c_int, u32),
     {
-        let mut entries: HashMap<u64, MftEntry> =
-            HashMap::with_capacity((mft_data.len() / record_size).min(4_000_000));
+        let records_in_buffer = mft_data.len() / record_size;
+        let num_chunks = rayon::current_num_threads().max(1);
+        let chunk_size = ((records_in_buffer + num_chunks - 1) / num_chunks).max(1);
 
-    let records_in_buffer = mft_data.len() / record_size;
-    let mut _cnt_file = 0u32;
-    let mut _cnt_attr = 0u32;
-    let mut _cnt_insert = 0u32;
-    let mut _cnt_bad_sig = 0u32;
-    let mut _cnt_not_in_use = 0u32;
-    let mut _cnt_base_frn = 0u32;
-    for frn in 0..records_in_buffer {
-            if CANCELLED.load(Ordering::SeqCst) { break; }
+        // Phase 1: 并行解析 MFT 记录（用 par_chunks_mut 安全切分 &mut）
+        let chunk_results: Vec<HashMap<u64, MftEntry>> = mft_data
+            .par_chunks_mut(record_size * chunk_size)
+            .enumerate()
+            .map(|(chunk_idx, chunk_data)| {
+                let base_frn = chunk_idx * chunk_size;
+                let records_in_chunk = chunk_data.len() / record_size;
+                let mut local_entries = HashMap::new();
 
-            let start = frn * record_size;
-            let record_buf = &mut mft_data[start..start + record_size];
+                for frn in 0..records_in_chunk {
+                    let start = frn * record_size;
+                    let abs_frn = base_frn + frn;
+                    let record_buf = &mut chunk_data[start..start + record_size];
 
-        if &record_buf[0..4] != b"FILE" { _cnt_bad_sig += 1; continue; }
-        _cnt_file += 1;
+                    if &record_buf[0..4] != b"FILE" { continue; }
+                    let flags = LittleEndian::read_u16(&record_buf[22..24]);
+                    if flags & 0x0001 == 0 { continue; }
+                    let base_frn = LittleEndian::read_u64(&record_buf[32..40]) & 0x0000_FFFF_FFFF_FFFF;
+                    if base_frn != 0 { continue; }
 
-        let flags = LittleEndian::read_u16(&record_buf[22..24]);
-        if flags & 0x0001 == 0 { _cnt_not_in_use += 1; continue; }
+                    fixup_record(record_buf);
+                    let is_dir = (flags & 0x0002) != 0;
+                    let first_attr_offset = LittleEndian::read_u16(&record_buf[20..22]) as usize;
 
-        let base_frn = LittleEndian::read_u64(&record_buf[32..40]) & 0x0000_FFFF_FFFF_FFFF;
-        if base_frn != 0 { _cnt_base_frn += 1; continue; }
+                    let mut attr_offset = first_attr_offset;
+                    let mut best_name: Option<(u64, String, i64, u64, u32)> = None;
+                    let mut allocated_size: i64 = 0;
 
-            fixup_record(record_buf);
+                    while attr_offset + 8 <= record_size {
+                        let attr_type = LittleEndian::read_u32(&record_buf[attr_offset..attr_offset + 4]);
+                        if attr_type == 0xFFFFFFFF { break; }
+                        let attr_len = LittleEndian::read_u32(&record_buf[attr_offset + 4..attr_offset + 8]) as usize;
+                        if attr_len == 0 || attr_len > record_size - attr_offset { break; }
 
-            let is_dir = (flags & 0x0002) != 0;
-            let first_attr_offset = LittleEndian::read_u16(&record_buf[20..22]) as usize;
-
-            let mut attr_offset = first_attr_offset;
-            let mut best_name: Option<(u64, String, i64, u64, u32)> = None;
-            let mut allocated_size: i64 = 0;
-
-            while attr_offset + 8 <= record_size {
-                let attr_type = LittleEndian::read_u32(&record_buf[attr_offset..attr_offset + 4]);
-                if attr_type == 0xFFFFFFFF { break; }
-
-                let attr_len = LittleEndian::read_u32(&record_buf[attr_offset + 4..attr_offset + 8]) as usize;
-                if attr_len == 0 || attr_len > record_size - attr_offset { break; }
-
-                if attr_type == 0x80 && record_buf[attr_offset + 8] != 0 {
-                    allocated_size = LittleEndian::read_u64(&record_buf[attr_offset + 0x28..attr_offset + 0x30]) as i64;
-                }
-
-                if attr_type == 0x30 {
-                    _cnt_attr += 1;
-                    if record_buf[attr_offset + 8] != 0 {
-                        attr_offset += attr_len;
-                        continue;
-                    }
-
-                    let value_offset =
-                        LittleEndian::read_u16(&record_buf[attr_offset + 0x14..attr_offset + 0x16]) as usize;
-                    let value_start = attr_offset + value_offset;
-                    let _name_len_attr = record_buf[attr_offset + 0x09] as u8;
-
-                    let parent_frn = LittleEndian::read_u64(&record_buf[value_start..value_start + 8])
-                        & 0x0000_FFFF_FFFF_FFFF;
-                    let mtime = LittleEndian::read_u64(&record_buf[value_start + 0x10..value_start + 0x18]);
-                    let ds = LittleEndian::read_u64(&record_buf[value_start + 0x30..value_start + 0x38]) as i64;
-                    let file_attrs = LittleEndian::read_u32(&record_buf[value_start + 0x38..value_start + 0x3C]);
-
-                    let name_length_40 = record_buf[value_start + 0x40] as u8;
-                    let ns_41 = record_buf[value_start + 0x41] as u8;
-                    let name_length = name_length_40 as usize;
-                    let namespace = ns_41;
-
-                    let name_start = value_start + 0x42;
-                    let name_end = name_start + name_length * 2;
-                    if name_end > record_buf.len() || name_length == 0 {
-                        attr_offset += attr_len;
-                        continue;
-                    }
-
-                    let name = utf16le_to_string(&record_buf[name_start..name_end]);
-
-                    let should_replace = match &best_name {
-                        Some((_, _, _, _, _)) => {
-                            namespace == 1 
+                        if attr_type == 0x80 && record_buf[attr_offset + 8] != 0 {
+                            allocated_size = LittleEndian::read_u64(&record_buf[attr_offset + 0x28..attr_offset + 0x30]) as i64;
                         }
-                        None => true,
-                    };
-                    if should_replace {
-                        best_name = Some((parent_frn, name, ds, mtime, file_attrs));
+
+                        if attr_type == 0x30 {
+                            if record_buf[attr_offset + 8] != 0 {
+                                attr_offset += attr_len;
+                                continue;
+                            }
+                            let value_offset = LittleEndian::read_u16(&record_buf[attr_offset + 0x14..attr_offset + 0x16]) as usize;
+                            let value_start = attr_offset + value_offset;
+                            let parent_frn = LittleEndian::read_u64(&record_buf[value_start..value_start + 8]) & 0x0000_FFFF_FFFF_FFFF;
+                            let mtime = LittleEndian::read_u64(&record_buf[value_start + 0x10..value_start + 0x18]);
+                            let ds = LittleEndian::read_u64(&record_buf[value_start + 0x30..value_start + 0x38]) as i64;
+                            let file_attrs = LittleEndian::read_u32(&record_buf[value_start + 0x38..value_start + 0x3C]);
+                            let name_length_40 = record_buf[value_start + 0x40] as u8;
+                            let ns_41 = record_buf[value_start + 0x41] as u8;
+                            let name_length = name_length_40 as usize;
+                            let namespace = ns_41;
+
+                            let name_start = value_start + 0x42;
+                            let name_end = name_start + name_length * 2;
+                            if name_end > record_buf.len() || name_length == 0 {
+                                attr_offset += attr_len;
+                                continue;
+                            }
+                            let name = utf16le_to_string(&record_buf[name_start..name_end]);
+
+                            let should_replace = match &best_name {
+                                Some(_) => namespace == 1,
+                                None => true,
+                            };
+                            if should_replace {
+                                best_name = Some((parent_frn, name, ds, mtime, file_attrs));
+                            }
+                        }
+                        attr_offset += attr_len;
+                    }
+
+                    if let Some((parent_frn, name, ds, nt_time, attrs)) = best_name {
+                        local_entries.insert(
+                            abs_frn as u64,
+                            MftEntry {
+                                name, parent_frn, is_dir,
+                                data_size: ds, allocated_size,
+                                nt_time, attrs,
+                            },
+                        );
                     }
                 }
+                local_entries
+            })
+            .collect();
 
-                attr_offset += attr_len;
-            }
-
-            if let Some((parent_frn, name, ds, nt_time, attrs)) = best_name {
-                _cnt_insert += 1;
-                entries.insert(
-                    frn as u64,
-                    MftEntry {
-                        name,
-                        parent_frn,
-                        is_dir,
-                        data_size: ds,
-                        allocated_size,
-                        nt_time,
-                        attrs,
-                    },
-                );
-            }
+        // 合并所有 chunk
+        let mut entries: HashMap<u64, MftEntry> = HashMap::with_capacity(records_in_buffer);
+        for chunk_map in chunk_results {
+            entries.extend(chunk_map);
         }
 
         if entries.is_empty() {
-        eprintln!("[mft] empty_entries records_in_buffer={} bad_sig={} not_in_use={} base_frn_nonzero={}",
-            records_in_buffer, _cnt_bad_sig, _cnt_not_in_use, _cnt_base_frn);
-        return 0;
-    }
+            eprintln!("[mft] empty_entries records_in_buffer={}", records_in_buffer);
+            return 0;
+        }
+
+        eprintln!("[mft] parsed {} entries ({} threads)", entries.len(), num_chunks);
+
+        // Phase 2: BFS 拓扑路径计算
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        for (&frn, entry) in &entries {
+            if frn >= 5 {
+                children.entry(entry.parent_frn).or_default().push(frn);
+            }
+        }
 
         let mut path_cache: HashMap<u64, String> = HashMap::new();
         path_cache.insert(5, String::new());
 
-        let results: RefCell<Vec<(String, String, i64, i64, u64, u32, i32, u64)>> = RefCell::new(Vec::new());
-        // FRN 5 = 根目录，必须保留以便路径拼接；其余系统文件（FRN 0~4）跳过
-        let all_frns: Vec<u64> = entries.keys().copied().filter(|&f| f >= 5).collect();
-        let mut _computed = 0u32;
-        let mut _matched_name = 0u32;
+        let mut queue: Vec<u64> = Vec::new();
+        let mut visited: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        visited.insert(5);
+        if let Some(roots) = children.get(&5) {
+            for &r in roots {
+                if visited.insert(r) { queue.push(r); }
+            }
+        }
 
-        for frn in &all_frns {
+        let mut front = 0usize;
+        while front < queue.len() {
+            let frn = queue[front];
+            front += 1;
+            let entry = match entries.get(&frn) { Some(e) => e, None => continue };
+            let parent_path = path_cache.get(&entry.parent_frn).cloned().unwrap_or_default();
+            let full_path = if parent_path.is_empty() { entry.name.clone() }
+                           else { format!("{}\\{}", parent_path, entry.name) };
+            path_cache.insert(frn, full_path);
+            if let Some(kids) = children.get(&frn) {
+                for &k in kids {
+                    if visited.insert(k) { queue.push(k); }
+                }
+            }
+        }
+
+        eprintln!("[mft] BFS computed {} paths", path_cache.len());
+
+        // Phase 3: 收集结果
+        let mut results: Vec<(String, String, i64, i64, u64, u32, i32, u64)> = Vec::new();
+
+        for (&frn, entry) in &entries {
+            if frn < 5 { continue; }
             if CANCELLED.load(Ordering::SeqCst) { break; }
-
-            let entry = &entries[frn];
-
             if !entry.is_dir {
                 if min_size >= 0 && entry.data_size < min_size { continue; }
                 if max_size >= 0 && entry.data_size > max_size { continue; }
             }
-
-            let full_path = compute_path(*frn, &entries, &mut path_cache);
+            let full_path = match path_cache.get(&frn) { Some(p) => p.clone(), None => continue };
             if full_path.is_empty() { continue; }
-            _computed += 1;
 
             if let Some(pat) = name_pattern {
-                let file_name = Path::new(&full_path)
-                    .file_name().and_then(|n| n.to_str()).unwrap_or(&full_path);
                 if entry.is_dir { continue; }
+                let file_name = Path::new(&full_path).file_name().and_then(|n| n.to_str()).unwrap_or(&full_path);
                 if !super::glob_match(file_name, pat) { continue; }
-                _matched_name += 1;
             }
 
-            let ext = if entry.is_dir {
-                String::new()
-            } else {
-                Path::new(&full_path)
-                    .extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase()
-            };
-            let parent = entry.parent_frn;
+            let ext = if entry.is_dir { String::new() }
+                      else { Path::new(&full_path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase() };
             let unix_ms = nt_to_unix_ms(entry.nt_time);
             let forward_path = full_path.replace('\\', "/");
-
-            // 不在 native 侧按 rel_prefix 过滤，原因：compute_path 仅基于 FRN 父链构建相对路径，
-            // 根目录 FRN 5 的名字是路径末级目录名（如 "java"），无法与 "D:\ch\...\src\main\java" 这种
-            // 全路径前缀匹配，反而会让本该命中的文件全部被剔除。改为在 Java 端按 rootPath 前缀过滤。
-
             let display_path = format!("{}{}", root_volume, forward_path);
             let entry_alloc = if entry.is_dir { 0 } else { entry.allocated_size };
-            results.borrow_mut().push((
-                display_path,
-                ext,
+
+            results.push((display_path, ext,
                 if entry.is_dir { 0 } else { entry.data_size },
-                entry_alloc,
-                unix_ms,
-                entry.attrs,
+                entry_alloc, unix_ms, entry.attrs,
                 if entry.is_dir { 1 } else { 0 },
-                parent,
-            ));
+                entry.parent_frn));
         }
 
         let mut count = 0i32;
-        for (path_str, ext, size, alloc, modified, attrs, is_dir, parent) in results.into_inner() {
+        for (path_str, ext, size, alloc, modified, attrs, is_dir, parent) in results {
             if max_results > 0 && count >= max_results { break; }
             let path_cstr = match CString::new(path_str.as_str()) { Ok(c) => c, Err(_) => continue };
             let ext_cstr = match CString::new(ext.as_str()) { Ok(c) => c, Err(_) => continue };
-            callback(
-                path_cstr.as_ptr(), ext_cstr.as_ptr(),
-                size, alloc, modified, 0, parent,
-                path_str.len() as c_int, is_dir, ext.len() as c_int, attrs,
-            );
+            callback(path_cstr.as_ptr(), ext_cstr.as_ptr(), size, alloc, modified, 0, parent,
+                path_str.len() as c_int, is_dir, ext.len() as c_int, attrs);
             count += 1;
         }
         count
@@ -503,7 +505,7 @@ mod platform {
         Some(buf)
     }
 
-    /// 对子目录路径使用 walkdir 回退
+    /// 对子目录路径使用 jwalk（多线程）回退
     fn search_files_walkdir<F>(
         root: &str,
         name_pattern: Option<&str>,
@@ -528,7 +530,7 @@ mod platform {
                 break;
             }
 
-            let path = entry.path().to_path_buf();
+            let path = entry.path();
             if path.components().count() <= 1 {
                 continue;
             }
@@ -602,37 +604,6 @@ mod platform {
             buf[sector_pos + 1] = buf[entry_start + 1];
             sector_pos += NTFS_BLOCK_SIZE;
         }
-    }
-
-    fn compute_path(
-        frn: u64,
-        entries: &HashMap<u64, MftEntry>,
-        cache: &mut HashMap<u64, String>,
-    ) -> String {
-        if frn == 5 {
-            return String::new();
-        }
-        if let Some(path) = cache.get(&frn) {
-            return path.clone();
-        }
-
-        let entry = match entries.get(&frn) {
-            Some(e) => e,
-            None => return String::new(),
-        };
-
-        if entry.parent_frn == frn || entry.parent_frn == 0 {
-            return entry.name.clone();
-        }
-
-        let parent_path = compute_path(entry.parent_frn, entries, cache);
-        let path = if parent_path.is_empty() {
-            entry.name.clone()
-        } else {
-            format!("{}\\{}", parent_path, entry.name)
-        };
-        cache.insert(frn, path.clone());
-        path
     }
 
     fn utf16le_to_string(bytes: &[u8]) -> String {
