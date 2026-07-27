@@ -1,0 +1,17 @@
+[package]
+name = "rust_smb_server"
+version = "4.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+smb-server = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
