@@ -82,12 +82,13 @@ mod platform {
 
         eprintln!("[mft] has_volume_letter=true, trying MFT scan for root={}", root);
         let mft_result = try_mft_scan(root, trimmed_root, name_pattern, min_size, max_size, max_results, &mut callback);
-        if mft_result >= 0 {
+        if mft_result > 0 {
             eprintln!("[mft] MFT scan returned {}", mft_result);
             return mft_result;
         }
-        eprintln!("[mft] MFT scan failed ({}), falling back to walkdir", mft_result);
-        // MFT 扫描失败（非管理员等），降级到 walkdir
+        eprintln!("[mft] MFT scan returned {} (<=0), falling back to walkdir", mft_result);
+        // MFT 解析可能跑通但拿到 0 条（flags 校验过严、parent_frn 缺失、$FILE_NAME 解析失败等），
+        // 此时不能当成"成功"，必须降级到 walkdir 才能给出真实结果。
         search_files_walkdir(root, name_pattern, min_size, max_size, max_results, callback)
     }
 
@@ -170,24 +171,17 @@ mod platform {
         eprintln!("[mft] read {} bytes of MFT data", mft_data.len());
 
         if mft_data.len() < record_size {
-            return 0;
+            eprintln!("[mft] FAIL: mft_data shorter than one record ({} < {})", mft_data.len(), record_size);
+            return -1;
         }
 
-        // 计算路径前缀
+        // 计算盘符前缀（用于构建完整路径）
         let volume_prefix = format!("{}:/", volume);
-        let rel_prefix = if trimmed_root.len() <= 2 {
-            String::new()
-        } else {
-            trimmed_root[2..]
-                .trim_start_matches(|c| c == '/' || c == '\\')
-                .replace('\\', "/")
-        };
 
         // 内存解析 MFT 记录，按前缀过滤并补上盘符
         let result = parse_mft_records(
             &mut mft_data,
             record_size,
-            &rel_prefix,
             &volume_prefix,
             name_pattern,
             min_size,
@@ -304,8 +298,7 @@ mod platform {
     fn parse_mft_records<F>(
         mft_data: &mut [u8],
         record_size: usize,
-        rel_prefix: &str,
-        volume_prefix: &str,
+        root_volume: &str,
         name_pattern: Option<&str>,
         min_size: i64,
         max_size: i64,
@@ -318,24 +311,27 @@ mod platform {
         let mut entries: HashMap<u64, MftEntry> =
             HashMap::with_capacity((mft_data.len() / record_size).min(4_000_000));
 
-        let records_in_buffer = mft_data.len() / record_size;
-        let mut _cnt_file = 0u32;
-        let mut _cnt_attr = 0u32;
-        let mut _cnt_insert = 0u32;
-        for frn in 0..records_in_buffer {
+    let records_in_buffer = mft_data.len() / record_size;
+    let mut _cnt_file = 0u32;
+    let mut _cnt_attr = 0u32;
+    let mut _cnt_insert = 0u32;
+    let mut _cnt_bad_sig = 0u32;
+    let mut _cnt_not_in_use = 0u32;
+    let mut _cnt_base_frn = 0u32;
+    for frn in 0..records_in_buffer {
             if CANCELLED.load(Ordering::SeqCst) { break; }
 
             let start = frn * record_size;
             let record_buf = &mut mft_data[start..start + record_size];
 
-            if &record_buf[0..4] != b"FILE" { continue; }
-            _cnt_file += 1;
+        if &record_buf[0..4] != b"FILE" { _cnt_bad_sig += 1; continue; }
+        _cnt_file += 1;
 
-            let flags = LittleEndian::read_u16(&record_buf[22..24]);
-            if flags & 0x0001 == 0 { continue; }
+        let flags = LittleEndian::read_u16(&record_buf[22..24]);
+        if flags & 0x0001 == 0 { _cnt_not_in_use += 1; continue; }
 
-            let base_frn = LittleEndian::read_u64(&record_buf[32..40]) & 0x0000_FFFF_FFFF_FFFF;
-            if base_frn != 0 { continue; }
+        let base_frn = LittleEndian::read_u64(&record_buf[32..40]) & 0x0000_FFFF_FFFF_FFFF;
+        if base_frn != 0 { _cnt_base_frn += 1; continue; }
 
             fixup_record(record_buf);
 
@@ -420,13 +416,18 @@ mod platform {
             }
         }
 
-        if entries.is_empty() { return 0; }
+        if entries.is_empty() {
+        eprintln!("[mft] empty_entries records_in_buffer={} bad_sig={} not_in_use={} base_frn_nonzero={}",
+            records_in_buffer, _cnt_bad_sig, _cnt_not_in_use, _cnt_base_frn);
+        return 0;
+    }
 
         let mut path_cache: HashMap<u64, String> = HashMap::new();
         path_cache.insert(5, String::new());
 
         let results: RefCell<Vec<(String, String, i64, i64, u64, u32, i32, u64)>> = RefCell::new(Vec::new());
-        let all_frns: Vec<u64> = entries.keys().copied().filter(|&f| f >= 12).collect();
+        // FRN 5 = 根目录，必须保留以便路径拼接；其余系统文件（FRN 0~4）跳过
+        let all_frns: Vec<u64> = entries.keys().copied().filter(|&f| f >= 5).collect();
         let mut _computed = 0u32;
         let mut _matched_name = 0u32;
 
@@ -462,20 +463,19 @@ mod platform {
             let unix_ms = nt_to_unix_ms(entry.nt_time);
             let forward_path = full_path.replace('\\', "/");
 
-            if !rel_prefix.is_empty() {
-                let matches = forward_path == rel_prefix
-                    || (forward_path.starts_with(rel_prefix)
-                        && forward_path.as_bytes().get(rel_prefix.len()).copied() == Some(b'/'));
-                if !matches { continue; }
-            }
+            // 不在 native 侧按 rel_prefix 过滤，原因：compute_path 仅基于 FRN 父链构建相对路径，
+            // 根目录 FRN 5 的名字是路径末级目录名（如 "java"），无法与 "D:\ch\...\src\main\java" 这种
+            // 全路径前缀匹配，反而会让本该命中的文件全部被剔除。改为在 Java 端按 rootPath 前缀过滤。
 
-            let display_path = format!("{}{}", volume_prefix, forward_path);
+            let display_path = format!("{}{}", root_volume, forward_path);
             let entry_alloc = if entry.is_dir { 0 } else { entry.allocated_size };
             results.borrow_mut().push((
-                display_path, ext,
+                display_path,
+                ext,
                 if entry.is_dir { 0 } else { entry.data_size },
                 entry_alloc,
-                unix_ms, entry.attrs,
+                unix_ms,
+                entry.attrs,
                 if entry.is_dir { 1 } else { 0 },
                 parent,
             ));
