@@ -1,6 +1,9 @@
 use std::ffi::{c_char, c_int, CStr, CString};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use smb_server::{Access, LocalFsBackend, Share, SmbServer};
 
 /// SMB 服务器句柄。
 /// 持有 tokio Runtime 和停止信号。
@@ -36,10 +39,14 @@ pub extern "C" fn smb_server_start(
         return -1;
     }
 
-    let bind_addr = unsafe { CStr::from_ptr(bind_addr) }.to_string_lossy().to_string();
+    let bind_addr_str = unsafe { CStr::from_ptr(bind_addr) }.to_string_lossy().to_string();
     let share_name = unsafe { CStr::from_ptr(share_name) }.to_string_lossy().to_string();
     let root_path = unsafe { CStr::from_ptr(root_path) }.to_string_lossy().to_string();
-    let port = if port > 0 && port <= 65535 { port as u16 } else { 445 };
+    let port = if port > 0 && port <= 65535 {
+        port as u16
+    } else {
+        445
+    };
 
     let user = if user.is_null() {
         String::new()
@@ -66,27 +73,55 @@ pub extern "C" fn smb_server_start(
     let password_clone = password.clone();
 
     rt.spawn(async move {
-        let mut builder = smb_server::SmbServer::builder()
-            .listen(format!("{}:{}", bind_addr, port))
-            .share(&share_name_clone, &root_path_clone);
+        let addr: SocketAddr = match format!("{}:{}", bind_addr_str, port).parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                eprintln!("[rust_smb_server] Invalid address: {}", e);
+                return;
+            }
+        };
 
-        // 配置用户认证（如果提供了用户名）
+        let backend = match LocalFsBackend::new(&root_path_clone) {
+            Ok(backend) => backend,
+            Err(e) => {
+                eprintln!("[rust_smb_server] Failed to create backend: {}", e);
+                return;
+            }
+        };
+
+        let mut share = Share::new(&share_name_clone, backend);
+        if !user_clone.is_empty() {
+            share = share.user(&user_clone, Access::ReadWrite);
+        }
+
+        let mut builder = SmbServer::builder()
+            .listen(addr)
+            .share(share);
+
         if !user_clone.is_empty() {
             builder = builder.user(&user_clone, &password_clone);
         }
 
-        let server = builder.build();
-
-        match server {
-            Ok(srv) => {
-                // 绑定并启动服务
-                // 注意：smb-server 0.4 的 API 可能是 .bind().await + .serve(flag).await
-                // 也可能是直接 .serve(flag).await，需根据实际 crate 版本调整
-                let _ = srv.serve(stop_flag_clone).await;
-            }
+        let server = match builder.build() {
+            Ok(srv) => srv,
             Err(e) => {
                 eprintln!("[rust_smb_server] Failed to build server: {}", e);
+                return;
             }
+        };
+
+        // 使用 select! 允许通过 stop_flag 优雅关闭
+        tokio::select! {
+            result = server.serve() => {
+                if let Err(e) = result {
+                    eprintln!("[rust_smb_server] Server error: {}", e);
+                }
+            }
+            _ = async {
+                while !stop_flag_clone.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            } => {}
         }
     });
 
