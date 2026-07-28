@@ -1,0 +1,80 @@
+   Compiling crossbeam-utils v0.8.22
+   Compiling crossbeam-epoch v0.9.20
+   Compiling crossbeam-deque v0.8.7
+   Compiling windows-link v0.2.1
+   Compiling rayon-core v1.13.0
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling either v1.17.0
+   Compiling byteorder v1.5.0
+   Compiling windows-sys v0.61.2
+error: linking with `C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe` failed: exit code: 1
+  |
+  = note: "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe" "-flavor" "link" "/NOLOGO" "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\rayon-core-2b0074691b1331d9\\rustcqJGacg\\symbols.o" "<2 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\rayon-core-2b0074691b1331d9\\build_script_build-2b0074691b1331d9.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'ntdll.lib': no such file or directory
+          rust-lld: error: could not open 'userenv.lib': no such file or directory
+          rust-lld: error: could not open 'ws2_32.lib': no such file or directory
+          rust-lld: error: could not open 'dbghelp.lib': no such file or directory
+          
+
+error: linking with `C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe` failed: exit code: 1
+  |
+  = note: "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe" "-flavor" "link" "/NOLOGO" "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-utils-2266e14e1df95837\\rustcfxZLT7\\symbols.o" "<4 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-utils-2266e14e1df95837\\build_script_build-2266e14e1df95837.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'ntdll.lib': no such file or directory
+          rust-lld: error: could not open 'userenv.lib': no such file or directory
+          rust-lld: error: could not open 'ws2_32.lib': no such file or directory
+          rust-lld: error: could not open 'dbghelp.lib': no such file or directory
+          
+
+error: linking with `C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe` failed: exit code: 1
+  |
+  = note: "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe" "-flavor" "link" "/NOLOGO" "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-deque-789b8b4c88718cc0\\rustclGOlh8\\symbols.o" "<2 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-deque-789b8b4c88718cc0\\build_script_build-789b8b4c88718cc0.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'ntdll.lib': no such file or directory
+          rust-lld: error: could not open 'userenv.lib': no such file or directory
+          rust-lld: error: could not open 'ws2_32.lib': no such file or directory
+          rust-lld: error: could not open 'dbghelp.lib': no such file or directory
+          
+
+error: linking with `C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe` failed: exit code: 1
+  |
+  = note: "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe" "-flavor" "link" "/NOLOGO" "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\windows_x86_64_msvc-c7a7802da6f28d70\\rustcPNPbLK\\symbols.o" "<2 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\windows_x86_64_msvc-c7a7802da6f28d70\\build_script_build-c7a7802da6f28d70.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'ntdll.lib': no such file or directory
+          rust-lld: error: could not open 'userenv.lib': no such file or directory
+          rust-lld: error: could not open 'ws2_32.lib': no such file or directory
+          rust-lld: error: could not open 'dbghelp.lib': no such file or directory
+          
+
+error: linking with `C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe` failed: exit code: 1
+  |
+  = note: "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe" "-flavor" "link" "/NOLOGO" "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-epoch-163ed3b3f00683c8\\rustcNXtVwe\\symbols.o" "<2 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:D:\\ch\\project\\utils-support-native-parent\\utils-support-native-filesearch\\src\\main\\rust\\target\\release\\build\\crossbeam-epoch-163ed3b3f00683c8\\build_script_build-163ed3b3f00683c8.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'kernel32.lib': no such file or directory
+          rust-lld: error: could not open 'ntdll.lib': no such file or directory
+          rust-lld: error: could not open 'userenv.lib': no such file or directory
+          rust-lld: error: could not open 'ws2_32.lib': no such file or directory
+          rust-lld: error: could not open 'dbghelp.lib': no such file or directory
+          
+
+error: could not compile `rayon-core` (build script) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `windows_x86_64_msvc` (build script) due to 1 previous error
+error: could not compile `crossbeam-deque` (build script) due to 1 previous error
+error: could not compile `crossbeam-utils` (build script) due to 1 previous error
+error: could not compile `crossbeam-epoch` (build script) due to 1 previous error
