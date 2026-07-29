@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-smb-server = { version = "0.4", features = ["localfs"] }
+smb-server = { path = "local-smb", features = ["localfs"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 libc = "0.2"
 

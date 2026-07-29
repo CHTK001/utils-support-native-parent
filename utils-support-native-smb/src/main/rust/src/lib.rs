@@ -90,7 +90,10 @@ pub extern "C" fn smb_server_start(
         };
 
         let mut share = Share::new(&share_name_clone, backend);
-        if !user_clone.is_empty() {
+        if user_clone.is_empty() {
+            // Empty user means anonymous access is intended.
+            share = share.public();
+        } else {
             share = share.user(&user_clone, Access::ReadWrite);
         }
 
