@@ -17,10 +17,5 @@
             <artifactId>utils-support-native-rust-proxy</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-crypto</artifactId>
-            <version>${project.version}</version>
-        </dependency>
     </dependencies>
 </project>
