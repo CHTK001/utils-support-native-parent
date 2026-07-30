@@ -290,20 +290,7 @@ async fn dispatch_one(
     server: &Arc<ServerState>,
     conn: &Arc<Connection>,
     frame: &[u8],
-) -> Option<Vec<u8>> {
-    use std::io::Write;
-    let _ = std::fs::OpenOptions::new()
-        .create(true).append(true).open("D:/ch/smb-debug.log")
-        .and_then(|mut f| {
-            if frame.len() >= 16 {
-                let cmd_bytes = [frame[12], frame[13], frame[14], frame[15]];
-                writeln!(f, "[DEBUG dispatch] frame_len={} cmd={:#x} mid={}",
-                    frame.len(), u32::from_le_bytes(cmd_bytes), u32::from_le_bytes([frame[8], frame[9], frame[10], frame[11]]))
-            } else {
-                writeln!(f, "[DEBUG dispatch] frame_len={} (too short)", frame.len())
-            }
-        });
-    let (req_hdr, body_bytes) = match Smb2Header::parse(frame) {
+) -> Option<Vec<u8>> {    let (req_hdr, body_bytes) = match Smb2Header::parse(frame) {
         Ok(p) => p,
         Err(e) => {
             warn!(error = %e, "failed to parse header");
