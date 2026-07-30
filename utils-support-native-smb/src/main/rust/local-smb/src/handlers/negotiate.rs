@@ -130,8 +130,7 @@ pub async fn handle(
         // Round up to next multiple of 8 from the start of the SMB2 header.
         negotiate_context_offset = (post_security + 7) & !7;
     }
-
-    let max_read_size = *conn.max_read_size.read().await;
+        let max_read_size = *conn.max_read_size.read().await;
     let max_write_size = *conn.max_write_size.read().await;
     let max_transact_size = max_read_size; // common practice
 
@@ -222,3 +221,4 @@ pub async fn multi_protocol_response(
     hr.skip_signing = true;
     hr
 }
+
