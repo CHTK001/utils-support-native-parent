@@ -27,7 +27,7 @@ final class NativeVideoCodecJniLoader {
             if (loaded) {
                 return;
             }
-            String lib = System.mapLibraryName("chua-native-video-codec");
+            String lib = System.mapLibraryName("chua_native_video_codec");
             System.loadLibrary(lib.replaceFirst("^lib", "").replaceAll("\\.[^.]+$", ""));
             loaded = true;
         }
