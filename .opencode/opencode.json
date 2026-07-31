@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "p3c": {
+      "type": "local",
+      "command": ["node", "D:/ch/project/p3c-mcp-server/index.js"],
+      "enabled": true
+    }
+  },
+  "skills": {
+    "paths": [".opencode/skills"]
+  }
+}
