@@ -17,3 +17,7 @@ test-results/
 tree-sitter.wasm
 FpsTest.java
 koi-ui-temp/
+
+# 二进制工具（过大，不入库）
+freebuff.exe
+rg.exe
