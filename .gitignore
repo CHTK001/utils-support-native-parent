@@ -1,0 +1,7 @@
+# 动态库二进制
+*.dll
+*.so
+*.dylib
+
+# 动态库资源目录（首次提交后忽略后续变更）
+utils-support-deeplearning-face-starter/src/main/resources/native/win32-x86-64/*.dll
