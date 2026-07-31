@@ -1,9 +1,0 @@
-09:36:57.950 [main] INFO com.chua.remote.support.gateway.config.DatasourceConfigStore -- [DatasourceConfigStore] SQLite 初始化完成，数据库路径: jdbc:sqlite:C:\Users\Administrator/.remote-gateway/gateway.db
-09:36:58.014 [main] INFO com.chua.remote.support.gateway.core.auth.FileBasedTokenVerifier -- [TokenVerifier] 已加载 1 个令牌: C:\Users\Administrator\.remote-gateway\tokens.json
-09:36:58.026 [main] INFO com.chua.remote.support.gateway.core.auth.DatasourceTokenVerifier -- [DatasourceTokenVerifier] SQLite 初始化完成，数据库路径: jdbc:sqlite:C:\Users\Administrator/.remote-gateway/gateway.db
-09:36:58.038 [main] INFO com.chua.remote.support.gateway.core.ratelimit.GatewayRateLimiter -- [RateLimiter] 参数更新: tps=1000.0 burst=2000
-09:36:58.039 [main] INFO com.chua.remote.support.gateway.core.session.SessionManager -- [SessionManager] maxSessions 更新为: 10000
-09:36:58.039 [main] INFO com.chua.remote.support.gateway.core.ratelimit.GatewayRateLimiter -- [RateLimiter] 参数更新: tps=1000.0 burst=2000
-09:36:58.040 [main] INFO com.chua.remote.support.gateway.config.GatewayConfigService -- [ConfigService] 已加载磁盘配置 (32 项)
-=== ManagementToken: a5f1023afeeb4cf0ac1d8515d674e8f0 ===
-09:36:58.339 [main] INFO com.chua.remote.support.gateway.GatewayNettyServer -- Binding TCP-CONTROL:9000...
