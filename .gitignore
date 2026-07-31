@@ -10,7 +10,10 @@ utils-support-deeplearning-face-starter/src/main/resources/native/win32-x86-64/*
 *.log
 *.err
 *.args.txt
+*.txt
 test-results/
 *.bat
 *.spec.ts
 tree-sitter.wasm
+FpsTest.java
+koi-ui-temp/
