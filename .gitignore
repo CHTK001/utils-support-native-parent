@@ -39,3 +39,6 @@ com/
 temp/
 example-vector-on_disk
 example-vector-on_disk.vec
+
+# 运行时调试文件 (PID/token)
+pid.code
