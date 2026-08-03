@@ -42,3 +42,7 @@ example-vector-on_disk.vec
 
 # 运行时调试文件 (PID/token)
 pid.code
+
+# OSGi 运行时缓存
+.workbuddy/osgi-cache/
+sys
