@@ -45,4 +45,7 @@ pid.code
 
 # OSGi 运行时缓存
 .workbuddy/osgi-cache/
+osgi-cache/
+# OSGi 本地 jar 缓存
+org/
 sys
