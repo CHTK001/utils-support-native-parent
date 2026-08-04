@@ -16,8 +16,8 @@ await page.waitForLoadState('networkidle');
 await page.fill('#inputTargetId', agent.id);
 await page.fill('#inputVerifyCode', agent.verifyCode);
 await page.click('#btnConnect');
-await page.waitForSelector('#status.ok', { timeout: 30000 });
-await page.waitForTimeout(3000);
+await page.waitForFunction(() => document.getElementById('status')?.textContent === '已连接', { timeout: 30000 });
+await page.waitForTimeout(4000);
 
 await page.screenshot({ path: 'D:/ch/project/remote_screen.png', fullPage: false });
 
