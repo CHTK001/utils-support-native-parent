@@ -1,3 +1,0 @@
-com.chua.common.support.network.server.codec.FixedLengthFrameDecoderFactory
-com.chua.common.support.network.server.codec.LengthFieldBasedFrameDecoderFactory
-com.chua.common.support.network.server.codec.DelimiterBasedFrameDecoderFactory
