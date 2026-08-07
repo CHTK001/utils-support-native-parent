@@ -6,3 +6,7 @@ target/
 .settings/
 *.class
 *.jar
+
+# Rust
+**/Cargo.lock
+**/*.log
