@@ -1,0 +1,12 @@
+{
+  "Image": "eclipse-temurin:25-jre",
+  "Cmd": ["sh", "-c", "sleep 3600"],
+  "WorkingDir": "/app",
+  "HostConfig": {
+    "Mounts": [
+      { "Type": "volume", "Source": "gateway-data", "Target": "/app" }
+    ],
+    "AutoRemove": false
+  },
+  "Name": "gateway-init"
+}

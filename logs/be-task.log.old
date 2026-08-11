@@ -1,0 +1,913 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.fusesource.jansi.internal.JansiLoader in an unnamed module (file:/D:/apache-maven-3.9.9-bin/apache-maven-3.9.9/lib/jansi-2.4.1.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper (file:/D:/apache-maven-3.9.9-bin/apache-maven-3.9.9/lib/guava-33.2.1-jre.jar)
+WARNING: Please consider reporting this to the maintainers of class com.google.common.util.concurrent.AbstractFuture$UnsafeAtomicHelper
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------< com.chua:spring-support-ai-starter >-----------------
+[INFO] Building spring-support-ai-starter 4.0.0.42
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] >>> spring-boot:3.5.9:run (default-cli) > test-compile @ spring-support-ai-starter >>>
+[INFO] 
+[INFO] --- enforcer:3.4.1:enforce (enforce-versions) @ spring-support-ai-starter ---
+[INFO] Rule 0: org.apache.maven.enforcer.rules.version.RequireMavenVersion passed
+[INFO] Rule 1: org.apache.maven.enforcer.rules.version.RequireJavaVersion passed
+[INFO] Rule 2: org.apache.maven.enforcer.rules.dependency.BannedDependencies passed
+[INFO] Rule 3: org.apache.maven.enforcer.rules.dependency.RequireReleaseDeps passed
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ spring-support-ai-starter ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 13 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- flatten:1.6.0:flatten (flatten) @ spring-support-ai-starter ---
+[INFO] Generating flattened POM of project com.chua:spring-support-ai-starter:jar:4.0.0.42...
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ spring-support-ai-starter ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] >>> source:3.3.0:jar (default) > generate-sources @ spring-support-ai-starter >>>
+[INFO] 
+[INFO] --- enforcer:3.4.1:enforce (enforce-versions) @ spring-support-ai-starter ---
+[INFO] Rule 2: org.apache.maven.enforcer.rules.dependency.BannedDependencies passed
+[INFO] Rule 3: org.apache.maven.enforcer.rules.dependency.RequireReleaseDeps passed
+[INFO] 
+[INFO] <<< source:3.3.0:jar (default) < generate-sources @ spring-support-ai-starter <<<
+[INFO] 
+[INFO] 
+[INFO] --- source:3.3.0:jar (default) @ spring-support-ai-starter ---
+[INFO] Skipping source per configuration.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ spring-support-ai-starter ---
+[INFO] skip non existing resourceDirectory D:\ch\project\spring-support-parent-starter\spring-support-ai-starter\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ spring-support-ai-starter ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] <<< spring-boot:3.5.9:run (default-cli) < test-compile @ spring-support-ai-starter <<<
+[INFO] 
+[INFO] 
+[INFO] --- spring-boot:3.5.9:run (default-cli) @ spring-support-ai-starter ---
+[INFO] Attaching agents: []
+SLF4J(I): Connected with provider of type [ch.qos.logback.classic.spi.LogbackServiceProvider]
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+[32m :: Spring Boot :: [39m              [2m (v3.5.9)[0;39m
+
+[2m2026-08-07T08:11:44.222+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.ai.support.AiStarterApplication   [0;39m [2m:[0;39m Starting AiStarterApplication using Java 25.0.3 with PID 2832 (D:\ch\project\spring-support-parent-starter\spring-support-ai-starter\target\classes started by Administrator in D:\ch\project\spring-support-parent-starter\spring-support-ai-starter)
+[2m2026-08-07T08:11:44.229+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.ai.support.AiStarterApplication   [0;39m [2m:[0;39m The following 1 profile is active: "dev"
+[2m2026-08-07T08:11:45.523+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.s.d.p.DataSourcePropertyProviderFactory[0;39m [2m:[0;39m 已加载2个数据源Provider
+[2m2026-08-07T08:11:45.572+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.d.support.DataSourceGroupRegistry [0;39m [2m:[0;39m [数据源分组] 设置全局负载均衡策略: ROUND_ROBIN
+[2m2026-08-07T08:11:45.572+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.d.support.DataSourceInspect       [0;39m [2m:[0;39m [Datasource] 注册动态数据源 (strict=false, loadBalance=round_robin)
+[2m2026-08-07T08:11:45.701+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.g.y.a.MybatisPlusJoinAutoConfiguration[0;39m [2m:[0;39m MPJ SqlSessionFactory bean definition: sqlSessionFactory factoryBeanName: com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration factoryMethodName: sqlSessionFactory source: com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration.sqlSessionFactory(javax.sql.DataSource)
+[2m2026-08-07T08:11:45.761+08:00[0;39m [33m WARN[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mtrationDelegate$BeanPostProcessorChecker[0;39m [2m:[0;39m Bean 'com.chua.starter.datasource.support.MethodPointcutAdvisor' of type [com.chua.starter.datasource.support.MethodPointcutAdvisor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [projectingArgumentResolverBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+[2m2026-08-07T08:11:45.862+08:00[0;39m [33m WARN[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mtrationDelegate$BeanPostProcessorChecker[0;39m [2m:[0;39m Bean 'com.chua.starter.common.support.configuration.CommonConfiguration' of type [com.chua.starter.common.support.configuration.CommonConfiguration] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [projectingArgumentResolverBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+[2m2026-08-07T08:11:45.866+08:00[0;39m [33m WARN[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mtrationDelegate$BeanPostProcessorChecker[0;39m [2m:[0;39m Bean 'watchPointcutAdvisor' of type [com.chua.starter.common.support.watch.WatchPointcutAdvisor] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying). Is this bean getting eagerly injected/applied to a currently created BeanPostProcessor [projectingArgumentResolverBeanPostProcessor]? Check the corresponding BeanPostProcessor declaration and its dependencies/advisors. If this bean does not have to be post-processed, declare it with ROLE_INFRASTRUCTURE.
+[2m2026-08-07T08:11:46.161+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.s.b.w.embedded.tomcat.TomcatWebServer [0;39m [2m:[0;39m Tomcat initialized with port 8080 (http)
+[2m2026-08-07T08:11:46.177+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.apache.catalina.core.StandardService  [0;39m [2m:[0;39m Starting service [Tomcat]
+[2m2026-08-07T08:11:46.177+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.apache.catalina.core.StandardEngine   [0;39m [2m:[0;39m Starting Servlet engine: [Apache Tomcat/10.1.50]
+[2m2026-08-07T08:11:46.259+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.a.c.c.C.[Tomcat].[localhost].[/]      [0;39m [2m:[0;39m Initializing Spring embedded WebApplicationContext
+[2m2026-08-07T08:11:46.259+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mw.s.c.ServletWebServerApplicationContext[0;39m [2m:[0;39m Root WebApplicationContext: initialization completed in 1925 ms
+[2m2026-08-07T08:11:46.271+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]初始化消息转换器配置
+[2m2026-08-07T08:11:46.309+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]获取 ObjectMapper Bean, 类型: com.fasterxml.jackson.databind.json.JsonMapper
+[2m2026-08-07T08:11:46.310+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]注册 JSON 转换器: org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+[2m2026-08-07T08:11:46.310+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]注册字符串转换器: org.springframework.http.converter.StringHttpMessageConverter
+[2m2026-08-07T08:11:46.312+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]注册 XML 转换器: org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter
+[2m2026-08-07T08:11:46.312+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]注册 YAML 转换器: org.springframework.http.converter.yaml.MappingJackson2YamlHttpMessageConverter
+[2m2026-08-07T08:11:46.313+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]消息转换器初始化完成, 共注册 4 个转换器
+[2m2026-08-07T08:11:46.440+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.c.s.c.s.a.ModuleEnvironmentRegistration[0;39m [2m:[0;39m [环境配置]已注册模块配置, 组: plugin.thread, 启用: false, 类型: com.chua.starter.common.support.properties.AsyncThreadPoolProperties
+[2m2026-08-07T08:11:46.547+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.g.y.a.MybatisPlusJoinAutoConfiguration[0;39m [2m:[0;39m mybatis plus join properties config complete
+[2m2026-08-07T08:11:46.573+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.d.support.DynamicDataSource       [0;39m [2m:[0;39m [动态数据源] 严格模式: 已禁用
+Logging initialized using 'class org.apache.ibatis.logging.stdout.StdOutImpl' adapter.
+[2m2026-08-07T08:11:46.634+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.g.y.a.MybatisPlusJoinAutoConfiguration[0;39m [2m:[0;39m mybatis plus join SqlInjector init
+Get /172.16.3.66 network interface 
+Get network interface info: name:iftype53_32768 (OrayBoxVpnEnt Tunnel)
+Initialization Sequence datacenterId:0 workerId:21
+ _ _   |_  _ _|_. ___ _ |    _ 
+| | |\/|_)(_| | |_\  |_)||_|_\ 
+     /               |         
+                        3.5.16 
+[2m2026-08-07T08:11:47.044+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-1 - Starting...
+[2m2026-08-07T08:11:47.057+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.pool.HikariPool       [0;39m [2m:[0;39m HikariPool-1 - Added connection conn1: url=jdbc:h2:mem:aidb user=SA
+[2m2026-08-07T08:11:47.058+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-1 - Start completed.
+[2m2026-08-07T08:11:47.265+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] 创建 ChatClientRegistry
+[2m2026-08-07T08:11:47.267+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] 创建 AgentRegistry
+[2m2026-08-07T08:11:47.283+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] 创建 AIDialogRecordService（内存实现）
+[2m2026-08-07T08:11:48.121+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.s.c.AiCacheManagerFallbackConfiguration[0;39m [2m:[0;39m [AiCacheManagerFallback] 创建 AI 降级缓存管理器（Caffeine, TTL=5min, max=1000）
+[2m2026-08-07T08:11:48.123+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] 发现 ChatClient 实现...
+[2m2026-08-07T08:11:48.140+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] SPI 发现 0 个 ChatClient
+[2m2026-08-07T08:11:48.142+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] Spring 容器中有 0 个 ChatClient Bean
+[2m2026-08-07T08:11:48.143+08:00[0;39m [33m WARN[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] 未发现任何 ChatClient 实现
+[2m2026-08-07T08:11:48.215+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.c.s.c.s.a.ModuleEnvironmentRegistration[0;39m [2m:[0;39m [环境配置]已注册模块配置, 组: plugin.api, 启用: true, 类型: com.chua.starter.common.support.api.properties.ApiProperties
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [注册开始]
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiVersion] [版本控制] [[32m开启[0m]
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiPlatform] [平台控制] [[32m开启[0m] [平台: system]
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiProfile] [环境控制] [[32m开启[0m]
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiDeprecated] [废弃提示] [[32m开启[0m]
+[2m2026-08-07T08:11:48.284+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiFeature] [功能开关] [[31m关闭[0m]
+[2m2026-08-07T08:11:48.285+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiInternal] [内部接口] [[32m开启[0m]
+[2m2026-08-07T08:11:48.285+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiMock] [Mock模式] [[31m关闭[0m]
+[2m2026-08-07T08:11:48.285+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [@ApiGray] [灰度发布] [[31m关闭[0m]
+[2m2026-08-07T08:11:48.285+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.a.c.ApiConfiguration          [0;39m [2m:[0;39m [API控制] [注册完成]
+[2m2026-08-07T08:11:48.416+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.c.BinaryHttpMessageConverter  [0;39m [2m:[0;39m [消息转换器]创建 BinaryHttpMessageConverter, 支持的媒体类型: application/encrypted-data, 委托转换器数量: 4
+[2m2026-08-07T08:11:48.416+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]注册二进制转换器到首位: com.chua.starter.common.support.converter.BinaryHttpMessageConverter
+[2m2026-08-07T08:11:48.416+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]开始扩展消息转换器列表, 当前转换器数量: 12
+[2m2026-08-07T08:11:48.416+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]创建 MappingJackson2HttpMessageConverter, includeNull=false
+[2m2026-08-07T08:11:48.416+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]使用的 ObjectMapper 类型: com.fasterxml.jackson.databind.json.JsonMapper
+[2m2026-08-07T08:11:48.417+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36ms.c.s.c.MessageConverterWebMvcConfigurer[0;39m [2m:[0;39m [消息转换器]已注册 MappingJackson2HttpMessageConverter 到位置: 5, 转换器类型: org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
+[2m2026-08-07T08:11:48.455+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.c.ResourceWebMvcConfigurer    [0;39m [2m:[0;39m 当前运行目录: D:\ch\project\spring-support-parent-starter\spring-support-ai-starter\.
+[2m2026-08-07T08:11:48.606+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mm.e.s.MybatisPlusApplicationContextAware[0;39m [2m:[0;39m Register ApplicationContext instances org.springframework.boot.web.servlet.context.AnnotationConfigServletWebServerApplicationContext@3591009c
+[2m2026-08-07T08:11:48.607+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.c.s.c.s.a.ModuleEnvironmentRegistration[0;39m [2m:[0;39m [环境配置]已注册模块配置, 组: plugin.actuator, 启用: false, 类型: com.chua.starter.common.support.actuator.ActuatorProperties
+[2m2026-08-07T08:11:48.690+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.c.s.c.CaptchaConfiguration        [0;39m [2m:[0;39m >>>>>>> 开启检验码接口
+[2m2026-08-07T08:11:48.714+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36m.c.s.c.s.a.ModuleEnvironmentRegistration[0;39m [2m:[0;39m [环境配置]已注册模块配置, 组: plugin.log, 启用: true, 类型: com.chua.starter.common.support.log.LogProperties
+ _ _   |_  _ _|_. ___ _ |    _  .  _  .  _  
+| | |\/|_)(_| | |_\  |_)||_|_\  | (_) | | | 
+     /               |          /
+                                    1.5.6
+[2m2026-08-07T08:11:48.846+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-2 - Starting...
+[2m2026-08-07T08:11:48.849+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.pool.HikariPool       [0;39m [2m:[0;39m HikariPool-2 - Added connection conn11: url=jdbc:h2:mem:aidb user=SA
+[2m2026-08-07T08:11:48.851+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-2 - Start completed.
+[2m2026-08-07T08:11:48.856+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-3 - Starting...
+[2m2026-08-07T08:11:48.858+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.pool.HikariPool       [0;39m [2m:[0;39m HikariPool-3 - Added connection conn12: url=jdbc:h2:mem:aidb user=SA
+[2m2026-08-07T08:11:48.858+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mcom.zaxxer.hikari.HikariDataSource      [0;39m [2m:[0;39m HikariPool-3 - Start completed.
+[2m2026-08-07T08:11:48.858+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.s.b.a.h2.H2ConsoleAutoConfiguration   [0;39m [2m:[0;39m H2 console available at '/h2-console'. Databases available at 'jdbc:h2:mem:aidb', 'jdbc:h2:mem:aidb', 'jdbc:h2:mem:aidb'
+[2m2026-08-07T08:11:48.961+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.d.c.DataSourceDocumentHandler     [0;39m [2m:[0;39m [spring-support-datasource] 数据库文档预览与图谱已注册: basePath=/plugin/datasource/document
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::allocateMemory has been called by io.netty.util.internal.PlatformDependent0$2 (file:/C:/Users/Administrator/.m2/repository/io/netty/netty-common/4.1.130.Final/netty-common-4.1.130.Final.jar)
+WARNING: Please consider reporting this to the maintainers of class io.netty.util.internal.PlatformDependent0$2
+WARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release
+[2m2026-08-07T08:11:49.071+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mo.s.b.w.embedded.tomcat.TomcatWebServer [0;39m [2m:[0;39m Tomcat started on port 8080 (http) with context path '/'
+[2m2026-08-07T08:11:49.081+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.ai.support.AiStarterApplication   [0;39m [2m:[0;39m Started AiStarterApplication in 5.904 seconds (process running for 6.882)
+
+[36m============================================================[0m
+[1m[33m  ������Ϣ[0m[0m
+[36m============================================================[0m
+[36m[�˵�][0m
+  AI/AI�ӿ�                        [33m/ai/**[0m[90m  ; AI�ӿ�[0m
+  ͨ��/Ӧ������                        [33mhttp://127.0.0.1:8080/service-info[0m[90m  ; ������Ϣ�ۺ϶˵�[0m
+  �ĵ�/swagger                     [33mhttp://127.0.0.1:8080/doc.html[0m[90m  ; Knife4j �ӿ��ĵ�[0m
+  ���/actuator                    [33mhttp://127.0.0.1:8080/actuator[0m[90m  ; Spring Boot Actuator[0m
+[36m[����][0m
+  [32m+ true [0m AI/ai                          AIģ��
+  [32m+ true [0m MyBatis/mybatis                MyBatis Plusģ��
+  [32m+ true [0m �ĵ�/swagger                     Knife4j �ӿ��ĵ�
+  [32m+ true [0m ���/actuator                    Spring Boot Actuator
+[36m============================================================[0m
+[2m2026-08-07T08:11:49.099+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] ChatClientRegistry 初始化完成，共 0 个客户端
+[2m2026-08-07T08:11:49.099+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.configuration.AiConfiguration [0;39m [2m:[0;39m [AiConfiguration] AI 注册体系初始化完成
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@aaa7000] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1548031724 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), chat_client_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@aaa7000]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7bfc36d5] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2059236860 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7bfc36d5]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@31b67d61] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1206908244 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@31b67d61]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@56ec6ac0] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1244890076 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), factory(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@56ec6ac0]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@591ba330] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2086415127 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_base_url(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@591ba330]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@18bf1bad] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@785140711 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_api_address(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@18bf1bad]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3355d9ba] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1398267406 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_api_key(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3355d9ba]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6f651ac] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1244242406 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_app_key(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6f651ac]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@57ac2910] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@979778117 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_app_secret(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@57ac2910]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@e296794] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@159957286 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), provider_secret_key(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@e296794]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7135e8cd] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1056671292 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7135e8cd]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5527dbb0] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1212147770 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), compression_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5527dbb0]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@16120270] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1958395112 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@16120270]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1fab0394] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@685917795 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1fab0394]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2ee5c08d] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@261710917 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2ee5c08d]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@48697181] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1921185713 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), timeout_millis(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@48697181]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7263b0c4] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@907823489 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), input_optimization_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7263b0c4]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@35fac3ba] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1352701387 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), context_compression_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@35fac3ba]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6b2efcae] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@145364322 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), context_compression_threshold(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6b2efcae]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2831c178] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1894301721 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: runtime(String), context_compression_retain_messages(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2831c178]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2a79da3a] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@706289539 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2a79da3a]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@c8531b9] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1586980179 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@c8531b9]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3c108c05] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@423459527 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3c108c05]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7d0333c8] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@408648902 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7d0333c8]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2093bb6c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1384781563 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), timeout(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2093bb6c]
+[2m2026-08-07T08:11:49.418+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.c.GlobalChatClientManager     [0;39m [2m:[0;39m [GlobalChatClient] 构建全局 ChatClient: model=null, factory=default, provider=openai, systemPrompt=-
+[2m2026-08-07T08:11:49.420+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.registry.ChatClientRegistry   [0;39m [2m:[0;39m [ChatClientRegistry] 设置默认 ChatClient: DefaultScopeChatClient
+[2m2026-08-07T08:11:49.434+08:00[0;39m [33m WARN[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.c.GlobalChatClientManager     [0;39m [2m:[0;39m [GlobalChatClient] 主 Agent 重建失败: Cannot invoke "com.chua.common.support.ai.agent.Agent.chatClient(com.chua.common.support.ai.chat.ChatClient)" because the return value of "com.chua.common.support.ai.agent.Agent.create(String)" is null
+[2m2026-08-07T08:11:49.434+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [           main] [0;39m[36mc.c.s.a.s.c.GlobalChatClientManager     [0;39m [2m:[0;39m [GlobalChatClient] 全局 ChatClient 已热更新: model=null, factory=default, provider=openai
+[2m2026-08-07T08:12:17.139+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [omcat-handler-0] [0;39m[36mo.a.c.c.C.[Tomcat].[localhost].[/]      [0;39m [2m:[0;39m Initializing Spring DispatcherServlet 'dispatcherServlet'
+[2m2026-08-07T08:12:17.139+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [omcat-handler-0] [0;39m[36mo.s.web.servlet.DispatcherServlet       [0;39m [2m:[0;39m Initializing Servlet 'dispatcherServlet'
+[2m2026-08-07T08:12:17.145+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [omcat-handler-0] [0;39m[36mo.s.web.servlet.DispatcherServlet       [0;39m [2m:[0;39m Completed initialization in 6 ms
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@b9b245c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1736587409 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), chat_client_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@b9b245c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d2b8d13] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2018852831 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_usage_analysis(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d2b8d13]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7de3782] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1903087960 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), usage_report_interval(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7de3782]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@30ec8973] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1628894070 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@30ec8973]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1702aaf1] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@283200856 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1702aaf1]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4492e926] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@306786177 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4492e926]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@109e5a1b] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@48841957 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), timeout(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@109e5a1b]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@60c59821] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@273472322 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_cache(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@60c59821]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7343f0ed] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@994401292 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), stream(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7343f0ed]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@778ddfd5] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@32345261 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@778ddfd5]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6d45c0e5] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2087797885 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_embedding_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6d45c0e5]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@651b4f51] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@142487483 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_llm_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@651b4f51]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4bff94b9] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1029399319 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_ocr_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4bff94b9]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@285d22a] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2080319030 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_upload_dir(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@285d22a]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4c122fac] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@708292322 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_vector_storage(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4c122fac]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@60f2d0c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@71525741 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@60f2d0c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@59714506] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1311158388 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_size(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@59714506]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@31be93f1] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2101598476 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_overlap(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@31be93f1]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@69d63c0] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1140414969 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_splitter(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@69d63c0]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@256af7c6] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@219593108 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), chat_client_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@256af7c6]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2e810bec] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1401071476 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_usage_analysis(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2e810bec]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2124ae05] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@424049068 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), usage_report_interval(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2124ae05]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3fbecf03] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2042721927 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3fbecf03]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7d11bb3c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1471161899 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7d11bb3c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1ebf3d09] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1815614743 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1ebf3d09]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c008bf7] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1247242018 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), timeout(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c008bf7]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2d674c14] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@22770690 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_cache(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2d674c14]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@199c08ed] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1745031819 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), stream(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@199c08ed]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7f13e473] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@632448247 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7f13e473]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5c90cbcc] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@754392479 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_embedding_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5c90cbcc]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4ca7440e] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2047087793 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_llm_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4ca7440e]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@20106e96] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@874484974 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_ocr_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@20106e96]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@426e2157] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@404030519 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_upload_dir(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@426e2157]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3bd2bd7d] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1940059661 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_vector_storage(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3bd2bd7d]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@407505b7] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1894880562 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@407505b7]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5ee6f704] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@982544459 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_size(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5ee6f704]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@52a09213] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@772064624 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_overlap(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@52a09213]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@47335963] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2123922406 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_splitter(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@47335963]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1e6487c3] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@493257278 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), chat_client_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1e6487c3]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@27cf8f84] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@706565311 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_usage_analysis(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@27cf8f84]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7e033af8] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@9400628 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), usage_report_interval(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7e033af8]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5b677d0e] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@463434353 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5b677d0e]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7cac4f00] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@122787696 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7cac4f00]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@673e0599] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@122879989 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@673e0599]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@19986450] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@309959172 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), timeout(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@19986450]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5fc471f] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@365014274 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_cache(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5fc471f]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4fa1f10e] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@299301700 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), stream(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4fa1f10e]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@767582de] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1858377903 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@767582de]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2e2d3df8] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@143130530 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_embedding_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2e2d3df8]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@523eef1e] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@410326038 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_llm_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@523eef1e]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5f70381d] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1748870846 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_ocr_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5f70381d]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4d5ef2b8] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2109442721 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_upload_dir(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4d5ef2b8]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@23d5e5db] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@643346249 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_vector_storage(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@23d5e5db]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c295208] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1030106542 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c295208]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3191ece4] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1380986744 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_size(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3191ece4]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@43f9e28] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@137939036 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_overlap(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@43f9e28]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3670f373] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1695031594 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_splitter(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3670f373]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d3e2d7d] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1401584814 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), chat_client_enabled(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d3e2d7d]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6250e6c7] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1190496982 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_usage_analysis(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6250e6c7]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2a4c12b0] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@715351131 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), usage_report_interval(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@2a4c12b0]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4fa0d916] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@636045582 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), default_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4fa0d916]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6ffa1691] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1581917833 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), temperature(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6ffa1691]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@176b2c3f] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2015737573 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), max_tokens(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@176b2c3f]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@47d479ee] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1218798067 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), timeout(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@47d479ee]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6e1b60c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1403435691 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), enable_cache(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6e1b60c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3759b238] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1418782681 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), stream(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3759b238]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5fca6a91] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@962588705 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@5fca6a91]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@436d5d40] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@269538523 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_embedding_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@436d5d40]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c82baaa] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1511690211 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_llm_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1c82baaa]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@73b44ebd] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1695869468 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_ocr_model(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@73b44ebd]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6cca4bfe] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1654764563 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_upload_dir(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@6cca4bfe]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3331df5c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1899468588 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_vector_storage(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3331df5c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4f9cb74f] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@552768387 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_system_prompt(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4f9cb74f]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d8463fe] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1355221397 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_size(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@1d8463fe]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4e91104c] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1890849267 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_chunk_overlap(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4e91104c]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@185725d1] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1038724948 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_global_setting_id, sys_ai_global_setting_group, sys_ai_global_setting_field, sys_ai_global_setting_value, sys_ai_global_setting_value_type, sys_ai_global_setting_description, sys_ai_global_setting_sort, sys_ai_global_setting_status, create_time, update_time FROM sys_ai_global_setting WHERE (sys_ai_global_setting_group = ? AND sys_ai_global_setting_field = ? AND sys_ai_global_setting_status = ?)
+==> Parameters: global(String), rag_splitter(String), 1(Integer)
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@185725d1]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7756bfca] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2033458517 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_model_id AS modelId, sys_ai_model_name AS modelName, sys_ai_model_code AS modelCode, sys_ai_model_provider_id AS modelProviderId, sys_ai_model_capabilities AS modelCapabilities, sys_ai_model_description AS modelDescription, sys_ai_model_enabled AS modelEnabled, sys_ai_model_sort AS modelSort, sys_ai_model_create_time AS modelCreateTime, sys_ai_model_update_time AS modelUpdateTime, sys_ai_model_deleted AS modelDeleted, sys_ai_model_input_price AS modelInputPrice, sys_ai_model_output_price AS modelOutputPrice, sys_ai_model_cache_price AS modelCachePrice FROM sys_ai_model WHERE sys_ai_model_deleted = 0 ORDER BY sys_ai_model_sort ASC, sys_ai_model_create_time ASC
+==> Parameters: 
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@7756bfca]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3621d72] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@1618002261 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_provider_id AS providerId, sys_ai_provider_name AS providerName, sys_ai_provider_type AS providerType, sys_ai_provider_base_url AS providerBaseUrl, sys_ai_provider_api_key AS providerApiKey, sys_ai_provider_logo AS providerLogo, sys_ai_provider_models AS providerModels, sys_ai_provider_enabled AS providerEnabled, sys_ai_provider_deleted AS providerDeleted, create_name, create_by, create_time, update_time, update_name, update_by FROM sys_ai_provider WHERE sys_ai_provider_deleted = 0
+==> Parameters: 
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@3621d72]
+[2m2026-08-07T08:13:36.142+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [omcat-handler-6] [0;39m[36mc.c.d.support.engine.ModelRegistry      [0;39m [2m:[0;39m ModelRegistry SPI loaded 1 registrar class(es), entries=139
+[2m2026-08-07T08:13:36.143+08:00[0;39m [32m INFO[0;39m [35m2832[0;39m [2m--- [ai-starter] [omcat-handler-6] [0;39m[36mc.c.d.support.engine.ModelRegistry      [0;39m [2m:[0;39m ModelRegistry SPI loaded 1 registrar class(es), entries=139
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@89e1114] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@983630918 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_model_id AS modelId, sys_ai_model_name AS modelName, sys_ai_model_code AS modelCode, sys_ai_model_provider_id AS modelProviderId, sys_ai_model_capabilities AS modelCapabilities, sys_ai_model_description AS modelDescription, sys_ai_model_enabled AS modelEnabled, sys_ai_model_sort AS modelSort, sys_ai_model_create_time AS modelCreateTime, sys_ai_model_update_time AS modelUpdateTime, sys_ai_model_deleted AS modelDeleted, sys_ai_model_input_price AS modelInputPrice, sys_ai_model_output_price AS modelOutputPrice, sys_ai_model_cache_price AS modelCachePrice FROM sys_ai_model WHERE sys_ai_model_deleted = 0 ORDER BY sys_ai_model_sort ASC, sys_ai_model_create_time ASC
+==> Parameters: 
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@89e1114]
+Creating a new SqlSession
+SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4c327c99] was not registered for synchronization because synchronization is not active
+JDBC Connection [HikariProxyConnection@2102766907 wrapping conn1: url=jdbc:h2:mem:aidb user=SA] will not be managed by Spring
+==>  Preparing: SELECT sys_ai_provider_id AS providerId, sys_ai_provider_name AS providerName, sys_ai_provider_type AS providerType, sys_ai_provider_base_url AS providerBaseUrl, sys_ai_provider_api_key AS providerApiKey, sys_ai_provider_logo AS providerLogo, sys_ai_provider_models AS providerModels, sys_ai_provider_enabled AS providerEnabled, sys_ai_provider_deleted AS providerDeleted, create_name, create_by, create_time, update_time, update_name, update_by FROM sys_ai_provider WHERE sys_ai_provider_deleted = 0
+==> Parameters: 
+<==      Total: 0
+Closing non transactional SqlSession [org.apache.ibatis.session.defaults.DefaultSqlSession@4c327c99]

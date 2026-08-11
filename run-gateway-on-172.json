@@ -1,0 +1,26 @@
+{
+  "Image": "eclipse-temurin:25-jre",
+  "Cmd": [
+    "sh",
+    "-c",
+    "exec /opt/java/openjdk/bin/java $JAVA_OPTS -cp /app/gateway-server.jar:/app/dependencies/* -Dguacd.host=guacd -Dguacd.port=4822 com.chua.gateway.server.GatewayServerApplication"
+  ],
+  "WorkingDir": "/app",
+  "Env": [
+    "JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8"
+  ],
+  "ExposedPorts": { "8090/tcp": {}, "8182/tcp": {}, "4822/tcp": {} },
+  "HostConfig": {
+    "Mounts": [
+      { "Type": "volume", "Source": "gateway-data", "Target": "/app" }
+    ],
+    "PortBindings": {
+      "8090/tcp": [{ "HostPort": "18090" }],
+      "8182/tcp": [{ "HostPort": "18182" }],
+      "4822/tcp": [{ "HostPort": "14822" }]
+    },
+    "RestartPolicy": { "Name": "always" },
+    "AutoRemove": false
+  },
+  "Name": "gateway-server"
+}
