@@ -72,7 +72,7 @@ if op == 0x1:
 elif op == 0x8:
     print(f'  server close: code={int.from_bytes(data[:2],"big")} reason={data[2:].decode("utf-8",errors="replace")}')
 else:
-    print(f'  op={op:#x} data={data[:100]!r}')
+    print(f'  op={op:#x} data={data[:100]!r}' if op is not None else '  op=None (no frame)')
 
 # 读取 SSH 输出（prompt）
 print('\n=== 4. 等 SSH prompt ===')
