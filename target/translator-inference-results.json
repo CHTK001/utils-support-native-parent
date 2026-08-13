@@ -1,0 +1,9 @@
+{
+  "test": "SixNewTranslatorsInferenceTest",
+  "date": "2026-08-13",
+  "model_file": "yolov8n.onnx (COCO 80 classes, 12.3MB)",
+  "summary": "ok=0 fail=6",
+  "results": [
+    {"model_id":"doclaynet-yolo-imgsz640","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"model path invalid"},{"model_id":"yolov8n-table-detection","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"NoClassDefFoundError: com/google/gson/JsonElement"},{"model_id":"yolov8n-seal-detection","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"NoClassDefFoundError: Could not initialize class ai.djl.modality.cv.output.DetectedObjects"},{"model_id":"yolov8n-barcode","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"ClassNotFoundException: com.chua.deeplearning.support.onnx.detection.single.BarcodeDetectionYolov8Translator"},{"model_id":"yolov8n-ppe","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"ClassNotFoundException: com.chua.deeplearning.support.onnx.detection.single.PpeDetectionYolov8Translator"},{"model_id":"yolov8n-fire-smoke","ok":false,"load_ms":0,"infer_ms":0,"detections":0,"msg":"ClassNotFoundException: com.chua.deeplearning.support.onnx.detection.single.FireSmokeDetectionYolov8Translator"}
+  ]
+}
