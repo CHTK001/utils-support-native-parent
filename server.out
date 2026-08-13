@@ -1,6 +1,0 @@
-[START] Gateway Server starting...
-[INFO] Java: C:\Program Files\Amazon Corretto\jdk25.0.3_9\bin\java.exe
-[INFO] Argfile: D:\ch\project\gateway.argfile
-[INFO] Log: D:\ch\project\server.log
-
-[STOP] Gateway Server exited, code=-1
