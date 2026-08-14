@@ -3,7 +3,7 @@ import requests, tarfile, io, sys, time, json
 
 DOCKER = "http://172.16.0.40:2375"
 CONTAINER = "gateway-server"
-JAR_LOCAL = r"D:\ch\project\gateway-server-v12.jar"
+JAR_LOCAL = r"D:\ch\project\gateway-server-v13.jar"
 
 def docker_exec(cmd, timeout=30):
     cr = requests.post(f"{DOCKER}/containers/{CONTAINER}/exec",
