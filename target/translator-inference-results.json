@@ -1,9 +1,0 @@
-{
-  "test": "SixNewTranslatorsInferenceTest",
-  "date": "2026-08-13",
-  "model_file": "yolov8n.onnx (COCO 80 classes, 12.3MB)",
-  "summary": "ok=6 fail=0",
-  "results": [
-    {"model_id":"doc-layout-yolo-imgsz640","ok":true,"load_ms":339,"infer_ms":616,"detections":29,"msg":"OK"},{"model_id":"yolov8n-table-detection","ok":true,"load_ms":95,"infer_ms":238,"detections":30,"msg":"OK"},{"model_id":"yolov8n-seal-detection","ok":true,"load_ms":85,"infer_ms":209,"detections":30,"msg":"OK"},{"model_id":"yolov8n-barcode","ok":true,"load_ms":98,"infer_ms":245,"detections":29,"msg":"OK"},{"model_id":"yolov8n-ppe","ok":true,"load_ms":99,"infer_ms":272,"detections":29,"msg":"OK"},{"model_id":"yolov8n-fire-smoke","ok":true,"load_ms":97,"infer_ms":243,"detections":29,"msg":"OK"}
-  ]
-}

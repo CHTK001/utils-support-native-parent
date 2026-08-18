@@ -22,6 +22,7 @@
     <module>utils-support-native-filesearch</module>
     <module>utils-support-native-filestorage</module>
     <module>utils-support-native-smb</module>
+    <module>utils-support-native-needle</module>
 </modules>
 
     <distributionManagement>
