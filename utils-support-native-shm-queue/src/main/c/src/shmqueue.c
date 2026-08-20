@@ -35,6 +35,9 @@
 #define SHMQ_NOTIFY_NAME_OFF  32
 #define SHMQ_NOTIFY_NAME_LEN  32
 
+/* 判满瞬态误判时的自旋重试次数（pause 指令级，约几十微秒） */
+#define SHMQ_SEND_FULL_RETRIES 10000
+
 /* 每槽发布状态：接收方只读取 READY 槽，CAS 抢占后写入再置 READY（无锁 MPSC） */
 #define SHMQ_STATE_EMPTY 0u
 #define SHMQ_STATE_READY 1u
@@ -409,22 +412,32 @@ static inline void slot_state_store(struct shm_queue_ctx *ctx, uint32_t idx, uin
     shmq_atomic_store_release(&ctx->state[idx], v);
 }
 
+static inline void shmq_cpu_pause(void);
+
 /**
  * CAS 无锁发送（支持多生产者 MPSC）。
- *
- * 通过 CAS 抢占 write_index 获得唯一槽位，写完数据后以 release 置槽 READY 发布；
+ * * 通过 CAS 抢占 write_index 获得唯一槽位，写完数据后以 release 置槽 READY 发布；
  * 接收方只读取 READY 槽，因此并发生产者之间不会互相覆盖，也不会让接收方读到
- * 未写完的数据。队列满时返回 SHMQ_ERR_QUEUE_FULL，调用方可重试。
+ * 未写完的数据。
+ *
+ * 满判定 (w+1)%capacity == r 存在瞬态误判：读取方推进 read_index 与生产者读到
+ * 旧 r 之间存在窗口，队列实际已腾出空间却仍判满。因此判满后做有界自旋重试，
+ * 仅当持续满才返回 SHMQ_ERR_QUEUE_FULL（调用方可重试）。
  */
 int shmq_send(shm_queue_ctx *ctx, uint32_t msg_type, const void *data, uint32_t len) {
     if (!ctx) return SHMQ_ERR_INVALID_ARG;
     if (len + 8u > ctx->slot_size) return SHMQ_ERR_DATA_TOO_LARGE;
 
     uint32_t slot;
+    int attempts = 0;
     for (;;) {
         uint32_t w = shmq_atomic_load_relaxed(&ctx->header->write_index);
         uint32_t r = shmq_atomic_load_acquire(&ctx->header->read_index);
-        if (((w + 1u) % ctx->capacity) == r) return SHMQ_ERR_QUEUE_FULL;
+        if (((w + 1u) % ctx->capacity) == r) {
+            if (++attempts >= SHMQ_SEND_FULL_RETRIES) return SHMQ_ERR_QUEUE_FULL;
+            shmq_cpu_pause();
+            continue;
+        }
         uint32_t next_w = (w + 1u) % ctx->capacity;
         if (shmq_atomic_cas_acqrel(&ctx->header->write_index, w, next_w)) {
             slot = w;
@@ -455,6 +468,18 @@ static inline int data_ready(struct shm_queue_ctx *ctx) {
     uint32_t w = shmq_atomic_load_acquire(&ctx->header->write_index);
     if (r == w) return 0;
     return slot_state_load(ctx, r) == SHMQ_STATE_READY;
+}
+
+static inline void shmq_cpu_pause(void) {
+#ifdef _WIN32
+    YieldProcessor();
+#else
+#if defined(__i386__) || defined(__x86_64__)
+    _mm_pause();
+#else
+    __asm__ __volatile__("" ::: "memory");
+#endif
+#endif
 }
 
 static inline void spin_wait(uint64_t ns) {
