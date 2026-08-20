@@ -40,6 +40,12 @@ public class HttpServerCompare {
             s.registerMapping("/ping", (req, res) -> res.setBody("pong").end());
             return s;
         }, basePort + 200);
+
+        run("VertxHttpServer", (setting) -> {
+            VertxHttpServer s = new VertxHttpServer(setting);
+            s.registerMapping("/ping", (req, res) -> res.setBody("pong").end());
+            return s;
+        }, basePort + 300);
     }
 
     private static void run(String name, ServerFactory factory, int port) throws Exception {
