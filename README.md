@@ -51,6 +51,7 @@ dependencies {
 
 - `resource-config.json`：将 `native/**` 平台动态库与 `META-INF/services/**` SPI 声明打入原生镜像；
 - `jni-config.json`：`utils-support-native-video-codec` 的 JNI 类（`NativeVideoCodec`）及其全部 native 方法签名；
+- `reachability-metadata.json`（`foreign.downcalls`）：`utils-support-native-shm-queue` / `shm-queue-http` 的 FFM downcall 签名（`void*`/`jint`/`jlong`/`jshort`），原生镜像中执行 FFM 调用必需；
 - `native-image.properties`：合并到最终原生镜像构建的推荐参数。
 
 ### 使用 Native Image 时的要求
