@@ -1,0 +1,16 @@
+[package]
+name = "shmqueue"
+version = "0.1.0"
+edition = "2021"
+description = "Rust FFI binding for the shmqueue C library (shared-memory ring queue)"
+license = "Apache-2.0"
+links = "shmqueue"
+
+[lib]
+name = "shmqueue"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+libc = "0.2"
+libloading = "0.8"
+thiserror = "1"

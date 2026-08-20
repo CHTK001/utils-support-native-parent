@@ -1,0 +1,23 @@
+[package]
+name = "rust_http_bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Rust hyper HTTP server bridged to Java over shared-memory ring queues (cdylib)"
+license = "Apache-2.0"
+
+[lib]
+name = "rust_http_bridge"
+crate-type = ["cdylib"]
+
+[build-dependencies]
+cc = "1"
+
+[dependencies]
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
+tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Networking_WinSock"] }
