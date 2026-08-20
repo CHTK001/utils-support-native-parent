@@ -45,7 +45,32 @@ dependencies {
 }
 ```
 
-## 构建
+## GraalVM 支持
+
+本项目为 GraalVM Native Image 提供了开箱即用的元数据（位于各模块 `src/main/resources/META-INF/native-image/com.chua/<module>/`）：
+
+- `resource-config.json`：将 `native/**` 平台动态库与 `META-INF/services/**` SPI 声明打入原生镜像；
+- `jni-config.json`：`utils-support-native-video-codec` 的 JNI 类（`NativeVideoCodec`）及其全部 native 方法签名；
+- `native-image.properties`：合并到最终原生镜像构建的推荐参数。
+
+### 使用 Native Image 时的要求
+
+1. **动态库可达**：`utils-support-native-video-codec` 通过 `System.loadLibrary("chua_native_video_codec")` 加载，
+   构建原生镜像后需保证 `chua_native_video_codec.dll/.so/.dylib` 位于运行期 `java.library.path`；
+2. **Foreign API**：`utils-support-native-shm-queue`、`utils-support-native-shm-queue-http` 使用 Panama FFM，
+   Native Image 需启用原生访问：
+
+   ```bash
+   native-image --enable-native-access=ALL-UNNAMED -jar app.jar
+   ```
+
+   或 Maven 场景：`mvn -Pnative native:compile -Dnative.buildtools.build-args="--enable-native-access=ALL-UNNAMED"`
+
+3. **NativeLoader 目录枚举限制**：`NativeLoader`/`NativeUtils` 依赖 `ClassLoader.getResources(native/<platform>)`
+   做目录枚举，该方式在原生镜像中不可用；如需在 Native Image 下加载 classpath 内动态库，请改用
+   `NativeUtils.load(libName, null)` 精确加载，并在应用侧运行 `native-image` tracing agent 补充反射元数据。
+
+### 构建
 
 ```bash
 mvn clean install
