@@ -93,6 +93,9 @@ public final class RustHttpBridge implements AutoCloseable {
     /** 已启动标志 */
     private volatile boolean started;
 
+    /** 响应队列满时的最大重试次数（onSpinWait 级，约百微秒内） */
+    private static final int SEND_FULL_MAX_RETRY = 200_000;
+
     private RustHttpBridge() {
     }
 
@@ -180,7 +183,18 @@ public final class RustHttpBridge implements AutoCloseable {
             if (payload.length > 0) {
                 MemorySegment.copy(payload, 0, bodySeg, ValueLayout.JAVA_BYTE, 0, payload.length);
             }
-            int rc = (int) rhbSendResponse.invokeExact(reqId, (short) status, ctSeg, ct.length, bodySeg, payload.length);
+            int rc = 0;
+            // 队列满（rc=-8）为瞬态：虚拟线程突发写响应可能短暂超过 Rust 读取速率，
+            // 有界自旋重试吸收突发，避免响应丢失导致客户端 504。
+            int attempt = 0;
+            while (true) {
+                rc = (int) rhbSendResponse.invokeExact(reqId, (short) status, ctSeg, ct.length, bodySeg, payload.length);
+                if (rc != -8 || attempt >= SEND_FULL_MAX_RETRY) {
+                    break;
+                }
+                Thread.onSpinWait();
+                attempt++;
+            }
             if (rc != 0) {
                 throw new IllegalStateException("rhb_send_response 失败, rc=" + rc);
             }
