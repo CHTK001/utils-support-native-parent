@@ -1,0 +1,152 @@
+[
+  {
+    "name": "com.chua.nativevideocodec.support.NativeVideoCodec",
+    "methods": [
+      {
+        "name": "h264EncoderCreate",
+        "parameterTypes": [
+          "I",
+          "I",
+          "I",
+          "I",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h264Encode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h264EncoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "h265EncoderCreate",
+        "parameterTypes": [
+          "I",
+          "I",
+          "I",
+          "I",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h265Encode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h265EncoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "h266EncoderCreate",
+        "parameterTypes": [
+          "I",
+          "I",
+          "I",
+          "I",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h266Encode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h266EncoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "h264DecoderCreate",
+        "parameterTypes": [
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h264Decode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I"
+        ]
+      },
+      {
+        "name": "h264DecoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "h265DecoderCreate",
+        "parameterTypes": [
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h265Decode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I"
+        ]
+      },
+      {
+        "name": "h265DecoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "h266DecoderCreate",
+        "parameterTypes": [
+          "I",
+          "I"
+        ]
+      },
+      {
+        "name": "h266Decode",
+        "parameterTypes": [
+          "J",
+          "[B",
+          "I"
+        ]
+      },
+      {
+        "name": "h266DecoderFree",
+        "parameterTypes": [
+          "J"
+        ]
+      },
+      {
+        "name": "getVersion",
+        "parameterTypes": []
+      }
+    ]
+  }
+]
