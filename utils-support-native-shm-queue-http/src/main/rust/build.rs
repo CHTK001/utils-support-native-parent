@@ -7,10 +7,13 @@ fn main() {
     let shm_root = std::path::Path::new(&manifest)
         .join("../../../../utils-support-native-shm-queue/src/main/c");
     let src_c = shm_root.join("src/shmqueue.c");
+    let src_chan = shm_root.join("src/shmchan.c");
     assert!(src_c.exists(), "shmqueue.c not found: {}", src_c.display());
+    assert!(src_chan.exists(), "shmchan.c not found: {}", src_chan.display());
 
     cc::Build::new()
-        .file(src_c)
+        .file(&src_c)
+        .file(&src_chan)
         .include(shm_root.join("include"))
         .include(shm_root.join("src"))
         .define("SHMQUEUE_BUILDING_DLL", None)
@@ -18,7 +21,8 @@ fn main() {
         .warnings(false)
         .compile("shmqueue_embedded");
 
-    println!("cargo:rerun-if-changed={}", shm_root.join("src/shmqueue.c").display());
-    println!("cargo:rerun-if-changed={}", shm_root.join("src/atomic_ops.h").display());
+    println!("cargo:rerun-if-changed={}", src_c.display());
+    println!("cargo:rerun-if-changed={}", src_chan.display());
     println!("cargo:rerun-if-changed={}", shm_root.join("include/shmqueue.h").display());
+    println!("cargo:rerun-if-changed={}", shm_root.join("include/shmchan.h").display());
 }
