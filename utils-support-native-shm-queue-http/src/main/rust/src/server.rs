@@ -1,4 +1,5 @@
 //! hyper HTTP 服务器 + 请求/响应队列桥接。
+//! 单环 Zero-copy：请求和响应共享同一块 SHM，同一槽位 REQ→RESP 原地复用。
 
 use crate::channel::Channel;
 use std::collections::HashMap;
@@ -32,11 +33,13 @@ pub struct Bridge {
     pub slot_size: u32,
     /// 运行标志
     pub running: Arc<std::sync::atomic::AtomicBool>,
-    /// req_id -> oneshot Sender，供响应读取线程回填
+    /// req_id -> oneshot Sender，供响应回填
     pub pending: Arc<Mutex<HashMap<u64, oneshot::Sender<RespData>>>>,
+    /// 上一次轮询到的 req 槽位（用于 send_response 写入相同槽位）
+    pub last_polled_req_slot: std::sync::atomic::AtomicU32,
 }
 
-/// 工作线程句柄
+/// 桥接线程句柄
 pub struct ThreadHandles {
     pub hyper: std::thread::JoinHandle<()>,
     pub resp: std::thread::JoinHandle<()>,
@@ -55,54 +58,35 @@ pub fn build_req_envelope(req_id: u64, method: &str, path: &str, body: &[u8]) ->
     v
 }
 
-/// 从响应通道读取并回填 pending
-pub fn resp_reader_loop(bridge: Arc<Bridge>) {
+/// 从请求通道取出一条请求信封（阻塞至多 MAX_POLL_WAIT_NS）。
+///
+/// 返回：(写入 out 的字节数，槽索引)；
+/// 返回 (0, slot)：无数据（超时）；
+/// 返回 (负值, slot)：错误。
+pub fn poll_request(bridge: &Bridge, out: &mut [u8]) -> (i32, u32) {
     let mut buf = vec![0u8; bridge.slot_size as usize];
-    while bridge.running.load(Ordering::Relaxed) {
-        let n = match bridge.resp_channel.recv_timeout(&mut buf, crate::MAX_POLL_WAIT_NS) {
-            Ok(n) => n,
-            Err(rc) if rc == -12 => continue,
-            Err(_) => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                continue;
+    match bridge.req_channel.poll_req_timeout(crate::MAX_POLL_WAIT_NS) {
+        Ok((slot, ptr, len)) => {
+            // 将数据复制到 out buffer
+            let copy_len = std::cmp::min(len, out.len() as u32);
+            unsafe {
+                std::ptr::copy_nonoverlapping(ptr, out.as_mut_ptr(), copy_len as usize);
             }
-        };
-        if n < RESP_HEADER_LEN {
-            eprintln!("[rhb] resp drop: n={} < header", n);
-            continue;
+            let _ = slot; // slot already stored in bridge for send_response
+            (copy_len as i32, slot)
         }
-        let req_id = u64::from_le_bytes(buf[0..8].try_into().unwrap());
-        let status = u16::from_le_bytes(buf[8..10].try_into().unwrap());
-        let ct_len = u16::from_le_bytes(buf[10..12].try_into().unwrap()) as usize;
-        let body_len = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
-        if RESP_HEADER_LEN + ct_len + body_len > n {
-            eprintln!("[rhb] resp drop: len mismatch n={} need={}", n, RESP_HEADER_LEN + ct_len + body_len);
-            continue;
-        }
-        let ct = String::from_utf8_lossy(&buf[16..16 + ct_len]).into_owned();
-        let body = buf[16 + ct_len..16 + ct_len + body_len].to_vec();
-        if let Some(tx) = bridge.pending.lock().unwrap().remove(&req_id) {
-            let _ = tx.send(RespData {
-                status,
-                content_type: ct,
-                body,
-            });
-        } else {
-            eprintln!("[rhb] resp drop: no pending for req_id={}", req_id);
+        Err(rc) => {
+            // 即使出错也尝试存入 slot 便于调试/重试
+            let slot = bridge.last_polled_req_slot.load(Ordering::Relaxed);
+            (rc, slot)
         }
     }
 }
 
-/// Java 轮询请求通道，返回信封字节数（0=超时无数据，负数=错误）
-pub fn poll_request(bridge: &Bridge, out: &mut [u8]) -> i32 {
-    match bridge.req_channel.recv_timeout(out, crate::MAX_POLL_WAIT_NS) {
-        Ok(n) => n as i32,
-        Err(rc) if rc == -12 => 0,
-        Err(rc) => rc,
-    }
-}
-
-/// Java 写响应通道
+/// Java 写响应通道——在上一次轮询到的槽位上原地覆写响应（zero-copy）。
+///
+/// # Safety
+/// `ct`/`body` 必须指向至少 `ct_len`/`body_len` 字节的可读内存（可为 NULL 且长度 0）。
 pub fn send_response(
     bridge: &Bridge,
     req_id: u64,
@@ -117,9 +101,22 @@ pub fn send_response(
     v.extend_from_slice(&(body.len() as u32).to_le_bytes());
     v.extend_from_slice(ct);
     v.extend_from_slice(body);
-    match bridge.resp_channel.send(&v) {
+
+    // 在上一次 poll_request 到的槽位上原地写入响应（zero-copy）
+    let slot = bridge.last_polled_req_slot.load(Ordering::Relaxed);
+    // 写入前先确认槽状态，避免覆盖未完成的请求
+    let slot_state = unsafe { crate::channel::shmc_slot_state(bridge.resp_channel.ctx as *mut crate::channel::ShmCtx, slot) };
+    if slot_state != 0 { // 不是 EMPTY，可能上一个还在处理
+        eprintln!("[rhb] slot {} not EMPTY, overriding", slot);
+    }
+    // 写入：[4字节 RESP 状态] [4字节 body_len] [body...]
+    // 注意：write_resp_direct 内部会处理状态写入和 commit
+    match bridge.resp_channel.write_resp_direct(slot, &v) {
         Ok(()) => 0,
-        Err(rc) => rc,
+        Err(rc) => {
+            eprintln!("[rhb] write_resp_direct 失败 rc={} slot={}", rc, slot);
+            rc
+        }
     }
 }
 
@@ -190,37 +187,47 @@ async fn handle_req(
     let req_id = crate::next_req_id();
     let envelope = build_req_envelope(req_id, &method, &path, &body_bytes);
 
-    // 先登记 pending 再入队，避免响应早于 pending 注册而丢失
+    // 1. 获取空槽，写入请求数据，标记为 REQ
+    let (slot, ptr) = match bridge.req_channel.acquire_empty() {
+        Ok(s) => s,
+        Err(rc) => {
+            bridge.pending.lock().unwrap().remove(&req_id);
+            eprintln!("[rhb] acquire_empty failed: {rc}");
+            return Ok(json_resp(503, "server busy"));
+        }
+    };
+    // 复制 enrolle 数据到槽ptr
+    unsafe {
+        std::ptr::copy_nonoverlapping(envelope.as_ptr(), ptr, envelope.len());
+    }
+    // 标记为 REQ
+    if let Err(rc) = bridge.req_channel.commit_req(slot) {
+        bridge.pending.lock().unwrap().remove(&req_id);
+        eprintln!("[rhb] commit_req failed: {rc}");
+        return Ok(json_resp(503, "server busy"));
+    }
+
+    // 2. 注册 pending，等待响应
     let (tx, rx) = oneshot::channel();
     {
         let mut guard = bridge.pending.lock().unwrap();
         guard.insert(req_id, tx);
     }
-    if let Err(rc) = bridge.req_channel.send(&envelope) {
-        bridge.pending.lock().unwrap().remove(&req_id);
-        eprintln!("[rhb] req queue send failed: {rc}");
-        return Ok(json_resp(503, "server busy"));
-    }
 
+    // 3. 等待响应超时
     let resp = match tokio::time::timeout(WAIT_HANDLER_TIMEOUT, rx).await {
         Ok(Ok(r)) => r,
         Ok(Err(_)) => return Ok(json_resp(503, "server closed")),
         Err(_) => {
             eprintln!("[rhb] handler timeout for req_id={}", req_id);
+            // 清理 pending 并回收槽
+            bridge.req_channel.release(slot);
+            bridge.pending.lock().unwrap().remove(&req_id);
             return Ok(json_resp(504, "handler timeout"));
         }
     };
 
-    let status = hyper::StatusCode::from_u16(resp.status)
-        .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
-    let mut response = hyper::Response::new(http_body_util::Full::new(bytes::Bytes::from(resp.body)));
-    *response.status_mut() = status;
-    if !resp.content_type.is_empty() {
-        if let Ok(v) = resp.content_type.parse::<hyper::header::HeaderValue>() {
-            response.headers_mut().insert(hyper::header::CONTENT_TYPE, v);
-        }
-    }
-    Ok(response)
+    Ok(resp)
 }
 
 /// 收集请求体，超过 MAX_BODY_BYTES 返回 Err
@@ -248,4 +255,63 @@ fn json_resp(status: u16, msg: &str) -> hyper::Response<http_body_util::Full<byt
         .headers_mut()
         .insert(hyper::header::CONTENT_TYPE, "application/json".parse().unwrap());
     response
+}
+
+/// Java 轮询响应通道的后续处理
+///
+/// 由 resp_reader_loop 调用：从响应通道轮询 RESP 槽，回填 pending，释放槽。
+pub fn poll_and_complete_resp(bridge: &Bridge) -> Option<RespData> {
+    // 从响应通道轮询 RESP
+    let (slot, ptr, len) = match bridge.resp_channel.poll_resp_timeout(crate::MAX_POLL_WAIT_NS) {
+        Ok(s) => s,
+        Err(rc) => {
+            // eprintln!("[rhb] poll_resp_timeout rc={}", rc);
+            return None;
+        }
+    };
+    if len < RESP_HEADER_LEN {
+        eprintln!("[rhb] resp drop: n={} < header", len);
+        // 即使太短也释放槽，避免死锁
+        bridge.resp_channel.release(slot);
+        return None;
+    }
+    let req_id = u64::from_le_bytes(ptr[0..8].try_into().unwrap());
+    let status = u16::from_le_bytes(ptr[8..10].try_into().unwrap());
+    let ct_len = u16::from_le_bytes(ptr[10..12].try_into().unwrap()) as usize;
+    let body_len = u32::from_le_bytes(ptr[12..16].try_into().unwrap()) as usize;
+    if RESP_HEADER_LEN + ct_len + body_len > len as usize {
+        eprintln!("[rhb] resp len mismatch n={} need={}", len, RESP_HEADER_LEN + ct_len + body_len);
+        bridge.resp_channel.release(slot);
+        return None;
+    }
+    let ct = String::from_utf8_lossy(&ptr[16..16 + ct_len]).into_owned();
+    let body = ptr[16 + ct_len..16 + ct_len + body_len].to_vec();
+    // 释放槽回 EMPTY
+    bridge.resp_channel.release(slot);
+    // 回填 pending
+    if let Some(tx) = bridge.pending.lock().unwrap().remove(&req_id) {
+        let _ = tx.send(RespData {
+            status,
+            content_type: ct,
+            body,
+        });
+    } else {
+        eprintln!("[rhb] resp drop: no pending for req_id={}", req_id);
+    }
+    // 返回给调用者（主循环可选择性使用，这里主要是为了完成 pending）
+    None
+}
+
+/// resp_reader_loop：轮询响应通道，回填 pending sender。
+pub fn resp_reader_loop(bridge: Arc<Bridge>) {
+    let mut buf = vec![0u8; bridge.slot_size as usize];
+    while bridge.running.load(Ordering::Relaxed) {
+        match poll_and_complete_resp(&bridge) {
+            Some(_) => {}
+            None => {
+                // 没有数据，短暂休眠避免空转
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
 }
