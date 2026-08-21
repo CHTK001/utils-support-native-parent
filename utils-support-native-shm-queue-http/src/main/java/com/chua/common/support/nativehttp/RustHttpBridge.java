@@ -96,6 +96,12 @@ public final class RustHttpBridge implements AutoCloseable {
     /** 响应队列满时的最大重试次数（onSpinWait 级，约百微秒内） */
     private static final int SEND_FULL_MAX_RETRY = 200_000;
 
+    /** 轮询线程复用的 Arena（仅单条轮询线程使用） */
+    private Arena pollArena;
+
+    /** 轮询线程复用的原生缓冲段 */
+    private MemorySegment pollSeg;
+
     private RustHttpBridge() {
     }
 
@@ -147,11 +153,18 @@ public final class RustHttpBridge implements AutoCloseable {
         if (!started) {
             throw new IllegalStateException("桥接未启动");
         }
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment outSeg = arena.allocate(out.length);
-            int n = (int) rhbPollRequest.invokeExact(outSeg, out.length);
+        try {
+            // 复用轮询 Arena/段：pollRequest 仅由单条轮询线程调用（confined arena 安全），
+            // 避免每请求新建 Arena + 分配 slotSize 段，减少 FFM 侧开销。
+            if (pollArena == null) {
+                pollArena = Arena.ofShared();
+            }
+            if (pollSeg == null || pollSeg.byteSize() != out.length) {
+                pollSeg = pollArena.allocate(out.length);
+            }
+            int n = (int) rhbPollRequest.invokeExact(pollSeg, out.length);
             if (n > 0) {
-                MemorySegment.copy(outSeg, ValueLayout.JAVA_BYTE, 0, out, 0, n);
+                MemorySegment.copy(pollSeg, ValueLayout.JAVA_BYTE, 0, out, 0, n);
             }
             return n;
         } catch (Throwable e) {
@@ -218,6 +231,12 @@ public final class RustHttpBridge implements AutoCloseable {
             rhbStop.invokeExact();
         } catch (Throwable e) {
             throw new IllegalStateException("rhb_stop 异常: " + e.getMessage(), e);
+        } finally {
+            if (pollArena != null) {
+                pollArena.close();
+                pollArena = null;
+                pollSeg = null;
+            }
         }
     }
 

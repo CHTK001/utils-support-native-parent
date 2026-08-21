@@ -99,6 +99,11 @@ SHMQ_API int shmq_capacity(shm_queue_ctx *ctx, uint32_t *out);
 SHMQ_API int shmq_slot_size(shm_queue_ctx *ctx, uint32_t *out);
 SHMQ_API int shmq_mode(shm_queue_ctx *ctx, int *out);
 
+/* Zero-copy 单缓冲直访：可直接读写同一块槽内内存（消除双环拷贝） */
+SHMQ_API void *shmq_slot_ptr(shm_queue_ctx *ctx, uint32_t slot);
+SHMQ_API uint32_t shmq_slot_state(shm_queue_ctx *ctx, uint32_t slot);
+SHMQ_API void shmq_set_slot_state(shm_queue_ctx *ctx, uint32_t slot, uint32_t state);
+
 SHMQ_API void shmq_destroy(shm_queue_ctx *ctx, int unlink);
 
 SHMQ_API int shmq_unlink(const char *name);
