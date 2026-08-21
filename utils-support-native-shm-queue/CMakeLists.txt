@@ -19,8 +19,8 @@ option(SHMQUEUE_BUILD_TESTS "构建 C 单元测试" ON)
 option(SHMQUEUE_BUILD_SHARED "构建为动态库" ON)
 
 set(SHMQUEUE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/main/c")
-set(SHMQUEUE_SOURCES ${SHMQUEUE_SRC_DIR}/src/shmqueue.c)
-set(SHMQUEUE_HEADERS ${SHMQUEUE_SRC_DIR}/include/shmqueue.h ${SHMQUEUE_SRC_DIR}/src/atomic_ops.h)
+set(SHMQUEUE_SOURCES ${SHMQUEUE_SRC_DIR}/src/shmqueue.c ${SHMQUEUE_SRC_DIR}/src/shmchan.c)
+set(SHMQUEUE_HEADERS ${SHMQUEUE_SRC_DIR}/include/shmqueue.h ${SHMQUEUE_SRC_DIR}/include/shmchan.h ${SHMQUEUE_SRC_DIR}/src/atomic_ops.h)
 
 if(SHMQUEUE_BUILD_SHARED)
     add_library(shmqueue SHARED ${SHMQUEUE_SOURCES} ${SHMQUEUE_HEADERS})
