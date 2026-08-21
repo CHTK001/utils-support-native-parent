@@ -1,9 +1,11 @@
-//! Rust HTTP 桥接库
+//! Rust HTTP 桥接库（单环 Zero-copy）
 //!
-//! Java 通过 Panama FFM 以动态库方式加载本库（cdylib），
-//! Java 是 HTTP 入口（{@code ShmHttpServer}），Rust hyper 负责真正的 HTTP 监听与响应。
-//! 两者通过共享内存环形队列（req/resp 两条队列）通信。
+//! Java 通过 Panama FFM 以动态库方式加载本库（cdylib）。
+//! 架构：Rust hyper 监听 HTTP，请求信封写入 req 队列，
+//!       Java 轮询读请求、执行业务后写回 resp 队列，
+//!       Rust 读取响应回包。
 
+mod channel;
 mod queue;
 mod server;
 
@@ -12,12 +14,13 @@ use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use channel::Channel;
 use server::{Bridge, ThreadHandles};
 
 #[cfg(windows)]
 mod winsock;
 
-/// 轮询/读取单次最大阻塞时间（纳秒），用于让线程能感知停止信号
+/// 单次轮询最大阻塞时间（纳秒），用于让线程感知停止信号
 pub const MAX_POLL_WAIT_NS: u64 = 200_000_000;
 
 /// 请求信封头部长度：req_id(8) + method_len(2) + path_len(2) + body_len(4)
@@ -40,7 +43,6 @@ pub fn next_req_id() -> u64 {
     REQ_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-/// 规范化共享内存对象名（Windows 文件映射名不允许斜杠）
 #[cfg(windows)]
 fn sanitize_name(name: &str) -> String {
     name.replace(['/', '\\'], "_")
@@ -63,7 +65,7 @@ pub unsafe extern "C" fn rhb_start(
     slot_size: u32,
 ) -> i32 {
     if STARTED.swap(true, Ordering::AcqRel) {
-        return -15; // already started
+        return -15;
     }
     if shm_name.is_null() || capacity < 2 || slot_size < 16 {
         STARTED.store(false, Ordering::Release);
@@ -76,17 +78,15 @@ pub unsafe extern "C" fn rhb_start(
             return -1;
         }
     };
-    let req_name = format!("{name}_req");
-    let resp_name = format!("{name}_resp");
 
-    let req_queue = match queue::Queue::create(&req_name, capacity, slot_size) {
+    let req_ch = match Channel::create(&format!("{name}_req"), capacity, slot_size) {
         Ok(q) => q,
         Err(rc) => {
             STARTED.store(false, Ordering::Release);
             return rc;
         }
     };
-    let resp_queue = match queue::Queue::create(&resp_name, capacity, slot_size) {
+    let resp_ch = match Channel::create(&format!("{name}_resp"), capacity, slot_size) {
         Ok(q) => q,
         Err(rc) => {
             STARTED.store(false, Ordering::Release);
@@ -102,8 +102,8 @@ pub unsafe extern "C" fn rhb_start(
 
     let running = Arc::new(AtomicBool::new(true));
     let bridge = Arc::new(Bridge {
-        req_queue,
-        resp_queue,
+        req_channel: req_ch,
+        resp_channel: resp_ch,
         slot_size,
         running: running.clone(),
         pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -113,7 +113,7 @@ pub unsafe extern "C" fn rhb_start(
     let hyper_thread = std::thread::Builder::new()
         .name("rhb-hyper".into())
         .spawn(move || {
-            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
                     eprintln!("[rhb] tokio build failed: {e}");
@@ -144,7 +144,6 @@ pub extern "C" fn rhb_stop() -> i32 {
     let bridge = BRIDGE.lock().unwrap().take();
     if let Some(b) = bridge {
         b.running.store(false, Ordering::Release);
-        // 清空 pending，让正在等待响应的请求立刻失败退出，避免 join 阻塞
         b.pending.lock().unwrap().clear();
         let threads = THREADS.lock().unwrap().take();
         if let Some(t) = threads {

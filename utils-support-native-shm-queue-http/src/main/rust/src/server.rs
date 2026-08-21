@@ -1,6 +1,6 @@
 //! hyper HTTP 服务器 + 请求/响应队列桥接。
 
-use crate::queue::{self, Queue};
+use crate::channel::Channel;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -24,10 +24,10 @@ pub struct RespData {
 
 /// 桥接全局状态
 pub struct Bridge {
-    /// 请求队列（Rust hyper 写，Java 轮询读）
-    pub req_queue: Queue,
-    /// 响应队列（Java 写，Rust 读）
-    pub resp_queue: Queue,
+    /// 请求通道
+    pub req_channel: Channel,
+    /// 响应通道
+    pub resp_channel: Channel,
     /// 槽大小
     pub slot_size: u32,
     /// 运行标志
@@ -55,13 +55,13 @@ pub fn build_req_envelope(req_id: u64, method: &str, path: &str, body: &[u8]) ->
     v
 }
 
-/// 从响应队列读取并回填 pending
+/// 从响应通道读取并回填 pending
 pub fn resp_reader_loop(bridge: Arc<Bridge>) {
     let mut buf = vec![0u8; bridge.slot_size as usize];
     while bridge.running.load(Ordering::Relaxed) {
-        let n = match bridge.resp_queue.recv_timeout(&mut buf, crate::MAX_POLL_WAIT_NS) {
+        let n = match bridge.resp_channel.recv_timeout(&mut buf, crate::MAX_POLL_WAIT_NS) {
             Ok(n) => n,
-            Err(rc) if rc == queue::TIMEOUT => continue,
+            Err(rc) if rc == -12 => continue,
             Err(_) => {
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 continue;
@@ -93,16 +93,16 @@ pub fn resp_reader_loop(bridge: Arc<Bridge>) {
     }
 }
 
-/// Java 轮询请求队列，返回信封字节数（0=超时无数据，负数=错误）
+/// Java 轮询请求通道，返回信封字节数（0=超时无数据，负数=错误）
 pub fn poll_request(bridge: &Bridge, out: &mut [u8]) -> i32 {
-    match bridge.req_queue.recv_timeout(out, crate::MAX_POLL_WAIT_NS) {
+    match bridge.req_channel.recv_timeout(out, crate::MAX_POLL_WAIT_NS) {
         Ok(n) => n as i32,
-        Err(rc) if rc == queue::TIMEOUT => 0,
+        Err(rc) if rc == -12 => 0,
         Err(rc) => rc,
     }
 }
 
-/// Java 写响应队列
+/// Java 写响应通道
 pub fn send_response(
     bridge: &Bridge,
     req_id: u64,
@@ -117,7 +117,7 @@ pub fn send_response(
     v.extend_from_slice(&(body.len() as u32).to_le_bytes());
     v.extend_from_slice(ct);
     v.extend_from_slice(body);
-    match bridge.resp_queue.send(0, &v) {
+    match bridge.resp_channel.send(&v) {
         Ok(()) => 0,
         Err(rc) => rc,
     }
@@ -196,7 +196,7 @@ async fn handle_req(
         let mut guard = bridge.pending.lock().unwrap();
         guard.insert(req_id, tx);
     }
-    if let Err(rc) = bridge.req_queue.send(0, &envelope) {
+    if let Err(rc) = bridge.req_channel.send(&envelope) {
         bridge.pending.lock().unwrap().remove(&req_id);
         eprintln!("[rhb] req queue send failed: {rc}");
         return Ok(json_resp(503, "server busy"));

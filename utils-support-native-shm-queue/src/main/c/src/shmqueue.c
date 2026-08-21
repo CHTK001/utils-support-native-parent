@@ -647,6 +647,21 @@ int shmq_mode(shm_queue_ctx *ctx, int *out) {
     return SHMQ_OK;
 }
 
+void *shmq_slot_ptr(shm_queue_ctx *ctx, uint32_t slot) {
+    if (!ctx || slot >= ctx->capacity) return NULL;
+    return (void *)slot_at(ctx, slot);
+}
+
+uint32_t shmq_slot_state(shm_queue_ctx *ctx, uint32_t slot) {
+    if (!ctx || slot >= ctx->capacity) return SHMQ_STATE_EMPTY;
+    return slot_state_load(ctx, slot);
+}
+
+void shmq_set_slot_state(shm_queue_ctx *ctx, uint32_t slot, uint32_t state) {
+    if (!ctx || slot >= ctx->capacity) return;
+    slot_state_store(ctx, slot, state);
+}
+
 void shmq_destroy(shm_queue_ctx *ctx, int unlink) {
     if (!ctx) return;
     if (unlink && ctx->is_creator) {

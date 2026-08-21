@@ -7,9 +7,6 @@ import com.chua.common.support.network.server.ServerSetting;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 基于共享内存 + Rust hyper 的 HTTP 服务器。
@@ -45,9 +42,6 @@ public class ShmHttpServer extends AbstractServer {
     /** 轮询线程 */
     private Thread pollThread;
 
-    /** 工作线程池（虚拟线程）：轮询线程只负责取信封，过滤器链在此并行执行 */
-    private ExecutorService workerPool;
-
     /** 队列容量 */
     private final int capacity;
 
@@ -81,7 +75,6 @@ public class ShmHttpServer extends AbstractServer {
     protected void doStart() {
         String shmName = "rhb_" + setting.getPort();
         bridge = RustHttpBridge.start(setting.getPort(), shmName, capacity, slotSize);
-        workerPool = Executors.newVirtualThreadPerTaskExecutor();
         pollThread = new Thread(this::pollLoop, "shm-http-poll");
         pollThread.setDaemon(true);
         pollThread.start();
@@ -94,24 +87,9 @@ public class ShmHttpServer extends AbstractServer {
     protected void doStop() {
         running = false;
         if (pollThread != null) {
-            try {
-                pollThread.join(3000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            try { pollThread.join(3000); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             pollThread = null;
-        }
-        if (workerPool != null) {
-            workerPool.shutdown();
-            try {
-                if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
-                    workerPool.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                workerPool.shutdownNow();
-            }
-            workerPool = null;
         }
         if (bridge != null) {
             bridge.stop();
@@ -134,44 +112,32 @@ public class ShmHttpServer extends AbstractServer {
     /**
      * 轮询请求队列并分发。
      *
-     * <p>轮询线程（req 队列唯一消费者，保持 SPSC）只做：取信封 → 解析 → 提交虚拟线程。
-     * 过滤器链/业务处理在 workerPool 中并行执行，避免单线程串行化成为吞吐瓶颈。</p>
+     * <p>轮询线程（req 队列唯一消费者，保持 SPSC）只做：取信封 → 解析 → 异步提交。
+     * 过滤器链在 AbstractServer 内部虚拟线程上并行执行，无需自行管理线程池。</p>
      */
     private void pollLoop() {
-        byte[] buf = new byte[slotSize];
+        var buf = new byte[slotSize];
         while (running) {
             int n;
             try {
                 n = bridge.pollRequest(buf);
             } catch (Exception e) {
                 log.warn("轮询请求失败: {}", e.getMessage());
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+                try { Thread.sleep(100); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
                 continue;
             }
             if (n <= 0) {
                 if (n < 0) {
-                    try {
-                        Thread.sleep(POLL_IDLE_SLEEP_MS);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
+                    try { Thread.sleep(POLL_IDLE_SLEEP_MS); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
                 }
                 continue;
             }
-            if (workerPool == null || workerPool.isShutdown()) {
-                return;
-            }
-            RequestData data = parseEnvelope(buf, n);
-            if (data == null) {
-                continue;
-            }
-            workerPool.submit(() -> dispatch(data));
+            var data = parseEnvelope(buf, n);
+            if (data == null) continue;
+            // handleRequestWithStage → AbstractServer workerPool 并行调度
+            dispatch(data);
         }
     }
 
