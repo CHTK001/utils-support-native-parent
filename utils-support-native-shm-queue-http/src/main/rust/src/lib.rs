@@ -107,6 +107,7 @@ pub unsafe extern "C" fn rhb_start(
         slot_size,
         running: running.clone(),
         pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        last_polled_req_slot: std::sync::atomic::AtomicU32::new(0),
     });
 
     let hyper_bridge = bridge.clone();
