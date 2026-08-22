@@ -1,9 +1,5 @@
 package com.chua.nativevideocodec.support;
 
-import com.chua.common.support.utils.NativeLoader;
-
-import java.nio.file.Path;
-
 /**
  * 基于 Rust cdylib 的原生 H.264/H.265/H.266 编码器/解码器门面。
  *
@@ -16,11 +12,7 @@ import java.nio.file.Path;
 public final class NativeVideoCodec {
 
     static {
-        // 使用 NativeLoader 统一加载机制，复用 common-starter 的加载工具
-        NativeLoader.of("native-video-codec")
-                .toTarget(Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "video-codec"))
-                .glob("*chua_native_video_codec*")
-                .load();
+        NativeVideoCodecJniLoader.load();
     }
 
     private NativeVideoCodec() {
