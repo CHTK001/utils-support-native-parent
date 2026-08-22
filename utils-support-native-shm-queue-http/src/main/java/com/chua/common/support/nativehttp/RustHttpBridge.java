@@ -1,6 +1,7 @@
 package com.chua.common.support.nativehttp;
 
 import com.chua.common.support.utils.NativeLoader;
+import com.chua.common.support.utils.NativeUtils;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -45,18 +46,13 @@ public final class RustHttpBridge implements AutoCloseable {
     private static MethodHandle rhbSendResponse;
 
     static {
-        // 使用 NativeLoader 统一加载机制：
-        // 1. 从 classpath:/native/{platformDir}/ 抽取到目标目录
-        // 2. MD5 校验避免重复拷贝
-        // 3. 按文件名排序后 System.load
         NativeLoader.of("rust-http-bridge")
-                .toTarget(Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "rust-http-bridge"))
+                .toTarget(NativeUtils.tempRoot().resolve("rust-http-bridge"))
                 .glob("*rust_http_bridge*")
                 .load();
 
-        // 获取已加载库的路径并绑定方法句柄
         String libName = System.mapLibraryName("rust_http_bridge");
-        Path libPath = Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "rust-http-bridge", libName);
+        Path libPath = NativeUtils.tempRoot().resolve("rust-http-bridge").resolve(libName);
 
         SymbolLookup lookup = SymbolLookup.libraryLookup(libPath, Arena.ofAuto());
 

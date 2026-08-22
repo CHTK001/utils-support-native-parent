@@ -1,6 +1,7 @@
 package com.chua.common.support.shmqueue;
 
 import com.chua.common.support.utils.NativeLoader;
+import com.chua.common.support.utils.NativeUtils;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -70,7 +71,7 @@ public class NativeShmQueueProvider implements ShmQueueProvider {
     static {
         try {
             String libName = System.mapLibraryName("shmqueue");
-            Path nativeDir = Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "shmqueue");
+            Path nativeDir = NativeUtils.tempRoot().resolve("shmqueue");
             NativeLoader.of("shmqueue")
                     .toTarget(nativeDir)
                     .glob("*shmqueue*")
