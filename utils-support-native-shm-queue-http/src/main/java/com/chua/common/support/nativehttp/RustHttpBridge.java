@@ -10,13 +10,12 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * rust_http_bridge.dll 的 Panama FFM 绑定。
+ * Rust HTTP 桥接的 Panama FFM 绑定。
  *
- * <p>负责加载 {@code rust_http_bridge.dll/.so/.dylib}（Rust hyper HTTP 服务器），
+ * <p>负责加载 {@code rust_http_bridge.dll/.so}（Rust hyper HTTP 服务器），
  * 并封装 {@code rhb_start / rhb_stop / rhb_poll_request / rhb_send_response}
  * 四个 C ABI 函数。请求信封格式：</p>
  *
@@ -33,12 +32,6 @@ public final class RustHttpBridge implements AutoCloseable {
     /** 原生链接器 */
     private static final Linker LINKER = Linker.nativeLinker();
 
-    /** 是否已加载 */
-    private static volatile boolean loaded = false;
-
-    /** 加载失败原因 */
-    private static volatile String loadError;
-
     /** rhb_start 句柄 */
     private static MethodHandle rhbStart;
 
@@ -52,42 +45,38 @@ public final class RustHttpBridge implements AutoCloseable {
     private static MethodHandle rhbSendResponse;
 
     static {
-        try {
-            String libName = System.mapLibraryName("rust_http_bridge");
-            Path nativeDir = Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "rust-http-bridge");
-            NativeLoader.of("rust-http-bridge")
-                    .toTarget(nativeDir)
-                    .glob("*rust_http_bridge*")
-                    .load();
-            Path libPath = nativeDir.resolve(libName);
-            if (!Files.exists(libPath)) {
-                throw new IllegalStateException("未找到原生库: " + libPath);
-            }
-            SymbolLookup lookup = SymbolLookup.libraryLookup(libPath, Arena.ofAuto());
+        // 使用 NativeLoader 统一加载机制：
+        // 1. 从 classpath:/native/{platformDir}/ 抽取到目标目录
+        // 2. MD5 校验避免重复拷贝
+        // 3. 按文件名排序后 System.load
+        NativeLoader.of("rust-http-bridge")
+                .toTarget(Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "rust-http-bridge"))
+                .glob("*rust_http_bridge*")
+                .load();
 
-            rhbStart = LINKER.downcallHandle(lookup.find("rhb_start").orElseThrow(),
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                            ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
-                            ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+        // 获取已加载库的路径并绑定方法句柄
+        String libName = System.mapLibraryName("rust_http_bridge");
+        Path libPath = Path.of(System.getProperty("java.io.tmpdir"), "chua-native", "rust-http-bridge", libName);
 
-            rhbStop = LINKER.downcallHandle(lookup.find("rhb_stop").orElseThrow(),
-                    FunctionDescriptor.ofVoid());
+        SymbolLookup lookup = SymbolLookup.libraryLookup(libPath, Arena.ofAuto());
 
-            rhbPollRequest = LINKER.downcallHandle(lookup.find("rhb_poll_request").orElseThrow(),
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                            ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+        rhbStart = LINKER.downcallHandle(lookup.find("rhb_start").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_INT, ValueLayout.ADDRESS,
+                        ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
 
-            rhbSendResponse = LINKER.downcallHandle(lookup.find("rhb_send_response").orElseThrow(),
-                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
-                            ValueLayout.JAVA_LONG, ValueLayout.JAVA_SHORT,
-                            ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
-                            ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+        rhbStop = LINKER.downcallHandle(lookup.find("rhb_stop").orElseThrow(),
+                FunctionDescriptor.ofVoid());
 
-            loaded = true;
-        } catch (Throwable e) {
-            loadError = e.getMessage();
-            System.err.println("[RustHttpBridge] rust_http_bridge 加载失败: " + e.getMessage());
-        }
+        rhbPollRequest = LINKER.downcallHandle(lookup.find("rhb_poll_request").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+
+        rhbSendResponse = LINKER.downcallHandle(lookup.find("rhb_send_response").orElseThrow(),
+                FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                        ValueLayout.JAVA_LONG, ValueLayout.JAVA_SHORT,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
+                        ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
     }
 
     /** 已启动标志 */
@@ -106,15 +95,6 @@ public final class RustHttpBridge implements AutoCloseable {
     }
 
     /**
-     * 校验原生库已加载。
-     */
-    private static void ensureLoaded() {
-        if (!loaded) {
-            throw new IllegalStateException("rust_http_bridge 未加载: " + (loadError == null ? "未知错误" : loadError));
-        }
-    }
-
-    /**
      * 启动 HTTP 桥接（Rust hyper 开始监听）。
      *
      * @param port      监听端口
@@ -124,7 +104,6 @@ public final class RustHttpBridge implements AutoCloseable {
      * @return 桥接实例
      */
     public static RustHttpBridge start(int port, String shmName, int capacity, int slotSize) {
-        ensureLoaded();
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment nameSeg = arena.allocateFrom(shmName);
             int rc = (int) rhbStart.invokeExact(port, nameSeg, capacity, slotSize);
@@ -149,7 +128,6 @@ public final class RustHttpBridge implements AutoCloseable {
      * @return 信封字节数（&gt;0 有数据；0 无数据；&lt;0 错误）
      */
     public int pollRequest(byte[] out) {
-        ensureLoaded();
         if (!started) {
             throw new IllegalStateException("桥接未启动");
         }
@@ -181,7 +159,6 @@ public final class RustHttpBridge implements AutoCloseable {
      * @param body        响应体（可为 null）
      */
     public void sendResponse(long reqId, int status, String contentType, byte[] body) {
-        ensureLoaded();
         if (!started) {
             throw new IllegalStateException("桥接未启动");
         }
