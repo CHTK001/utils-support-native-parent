@@ -73,7 +73,6 @@ public class ShmHttpServer extends AbstractServer {
     }
 
     @Override
-    /** Do开始 */
     protected void doStart() {
         String shmName = "rhb_" + setting.getPort();
         bridge = RustHttpBridge.start(setting.getPort(), shmName, capacity, slotSize);
@@ -85,7 +84,6 @@ public class ShmHttpServer extends AbstractServer {
     }
 
     @Override
-    /** Do停止 */
     protected void doStop() {
         running = false;
         if (pollThread != null) {

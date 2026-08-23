@@ -15,10 +15,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.*;
 
-/**
- * HTTP 服务器对比基准：ShmHttpServer vs JdkHttpServer vs NioHttpServer。
- * 同一 /ping 处理器、同一并发档位（8/16/32 × 2000 请求），输出 RPS 与延迟分位。
- */
 public class HttpServerCompare {
 
     public static void main(String[] args) throws Exception {
