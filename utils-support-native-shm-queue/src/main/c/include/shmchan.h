@@ -22,6 +22,7 @@ extern "C" {
 #define SHMCHAN_STATE_EMPTY 0u
 #define SHMCHAN_STATE_REQ   1u
 #define SHMCHAN_STATE_RESP  2u
+#define SHMCHAN_STATE_POLLED 4u
 
 typedef struct shm_chan_ctx shm_chan_ctx;
 
