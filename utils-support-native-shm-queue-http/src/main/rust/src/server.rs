@@ -172,6 +172,10 @@ async fn handle_req(
     req: hyper::Request<hyper::body::Incoming>,
     bridge: Arc<Bridge>,
 ) -> Result<hyper::Response<http_body_util::Full<bytes::Bytes>>, std::convert::Infallible> {
+    // 诊断旁路：RHB_BYPASS=1 时跳过 SHM，直接回包（用于隔离 hyper/tokio 层开销）
+    if std::env::var("RHB_BYPASS").map(|v| v == "1").unwrap_or(false) {
+        return Ok(json_resp(200, "bypass"));
+    }
     let method = req.method().as_str().to_string();
     // 保留查询串，供 Java 侧解析 query 参数（path 字段按 path?query 传递）
     let path = match req.uri().query() {
