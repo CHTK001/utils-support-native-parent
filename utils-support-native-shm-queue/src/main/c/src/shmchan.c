@@ -154,7 +154,7 @@ int shmc_poll_req(shm_chan_ctx *c,uint32_t *slot,void **ptr,uint32_t *len,uint64
  struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); start=(uint64_t)ts.tv_sec*1000000000ull+ts.tv_nsec;
 #endif
  while(1){
-  for(uint32_t i=0;i<c->capacity;++i){ if(shmq_atomic_load_acquire(&c->state[i])==SHMCHAN_STATE_REQ){ uint8_t *p=slot_ptr(c,i); uint32_t l; memcpy(&l,p,4); *slot=i; *ptr=p+4; *len=l; return SHMQ_OK; } }
+  for(uint32_t i=0;i<c->capacity;++i){ if(shmq_atomic_load_acquire(&c->state[i])==SHMCHAN_STATE_REQ){ if(!shmq_atomic_cas_acqrel(&c->state[i],SHMCHAN_STATE_REQ,SHMCHAN_STATE_POLLED)) continue; uint8_t *p=slot_ptr(c,i); uint32_t l; memcpy(&l,p,4); *slot=i; *ptr=p+4; *len=l; return SHMQ_OK; } }
   uint64_t now=0;
 #ifdef _WIN32
   LARGE_INTEGER n; QueryPerformanceCounter(&n); now=n.QuadPart;
