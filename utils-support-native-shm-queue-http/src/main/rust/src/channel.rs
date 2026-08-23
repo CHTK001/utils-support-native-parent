@@ -32,7 +32,7 @@ extern "C" {
         len: *mut u32,
         timeout_ns: u64,
     ) -> i32;
-    pub fn shmc_commit_resp(ctx: *mut ShmCtx, slot: u32) -> i32;
+    pub fn shmc_commit_resp(ctx: *mut ShmCtx, slot: u32, len: u32) -> i32;
     pub fn shmc_poll_resp(
         ctx: *mut ShmCtx,
         slot: *mut u32,
@@ -119,37 +119,24 @@ impl Channel {
         Ok((slot, ptr, len))
     }
 
-    /// Java: 在已有 slot 位置写入响应数据（原地覆写，zero-copy）。
-    /// 数据布局：前 4 字节 = msg_type(u32=STATE_RESP)，第 4-8 字节 = body_len(u32)，第 8 字节后为 body。
+/// Java: 在已有 slot 位置写入响应数据（原地覆写，zero-copy）。
+    /// 数据布局：前 4 字节由 C 端 commit_resp 写入长度头，数据从 ptr+4 开始。
     pub fn write_resp_direct(&self, slot: u32, data: &[u8]) -> Result<(), i32> {
         let cap_result = unsafe { shmc_slot_size(self.ctx as *mut ShmCtx, &mut 0) };
         let cap = if cap_result >= 0 { cap_result as usize } else { return Err(cap_result) };
-        if data.len() + 8 > cap {
+        if data.len() + 4 > cap {
             return Err(-9);
         }
         let ptr = unsafe { shmc_slot_ptr(self.ctx as *mut ShmCtx, slot) };
         if ptr.is_null() {
             return Err(-10);
         }
-        // 写入：[4字节状态 RESP] [4字节 body_len] [body...]
+        // 写入 body 到 slot+4，槽前 4 字节由 commit_resp 写长度头
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                &STATE_REQ as *const u32 as *const u8,
-                ptr,
-                4,
-            );
-            // 注意：下面写入 len，实际应写入 body_len
-            // 这里写入 data.len() 作为 body_len
-            let ln = data.len() as u32;
-            std::ptr::copy_nonoverlapping(
-                &ln as *const u32 as *const u8,
-                ptr.add(4),
-                4,
-            );
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(8), data.len());
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(4), data.len());
         }
         // 标记为 RESP 状态
-        let _ = unsafe { shmc_commit_resp(self.ctx as *mut ShmCtx, slot) };
+        let _ = unsafe { shmc_commit_resp(self.ctx as *mut ShmCtx, slot, data.len() as u32) };
         Ok(())
     }
 

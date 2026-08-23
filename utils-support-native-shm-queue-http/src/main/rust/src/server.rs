@@ -196,8 +196,9 @@ async fn handle_req(
         }
     };
     // 复制 enrolle 数据到槽ptr
+    // 槽前 4 字节由 C 端 commit_req 写入长度头，数据从 ptr+4 开始
     unsafe {
-        std::ptr::copy_nonoverlapping(envelope.as_ptr(), ptr, envelope.len());
+        std::ptr::copy_nonoverlapping(envelope.as_ptr(), ptr.add(4), envelope.len());
     }
     // 标记为 REQ
     if let Err(rc) = bridge.req_channel.commit_req(slot, envelope.len() as u32) {

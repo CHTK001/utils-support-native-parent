@@ -122,19 +122,15 @@ public class ShmHttpServer extends AbstractServer {
             try {
                 n = bridge.pollRequest(buf);
                 if (n > 0) {
-                    System.err.println("[shm] poll n=" + n + " buf[0..15]=" + bytesToHex(buf, 16));
                     var data = parseEnvelope(buf, n);
                     if (data != null) {
-                        System.err.println("[shm] req: method=" + data.method + " path=" + data.path);
                         dispatch(data);
-                    } else {
-                        System.err.println("[shm] parseEnvelope returned null");
                     }
                 } else {
                     for (int i = 0; i < 10; i++) Thread.onSpinWait();
                 }
             } catch (Exception e) {
-                System.err.println("[shm] poll error: " + e.getMessage());
+                log.debug("轮询请求队列异常: {}", e.getMessage());
                 try { Thread.sleep(10); } catch (InterruptedException ie) { return; }
             }
         }
