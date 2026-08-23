@@ -4,6 +4,7 @@ import com.chua.common.support.nativehttp.RustHttpBridge;
 import com.chua.common.support.network.ProtocolType;
 import com.chua.common.support.network.server.AbstractServer;
 import com.chua.common.support.network.server.ServerSetting;
+import com.chua.common.support.spi.annotations.Spi;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
@@ -25,6 +26,7 @@ import java.nio.charset.StandardCharsets;
  * @since 4.0.0.42
  */
 @Slf4j
+@Spi({"shm-http"})
 public class ShmHttpServer extends AbstractServer {
 
     /** 默认队列容量 */
@@ -117,23 +119,28 @@ public class ShmHttpServer extends AbstractServer {
      */
     private void pollLoop() {
         var buf = new byte[slotSize];
+        int spin = 0;
         while (running) {
             int n;
             try {
                 n = bridge.pollRequest(buf);
             } catch (Exception e) {
                 log.warn("轮询请求失败: {}", e.getMessage());
-                try { Thread.sleep(100); }
-                catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+                Thread.onSpinWait();
                 continue;
             }
             if (n <= 0) {
-                if (n < 0) {
-                    try { Thread.sleep(POLL_IDLE_SLEEP_MS); }
-                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+                // 通知模式：Windows 上 WaitForSingleObject 阻塞等待，Linux 上自旋+退避
+                if (RustHttpBridge.waitForReq(1) == 0) {
+                    spin = 0;
+                } else if (++spin < 100) {
+                    Thread.onSpinWait();
+                } else {
+                    spin = 0;
                 }
                 continue;
             }
+            spin = 0;
             var data = parseEnvelope(buf, n);
             if (data == null) continue;
             // handleRequestWithStage → AbstractServer workerPool 并行调度

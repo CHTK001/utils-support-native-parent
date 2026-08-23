@@ -64,42 +64,50 @@ pub unsafe extern "C" fn rhb_start(
     capacity: u32,
     slot_size: u32,
 ) -> i32 {
+    eprintln!("[rhb] rhb_start: port={}, shm_name={:?}, capacity={}, slot_size={}", port, shm_name, capacity, slot_size);
     if STARTED.swap(true, Ordering::AcqRel) {
+        eprintln!("[rhb] already started");
         return -15;
     }
     if shm_name.is_null() || capacity < 2 || slot_size < 16 {
+        eprintln!("[rhb] invalid args");
         STARTED.store(false, Ordering::Release);
         return -1;
     }
     let name = match CStr::from_ptr(shm_name).to_str() {
         Ok(s) => sanitize_name(s),
         Err(_) => {
+            eprintln!("[rhb] invalid shm_name");
             STARTED.store(false, Ordering::Release);
             return -1;
         }
     };
-
+    eprintln!("[rhb] name='{}', creating req_ch", name);
     let req_ch = match Channel::create(&format!("{name}_req"), capacity, slot_size) {
         Ok(q) => q,
         Err(rc) => {
+            eprintln!("[rhb] req_ch create failed: {}", rc);
             STARTED.store(false, Ordering::Release);
             return rc;
         }
     };
+    eprintln!("[rhb] req_ch created, creating resp_ch");
     let resp_ch = match Channel::create(&format!("{name}_resp"), capacity, slot_size) {
         Ok(q) => q,
         Err(rc) => {
+            eprintln!("[rhb] resp_ch create failed: {}", rc);
             STARTED.store(false, Ordering::Release);
             return rc;
         }
     };
-
+    eprintln!("[rhb] resp_ch created, init winsock");
     #[cfg(windows)]
     if let Err(rc) = winsock::init() {
+        eprintln!("[rhb] winsock init failed: {}", rc);
         STARTED.store(false, Ordering::Release);
         return rc;
     }
-
+    eprintln!("[rhb] winsock ok, building bridge");
     let running = Arc::new(AtomicBool::new(true));
     let bridge = Arc::new(Bridge {
         req_channel: req_ch,
