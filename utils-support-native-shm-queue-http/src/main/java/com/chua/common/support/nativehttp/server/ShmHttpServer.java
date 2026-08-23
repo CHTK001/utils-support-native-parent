@@ -136,12 +136,6 @@ public class ShmHttpServer extends AbstractServer {
         }
     }
 
-    private static String bytesToHex(byte[] buf, int len) {
-        var sb = new StringBuilder();
-        for (int i = 0; i < len && i < buf.length; i++) sb.append(String.format("%02x ", buf[i] & 0xFF));
-        return sb.toString();
-    }
-
     /**
      * 解析请求信封
      *
@@ -151,7 +145,6 @@ public class ShmHttpServer extends AbstractServer {
      */
     private RequestData parseEnvelope(byte[] buf, int n) {
         if (n < 16) {
-            System.err.println("[shm] parseEnvelope: too short: " + n);
             return null;
         }
         long reqId = readLeU64(buf, 0);
@@ -159,9 +152,7 @@ public class ShmHttpServer extends AbstractServer {
         int pathLen = readLeU16(buf, 10);
         int bodyLen = readLeU32(buf, 12);
         int total = 16 + methodLen + pathLen + bodyLen;
-        System.err.println("[shm] parseEnvelope: reqId=" + reqId + " methodLen=" + methodLen + " pathLen=" + pathLen + " bodyLen=" + bodyLen + " total=" + total + " n=" + n);
         if (total > n) {
-            System.err.println("[shm] parseEnvelope: length mismatch: " + total + " > " + n);
             return null;
         }
         String method = new String(buf, 16, methodLen, StandardCharsets.UTF_8);
@@ -188,18 +179,18 @@ public class ShmHttpServer extends AbstractServer {
                 try {
                     bridge.sendResponse(data.reqId, response.getStatus(), ct, respBody);
                 } catch (Throwable t) {
-                    System.err.println("[shm] sendResponse 失败 req_id=" + data.reqId + ": " + t);
+                    log.warn("SHM 响应回写失败 req_id={}: {}", data.reqId, t.getMessage());
                 }
             });
         } catch (Throwable e) {
-            System.err.println("[shm] 请求处理异常 req_id=" + data.reqId + ":" + e);
+            log.warn("请求处理异常 req_id={}: {}", data.reqId, e.getMessage());
             byte[] err = e.getMessage() == null
                     ? "Internal Server Error".getBytes(StandardCharsets.UTF_8)
                     : e.getMessage().getBytes(StandardCharsets.UTF_8);
             try {
                 bridge.sendResponse(data.reqId, 500, "text/plain; charset=utf-8", err);
             } catch (Throwable t) {
-                System.err.println("[shm] sendResponse(500) 失败 req_id=" + data.reqId + ": " + t);
+                log.warn("SHM sendResponse(500) 失败 req_id={}: {}", data.reqId, t.getMessage());
             }
         }
     }
