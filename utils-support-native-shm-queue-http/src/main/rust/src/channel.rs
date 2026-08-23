@@ -17,7 +17,6 @@ extern "C" {
         shm_size: usize,
         capacity: u32,
         slot_size: u32,
-        mode: i32,
         ctx_out: *mut *mut ShmCtx,
     ) -> i32;
     pub fn shmc_acquire_empty(
@@ -25,7 +24,7 @@ extern "C" {
         slot: *mut u32,
         ptr: *mut *mut u8,
     ) -> i32;
-    pub fn shmc_commit_req(ctx: *mut ShmCtx, slot: u32) -> i32;
+    pub fn shmc_commit_req(ctx: *mut ShmCtx, slot: u32, len: u32) -> i32;
     pub fn shmc_poll_req(
         ctx: *mut ShmCtx,
         slot: *mut u32,
@@ -62,12 +61,17 @@ unsafe impl Sync for Channel {}
 
 impl Channel {
     pub fn create(name: &str, capacity: u32, slot_size: u32) -> Result<Self, i32> {
+        eprintln!("[ch] create: name='{}', cap={}, ss={}", name, capacity, slot_size);
         let n = CString::new(name).map_err(|_| -1)?;
+        eprintln!("[ch] CString ok");
         let mut c: *mut ShmCtx = std::ptr::null_mut();
-        let rc = unsafe { shmc_create(n.as_ptr(), 0, capacity, slot_size, 2, &mut c) };
+        eprintln!("[ch] calling shmc_create({:?}, 0, {}, {}, 2, {:p})", n.as_ptr(), capacity, slot_size, std::ptr::addr_of_mut!(c));
+        let rc = unsafe { shmc_create(n.as_ptr(), 0, capacity, slot_size, &mut c) };
+        eprintln!("[ch] shmc_create rc={}, ctx={:p}", rc, c);
         if rc != 0 {
             return Err(rc);
         }
+        eprintln!("[ch] ctx created");
         Ok(Self { ctx: c as usize })
     }
 
@@ -86,8 +90,8 @@ impl Channel {
     }
 
     /// Rust: 标记槽为 REQ（由 shmc_acquire_empty 后自动完成，也可显式调用）。
-    pub fn commit_req(&self, slot: u32) -> Result<(), i32> {
-        let rc = unsafe { shmc_commit_req(self.ctx as *mut ShmCtx, slot) };
+    pub fn commit_req(&self, slot: u32, len: u32) -> Result<(), i32> {
+        let rc = unsafe { shmc_commit_req(self.ctx as *mut ShmCtx, slot, len) };
         if rc != 0 {
             return Err(rc);
         }
@@ -182,4 +186,4 @@ impl Drop for Channel {
             self.ctx = 0;
         }
     }
-}
+}// trigger rebuild 14:24:28

@@ -117,33 +117,33 @@ public class ShmHttpServer extends AbstractServer {
      */
     private void pollLoop() {
         var buf = new byte[slotSize];
-        int spin = 0;
         while (running) {
             int n;
             try {
                 n = bridge.pollRequest(buf);
-            } catch (Exception e) {
-                log.warn("轮询请求失败: {}", e.getMessage());
-                Thread.onSpinWait();
-                continue;
-            }
-            if (n <= 0) {
-                // 通知模式：Windows 上 WaitForSingleObject 阻塞等待，Linux 上自旋+退避
-                if (RustHttpBridge.waitForReq(1) == 0) {
-                    spin = 0;
-                } else if (++spin < 100) {
-                    Thread.onSpinWait();
+                if (n > 0) {
+                    System.err.println("[shm] poll n=" + n + " buf[0..15]=" + bytesToHex(buf, 16));
+                    var data = parseEnvelope(buf, n);
+                    if (data != null) {
+                        System.err.println("[shm] req: method=" + data.method + " path=" + data.path);
+                        dispatch(data);
+                    } else {
+                        System.err.println("[shm] parseEnvelope returned null");
+                    }
                 } else {
-                    spin = 0;
+                    for (int i = 0; i < 10; i++) Thread.onSpinWait();
                 }
-                continue;
+            } catch (Exception e) {
+                System.err.println("[shm] poll error: " + e.getMessage());
+                try { Thread.sleep(10); } catch (InterruptedException ie) { return; }
             }
-            spin = 0;
-            var data = parseEnvelope(buf, n);
-            if (data == null) continue;
-            // handleRequestWithStage → AbstractServer workerPool 并行调度
-            dispatch(data);
         }
+    }
+
+    private static String bytesToHex(byte[] buf, int len) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < len && i < buf.length; i++) sb.append(String.format("%02x ", buf[i] & 0xFF));
+        return sb.toString();
     }
 
     /**
@@ -155,15 +155,17 @@ public class ShmHttpServer extends AbstractServer {
      */
     private RequestData parseEnvelope(byte[] buf, int n) {
         if (n < 16) {
-            log.warn("请求信封过短: {}", n);
+            System.err.println("[shm] parseEnvelope: too short: " + n);
             return null;
         }
         long reqId = readLeU64(buf, 0);
         int methodLen = readLeU16(buf, 8);
         int pathLen = readLeU16(buf, 10);
         int bodyLen = readLeU32(buf, 12);
-        if (16 + methodLen + pathLen + bodyLen > n) {
-            log.warn("请求信封长度不一致: {} vs {}", 16 + methodLen + pathLen + bodyLen, n);
+        int total = 16 + methodLen + pathLen + bodyLen;
+        System.err.println("[shm] parseEnvelope: reqId=" + reqId + " methodLen=" + methodLen + " pathLen=" + pathLen + " bodyLen=" + bodyLen + " total=" + total + " n=" + n);
+        if (total > n) {
+            System.err.println("[shm] parseEnvelope: length mismatch: " + total + " > " + n);
             return null;
         }
         String method = new String(buf, 16, methodLen, StandardCharsets.UTF_8);
