@@ -73,15 +73,27 @@ static int create_notify(const char *name,int create,notify_handle_t *out){
 }
 static int notify_wake(notify_handle_t fd){
 #ifdef _WIN32
- return SetEvent(fd)?SHMQ_OK:SHMQ_ERR_WRITE_FD;
+  return SetEvent(fd)?SHMQ_OK:SHMQ_ERR_WRITE_FD;
 #else
  uint64_t one=1; return (write(fd,&one,sizeof(one))==(ssize_t)sizeof(one))?SHMQ_OK:SHMQ_ERR_WRITE_FD;
 #endif
 }
 static int notify_wait(notify_handle_t fd,uint64_t ns){
 #ifdef _WIN32
- DWORD ms=(DWORD)(ns/1000000ull); if(ms==0&&ns>0) ms=1;
- DWORD r=WaitForSingleObject(fd,ms); if(r==WAIT_OBJECT_0) return SHMQ_OK; if(r==WAIT_TIMEOUT) return SHMQ_ERR_TIMEOUT; return SHMQ_ERR_READ_FD;
+  /* Windows 定时器默认节拍 10~15.6ms，WaitForSingleObject 小超时会被拉长，
+     造成 SHM 轮询固定延迟。改为 0 超时探测 + QPC 自旋，保证亚毫秒级响应。 */
+  DWORD r=WaitForSingleObject(fd,0);
+  if(r==WAIT_OBJECT_0) return SHMQ_OK;
+  if(ns==0) return SHMQ_ERR_TIMEOUT;
+  LARGE_INTEGER f,s,n; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&s);
+  for(;;){
+    r=WaitForSingleObject(fd,0);
+    if(r==WAIT_OBJECT_0) return SHMQ_OK;
+    QueryPerformanceCounter(&n);
+    uint64_t el=(uint64_t)((uint64_t)(n.QuadPart-s.QuadPart)*1000000000ull/(uint64_t)f.QuadPart);
+    if(el>=ns) return SHMQ_ERR_TIMEOUT;
+    SwitchToThread();
+  }
 #else
  struct pollfd p={fd,POLLIN,0}; int ms=(int)(ns/1000000ull); if(ms==0&&ns>0) ms=1;
  int r; do{r=poll(&p,1,ms);}while(r<0&&errno==EINTR); if(r==0) return SHMQ_ERR_TIMEOUT; if(r<0) return SHMQ_ERR_READ_FD;
@@ -146,29 +158,29 @@ int shmc_commit_req(shm_chan_ctx *c,uint32_t slot,uint32_t len){
  (void)notify_wake(c->notify_fd); return SHMQ_OK;
 }
 int shmc_poll_req(shm_chan_ctx *c,uint32_t *slot,void **ptr,uint32_t *len,uint64_t to){
- if(!c||!slot||!ptr||!len) return SHMQ_ERR_INVALID_ARG;
- uint64_t start=0;
+  if(!c||!slot||!ptr||!len) return SHMQ_ERR_INVALID_ARG;
+  uint64_t start=0;
 #ifdef _WIN32
- LARGE_INTEGER f,s; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&s); start=s.QuadPart;
+  LARGE_INTEGER f,s; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&s); start=s.QuadPart;
 #else
- struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); start=(uint64_t)ts.tv_sec*1000000000ull+ts.tv_nsec;
+  struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); start=(uint64_t)ts.tv_sec*1000000000ull+ts.tv_nsec;
 #endif
- while(1){
+  while(1){
   for(uint32_t i=0;i<c->capacity;++i){ if(shmq_atomic_load_acquire(&c->state[i])==SHMCHAN_STATE_REQ){ if(!shmq_atomic_cas_acqrel(&c->state[i],SHMCHAN_STATE_REQ,SHMCHAN_STATE_POLLED)) continue; uint8_t *p=slot_ptr(c,i); uint32_t l; memcpy(&l,p,4); *slot=i; *ptr=p+4; *len=l; return SHMQ_OK; } }
-  uint64_t now=0;
 #ifdef _WIN32
-  LARGE_INTEGER n; QueryPerformanceCounter(&n); now=n.QuadPart;
-  uint64_t elapsed=(uint64_t)(((now-start)*1000000000ull)/(uint64_t)f.QuadPart);
+  /* 纯扫描自旋：不依赖 event/定时器，cpu_pause 短暂退避保证亚毫秒发现 */
+  { LARGE_INTEGER n; for(int k=0;k<200;++k){ cpu_pause(); } QueryPerformanceCounter(&n); uint64_t elapsed=(uint64_t)(((n.QuadPart-s.QuadPart)*1000000000ull)/(uint64_t)f.QuadPart); if(to!=0&&elapsed>=to) return SHMQ_ERR_TIMEOUT; }
 #else
+  uint64_t now=0;
   struct timespec n; clock_gettime(CLOCK_MONOTONIC,&n); now=(uint64_t)n.tv_sec*1000000000ull+n.tv_nsec;
   uint64_t elapsed=now-start;
-#endif
   if(to!=0 && elapsed>=to) return SHMQ_ERR_TIMEOUT;
   uint64_t remain= to==0? 2000000ull : (to>elapsed? to-elapsed:0);
   if(remain>2000000ull) remain=2000000ull;
   int rc=notify_wait(c->notify_fd,remain);
   if(rc==SHMQ_ERR_TIMEOUT && to!=0 && elapsed+remain>=to) return SHMQ_ERR_TIMEOUT;
- }
+#endif
+  }
 }
 int shmc_commit_resp(shm_chan_ctx *c,uint32_t slot,uint32_t len){
  if(!c||slot>=c->capacity) return SHMQ_ERR_INVALID_ARG;
