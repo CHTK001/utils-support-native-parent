@@ -33,6 +33,28 @@ public final class RustHttpBridge implements AutoCloseable {
     /** 原生链接器 */
     private static final Linker LINKER = Linker.nativeLinker();
 
+    /** kernel32 符号查找 */
+    private static final SymbolLookup KERNEL32;
+
+    /** WaitForSingleObject 句柄 */
+    private static final MethodHandle waitForSingleObject;
+
+    static {
+        SymbolLookup k32;
+        MethodHandle wfso;
+        try {
+            k32 = SymbolLookup.libraryLookup("kernel32.dll", Arena.ofAuto());
+            wfso = LINKER.downcallHandle(k32.find("WaitForSingleObject").orElseThrow(),
+                    FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                            ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+        } catch (Throwable e) {
+            k32 = null;
+            wfso = null;
+        }
+        KERNEL32 = k32;
+        waitForSingleObject = wfso;
+    }
+
     /** 是否已加载 */
     private static volatile boolean loaded = false;
 
@@ -50,6 +72,18 @@ public final class RustHttpBridge implements AutoCloseable {
 
     /** rhb_send_response 句柄 */
     private static MethodHandle rhbSendResponse;
+
+    /** rhb_get_req_notify_fd 句柄 */
+    private static MethodHandle rhbGetReqNotifyFd;
+
+    /** rhb_get_resp_notify_fd 句柄 */
+    private static MethodHandle rhbGetRespNotifyFd;
+
+    /** rhb_get_req_shm_ptr 句柄 */
+    private static MethodHandle rhbGetReqShmPtr;
+
+    /** rhb_get_resp_shm_ptr 句柄 */
+    private static MethodHandle rhbGetRespShmPtr;
 
     static {
         try {
@@ -82,6 +116,26 @@ public final class RustHttpBridge implements AutoCloseable {
                             ValueLayout.JAVA_LONG, ValueLayout.JAVA_SHORT,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
+
+            var reqNotifyFd = lookup.find("rhb_get_req_notify_fd");
+            rhbGetReqNotifyFd = reqNotifyFd.isPresent()
+                    ? LINKER.downcallHandle(reqNotifyFd.get(), FunctionDescriptor.of(ValueLayout.JAVA_INT))
+                    : null;
+
+            var respNotifyFd = lookup.find("rhb_get_resp_notify_fd");
+            rhbGetRespNotifyFd = respNotifyFd.isPresent()
+                    ? LINKER.downcallHandle(respNotifyFd.get(), FunctionDescriptor.of(ValueLayout.JAVA_INT))
+                    : null;
+
+            var reqShmPtr = lookup.find("rhb_get_req_shm_ptr");
+            rhbGetReqShmPtr = reqShmPtr.isPresent()
+                    ? LINKER.downcallHandle(reqShmPtr.get(), FunctionDescriptor.of(ValueLayout.ADDRESS))
+                    : null;
+
+            var respShmPtr = lookup.find("rhb_get_resp_shm_ptr");
+            rhbGetRespShmPtr = respShmPtr.isPresent()
+                    ? LINKER.downcallHandle(respShmPtr.get(), FunctionDescriptor.of(ValueLayout.ADDRESS))
+                    : null;
 
             loaded = true;
         } catch (Throwable e) {
@@ -125,17 +179,17 @@ public final class RustHttpBridge implements AutoCloseable {
      */
     public static RustHttpBridge start(int port, String shmName, int capacity, int slotSize) {
         ensureLoaded();
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment nameSeg = arena.allocateFrom(shmName);
-            int rc = (int) rhbStart.invokeExact(port, nameSeg, capacity, slotSize);
-            if (rc != 0) {
-                throw new IllegalStateException("rhb_start 失败, rc=" + rc);
-            }
+        // 分配原生内存，确保 rhb_start 内部任何线程都能安全访问（生命周期由 Arena 管理）
+        var arena = Arena.ofAuto();
+        MemorySegment nameSeg = arena.allocateFrom(shmName);
+        int rc;
+        try {
+            rc = (int) rhbStart.invokeExact(port, nameSeg, capacity, slotSize);
         } catch (Throwable e) {
-            if (e instanceof RuntimeException re) {
-                throw re;
-            }
             throw new IllegalStateException("rhb_start 异常: " + e.getMessage(), e);
+        }
+        if (rc != 0) {
+            throw new IllegalStateException("rhb_start 失败, rc=" + rc);
         }
         RustHttpBridge bridge = new RustHttpBridge();
         bridge.started = true;
@@ -238,6 +292,63 @@ public final class RustHttpBridge implements AutoCloseable {
                 pollSeg = null;
             }
         }
+    }
+
+    /** 获取请求队列通知 fd（Windows: Event Object Handle, Linux: eventfd）。启动后调用一次。 */
+    public static int getReqNotifyFd() {
+        ensureLoaded();
+        if (rhbGetReqNotifyFd == null) return -1;
+        try {
+            return (int) rhbGetReqNotifyFd.invokeExact();
+        } catch (Throwable e) {
+            throw new IllegalStateException("rhb_get_req_notify_fd 异常: " + e.getMessage(), e);
+        }
+    }
+
+    /** 获取响应队列通知 fd。 */
+    public static int getRespNotifyFd() {
+        ensureLoaded();
+        if (rhbGetRespNotifyFd == null) return -1;
+        try {
+            return (int) rhbGetRespNotifyFd.invokeExact();
+        } catch (Throwable e) {
+            throw new IllegalStateException("rhb_get_resp_notify_fd 异常: " + e.getMessage(), e);
+        }
+    }
+
+    /** 获取请求队列 SHM 基地址 MemorySegment（零 FFM 直接读写）。启动后调用一次，结果永久有效。 */
+    public static MemorySegment getReqShmSegment() {
+        ensureLoaded();
+        if (rhbGetReqShmPtr == null) return null;
+        try {
+            return (MemorySegment) rhbGetReqShmPtr.invokeExact();
+        } catch (Throwable e) {
+            throw new IllegalStateException("rhb_get_req_shm_ptr 异常: " + e.getMessage(), e);
+        }
+    }
+
+    /** 获取响应队列 SHM 基地址 MemorySegment。 */
+    public static MemorySegment getRespShmSegment() {
+        ensureLoaded();
+        if (rhbGetRespShmPtr == null) return null;
+        try {
+            return (MemorySegment) rhbGetRespShmPtr.invokeExact();
+        } catch (Throwable e) {
+            throw new IllegalStateException("rhb_get_resp_shm_ptr 异常: " + e.getMessage(), e);
+        }
+    }
+
+    /** 等待请求队列通知（Windows: WaitForSingleObject, Linux: 轮询）。阻塞直到有新请求或超时。 */
+    public static int waitForReq(int timeoutMs) {
+        if (waitForSingleObject != null) {
+            try {
+                int fd = getReqNotifyFd();
+                return (int) waitForSingleObject.invokeExact(MemorySegment.ofAddress(fd), timeoutMs);
+            } catch (Throwable e) {
+                throw new IllegalStateException("WaitForSingleObject 异常: " + e.getMessage(), e);
+            }
+        }
+        return -1; // 非 Windows 平台回退到轮询
     }
 
     @Override
