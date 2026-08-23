@@ -199,7 +199,7 @@ async fn handle_req(
         std::ptr::copy_nonoverlapping(envelope.as_ptr(), ptr, envelope.len());
     }
     // 标记为 REQ
-    if let Err(rc) = bridge.req_channel.commit_req(slot) {
+    if let Err(rc) = bridge.req_channel.commit_req(slot, envelope.len() as u32) {
         bridge.pending.lock().unwrap().remove(&req_id);
         eprintln!("[rhb] commit_req failed: {rc}");
         return Ok(json_resp(503, "server busy"));

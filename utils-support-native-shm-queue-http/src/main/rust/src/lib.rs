@@ -82,8 +82,10 @@ pub unsafe extern "C" fn rhb_start(
             return -1;
         }
     };
-    eprintln!("[rhb] name='{}', creating req_ch", name);
-    let req_ch = match Channel::create(&format!("{name}_req"), capacity, slot_size) {
+    eprintln!("[rhb] name='{}', formatting req name", name);
+    let req_name = format!("{name}_req");
+    eprintln!("[rhb] req_name='{}', creating req_ch", req_name);
+    let req_ch = match Channel::create(&req_name, capacity, slot_size) {
         Ok(q) => q,
         Err(rc) => {
             eprintln!("[rhb] req_ch create failed: {}", rc);
