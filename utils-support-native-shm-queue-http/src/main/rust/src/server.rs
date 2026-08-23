@@ -184,6 +184,7 @@ async fn handle_req(
 
     let req_id = crate::next_req_id();
     let envelope = build_req_envelope(req_id, &method, &path, &body_bytes);
+    eprintln!("[rhb] handle_req: req_id={}, method={}, path={}, envelope.len={}", req_id, method, path, envelope.len());
 
     // 1. 获取空槽，写入请求数据，标记为 REQ
     let (slot, ptr) = match bridge.req_channel.acquire_empty() {
