@@ -138,6 +138,8 @@ pub async fn run_hyper(port: u16, bridge: Arc<Bridge>) {
             res = listener.accept() => {
                 match res {
                     Ok((stream, _)) => {
+                        // 关闭 Nagle：HTTP 小包场景下 Nagle+delayed-ACK 会引入 ~10ms 固定延迟
+                        let _ = stream.set_nodelay(true);
                         let b = bridge.clone();
                         tokio::spawn(async move {
                             handle_conn(stream, b).await;
@@ -184,7 +186,6 @@ async fn handle_req(
 
     let req_id = crate::next_req_id();
     let envelope = build_req_envelope(req_id, &method, &path, &body_bytes);
-    eprintln!("[rhb] handle_req: req_id={}, method={}, path={}, envelope.len={}", req_id, method, path, envelope.len());
 
     // 1. 获取空槽，写入请求数据，标记为 REQ
     let (slot, ptr) = match bridge.req_channel.acquire_empty() {
@@ -270,7 +271,6 @@ fn json_resp(status: u16, msg: &str) -> hyper::Response<http_body_util::Full<byt
 
 /// resp_reader_loop：轮询响应通道，回填 pending sender。
 pub fn resp_reader_loop(bridge: Arc<Bridge>) {
-    let mut buf = vec![0u8; bridge.slot_size as usize];
     while bridge.running.load(Ordering::Relaxed) {
         match poll_and_complete_resp(&bridge) {
             Some(_) => {}
