@@ -48,6 +48,33 @@ fn sanitize_name(name: &str) -> String {
     name.replace(['/', '\\'], "_")
 }
 
+/// Windows 高精度定时器：poll 循环依赖毫秒级 WaitForSingleObject 超时，
+/// 默认系统 tick（10~15.6ms）会把 2ms 超时拉长到 10ms+，造成每请求固定延迟。
+#[cfg(windows)]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(period: u32) -> u32;
+    fn timeEndPeriod(period: u32) -> u32;
+}
+
+/// 提升定时器精度至 1ms
+#[cfg(windows)]
+fn enable_high_res_timer() {
+    unsafe { timeBeginPeriod(1); }
+}
+
+/// 恢复定时器精度
+#[cfg(windows)]
+fn disable_high_res_timer() {
+    unsafe { timeEndPeriod(1); }
+}
+
+#[cfg(not(windows))]
+fn enable_high_res_timer() {}
+
+#[cfg(not(windows))]
+fn disable_high_res_timer() {}
+
 #[cfg(not(windows))]
 fn sanitize_name(name: &str) -> String {
     name.to_string()
@@ -69,6 +96,7 @@ pub unsafe extern "C" fn rhb_start(
         eprintln!("[rhb] already started");
         return -15;
     }
+    enable_high_res_timer();
     if shm_name.is_null() || capacity < 2 || slot_size < 16 {
         eprintln!("[rhb] invalid args");
         STARTED.store(false, Ordering::Release);
@@ -163,6 +191,7 @@ pub extern "C" fn rhb_stop() -> i32 {
         }
     }
     STARTED.store(false, Ordering::Release);
+    disable_high_res_timer();
     0
 }
 
