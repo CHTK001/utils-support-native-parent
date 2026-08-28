@@ -24,5 +24,6 @@
     <module>utils-support-native-video-codec</module>
     <module>utils-support-native-shm-queue</module>
     <module>utils-support-native-shm-queue-http</module>
+    <module>utils-support-native-playwright</module>
 </modules>
 </project>
