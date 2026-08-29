@@ -26,6 +26,8 @@
     <module>utils-support-native-image</module>
     <module>utils-support-native-shm-queue</module>
     <module>utils-support-native-shm-queue-http</module>
+    <module>utils-support-native-headless</module>
+    <module>utils-support-native-remote</module>
 </modules>
 
     <distributionManagement>
