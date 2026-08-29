@@ -10,10 +10,8 @@
     <description>预编译 native 二进制库（Rust cdylib），独立于 Java 代码分发</description>
 
     <modules>
-        <module>utils-support-native-rust-proxy</module>
         <module>utils-support-native-ffmpeg</module>
         <module>utils-support-native-filesystem</module>
-        <module>utils-support-native-nmap</module>
         <module>utils-support-native-sqlite</module>
         <module>utils-support-native-datarecovery</module>
         <module>utils-support-native-video-processor</module>
@@ -22,9 +20,6 @@
     <module>utils-support-native-filestorage</module>
     <module>utils-support-native-smb</module>
     <module>utils-support-native-video-codec</module>
-    <module>utils-support-native-shm-queue</module>
-    <module>utils-support-native-shm-queue-http</module>
-    <module>utils-support-native-playwright</module>
     <module>utils-support-native-headless</module>
     <module>utils-support-native-remote</module>
 </modules>
