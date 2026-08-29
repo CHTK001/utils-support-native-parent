@@ -5,7 +5,6 @@ use headless_chrome::{Browser, Element, LaunchOptions, Tab};
 use jni::objects::{JClass, JString};
 use jni::sys::{jboolean, jstring, JNI_TRUE};
 use jni::JNIEnv;
-use once_cell::sync::OnceCell;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -165,7 +164,7 @@ fn launch(params: &Value) -> String {
     }
     match Browser::new(builder.build().unwrap()) {
         Ok(browser) => {
-            let reg = registry().lock().unwrap();
+            let mut reg = registry().lock().unwrap();
             let id = alloc_handle(&mut reg);
             reg.browsers.insert(id, browser);
             ok(json!({ "handle": id }))
@@ -179,7 +178,7 @@ fn new_context(browser_handle: Option<u64>) -> String {
         Some(v) => v,
         None => return err("缺少 browser handle"),
     };
-    let reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap();
     if !reg.browsers.contains_key(&id) {
         return err("无效的 browser handle");
     }
@@ -193,7 +192,7 @@ fn new_page(target: Option<u64>) -> String {
         Some(v) => v,
         None => return err("缺少 handle（browser 或 context）"),
     };
-    let reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap();
     let browser_id = if let Some(bid) = reg.contexts.get(&id) {
         *bid
     } else {
@@ -243,7 +242,7 @@ fn click(target: Option<u64>, params: &Value) -> String {
     // 尝试 element handle
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -282,7 +281,7 @@ fn fill(target: Option<u64>, params: &Value) -> String {
     // element handle
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -363,7 +362,7 @@ fn hover(target: Option<u64>, params: &Value) -> String {
     // element handle
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -401,7 +400,7 @@ fn text_content(target: Option<u64>, params: &Value) -> String {
     // element handle
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -438,7 +437,7 @@ fn inner_text(target: Option<u64>, params: &Value) -> String {
     let selector = params.get("selector").and_then(|v| v.as_str()).unwrap_or("");
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -468,7 +467,7 @@ fn inner_html(target: Option<u64>, params: &Value) -> String {
     let selector = params.get("selector").and_then(|v| v.as_str()).unwrap_or("");
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -499,7 +498,7 @@ fn get_attribute(target: Option<u64>, params: &Value) -> String {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -547,7 +546,7 @@ fn screenshot(target: Option<u64>, _params: &Value) -> String {
     };
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -578,7 +577,7 @@ fn evaluate(target: Option<u64>, params: &Value) -> String {
     };
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -612,7 +611,7 @@ fn query_selector(target: Option<u64>, params: &Value) -> String {
             drop(reg);
             return match tab.find_element(selector) {
                 Ok(el) => {
-                    let reg = registry().lock().unwrap();
+                    let mut reg = registry().lock().unwrap();
                     let hid = alloc_handle(&mut reg);
                     reg.elements.insert(hid, (id, el.node_id));
                     ok(json!({ "handle": hid }))
@@ -624,7 +623,7 @@ fn query_selector(target: Option<u64>, params: &Value) -> String {
     // element querySelector
     {
         let reg = registry().lock().unwrap();
-        if let Some((tab_id, _node_id)) = reg.elements.get(&id).copied() {
+        if let Some((tab_id, node_id)) = reg.elements.get(&id).copied() {
             let Some(tab) = reg.tabs.get(&tab_id).cloned() else {
                 return err("无效的 tab handle");
             };
@@ -634,7 +633,7 @@ fn query_selector(target: Option<u64>, params: &Value) -> String {
                 // 实际上 Element::find_element 内需要 child el from parent node
                 // 但直接用 tab.find_element 全局搜索即可
                 Ok(child) => {
-                    let reg = registry().lock().unwrap();
+                    let mut reg = registry().lock().unwrap();
                     let hid = alloc_handle(&mut reg);
                     reg.elements.insert(hid, (tab_id, child.node_id));
                     ok(json!({ "handle": hid }))
@@ -659,7 +658,7 @@ fn query_selector_all(target: Option<u64>, params: &Value) -> String {
     drop(reg);
     match tab.find_elements(selector) {
         Ok(els) => {
-            let reg = registry().lock().unwrap();
+let mut reg = registry().lock().unwrap();
             let handles: Vec<u64> = els
                 .into_iter()
                 .map(|e| {
@@ -763,7 +762,7 @@ fn close(target: Option<u64>) -> String {
         Some(v) => v,
         None => return err("缺少 handle"),
     };
-    let reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap();
     if reg.browsers.remove(&id).is_some() {
         return ok(json!(true));
     }
@@ -782,7 +781,7 @@ fn close(target: Option<u64>) -> String {
 
 // ===================== API Request（reqwest blocking） =====================
 fn reqwest_new() -> String {
-    let reg = registry().lock().unwrap();
+    let mut reg = registry().lock().unwrap();
     let id = alloc_handle(&mut reg);
     reg.contexts.insert(id, id);
     ok(json!({ "handle": id }))
