@@ -1,38 +1,51 @@
 # utils-support-native-filesearch
 
-跨平台快速文件搜索 Rust native 库（WizTree 能力）
-
----
-
-## 快速开始
-
-### 1. 添加依赖
-
-```xml
-<dependency>
-    <groupId>com.chua</groupId>
-    <artifactId>utils-support-native-filesearch</artifactId>
-    <version>${project.version}</version>
-</dependency>
-```
-
----
+$m.desc
 
 ## 构建
 
-```bash
-cd src/main/rust
+``bash
+cd src/main/rust   # 或 src/rust / src/main/c (sqlite)
 ./build.sh auto auto release
-```
+# 输出: resources/native/{windows-x86_64|linux-x86_64}/libname.{dll|so}
+``
 
----
+- Windows: cargo build --target x86_64-pc-windows-msvc → .dll
+- Linux: cargo build --target x86_64-unknown-linux-gnu → .so
+- macOS: cargo build --target x86_64-apple-darwin → .dylib
 
-## 原生库导出函数
+## 被谁使用
 
-| 函数 | 说明 |
-|------|------|
-| `fast_search_by_name(root, pattern, max, callback)` | 按名称通配符搜索 |
-| `fast_search_by_size(root, min, max, max_results, callback)` | 按大小范围搜索 |
-| `fast_get_tree(root, max_depth, callback)` | 获取目录树 |
-| `fast_get_version()` | 获取版本号 |
-| `fast_search_cancel()` | 取消搜索 |
+``xml
+<dependency>
+    <groupId>com.chua</groupId>
+    <artifactId>utils-support-native-filesearch</artifactId>
+    <version>\</version>
+</dependency>
+``
+
+调用方: $(System.Collections.Hashtable.users)
+"@
+        Set-Content -Path (Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch "README.md") -Value  -Encoding UTF8
+        Write-Host "✅ System.Collections.Hashtable.name"
+    }
+}
+
+# 无源码的模块
+ = @("headless","remote","rust-proxy","filesystem","filestorage","ffmpeg","datarecovery","needle","video-processor")
+foreach(System.Collections.Hashtable in ){
+    D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch = Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent "utils-support-native-System.Collections.Hashtable"
+    if(Test-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch){
+         = @"
+# utils-support-native-System.Collections.Hashtable
+
+预编译 native 二进制库（仅 Windows DLL）。
+
+## 构建说明
+
+- **Windows DLL**: ✅ 已预编译
+- **Linux .so**: ❌ 源码不可追溯，需外部提供 Rust/C 源码后重新编译
+
+## 被谁使用
+
+Java 项目通过 \System.loadLibrary()\ 加载 native 库。

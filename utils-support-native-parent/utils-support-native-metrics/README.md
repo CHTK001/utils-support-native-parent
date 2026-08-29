@@ -1,32 +1,151 @@
-# Metrics Native
+# utils-support-native-metrics
 
-系统指标 Rust native 库，通过 FlatBuffers 实现零拷贝跨语言传输。
+$m.desc
 
 ## 构建
 
-```bash
-cd src/rust
-cargo build --release --target x86_64-pc-windows-msvc
-cargo build --release --target x86_64-unknown-linux-gnu
-```
+``bash
+cd src/main/rust   # 或 src/rust / src/main/c (sqlite)
+./build.sh auto auto release
+# 输出: resources/native/{windows-x86_64|linux-x86_64}/libname.{dll|so}
+``
 
-## 指标
+- Windows: cargo build --target x86_64-pc-windows-msvc → .dll
+- Linux: cargo build --target x86_64-unknown-linux-gnu → .so
+- macOS: cargo build --target x86_64-apple-darwin → .dylib
 
-| 指标 | 粒度 |
-|------|------|
-| CPU | 每核心 |
-| 内存 | 每插槽 |
-| 磁盘 | 每分区 + IO |
-| 网络 | 每网卡 |
-| 进程 | 前 N 条 |
-| GPU | 每显卡 |
-| 电池 | 每电池 |
-| 系统负载 | Load 1/5/15 |
+## 被谁使用
 
-## 接口
+``xml
+<dependency>
+    <groupId>com.chua</groupId>
+    <artifactId>utils-support-native-metrics</artifactId>
+    <version>\</version>
+</dependency>
+``
 
-```rust
-pub fn start_sampler(interval_ms: u64);
-pub fn get_latest_snapshot() -> Option<Vec<u8>>;
-pub fn stop_sampler();
-```
+调用方: $(System.Collections.Hashtable.users)
+"@
+        Set-Content -Path (Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-metrics "README.md") -Value # utils-support-native-filesearch
+
+$m.desc
+
+## 构建
+
+``bash
+cd src/main/rust   # 或 src/rust / src/main/c (sqlite)
+./build.sh auto auto release
+# 输出: resources/native/{windows-x86_64|linux-x86_64}/libname.{dll|so}
+``
+
+- Windows: cargo build --target x86_64-pc-windows-msvc → .dll
+- Linux: cargo build --target x86_64-unknown-linux-gnu → .so
+- macOS: cargo build --target x86_64-apple-darwin → .dylib
+
+## 被谁使用
+
+``xml
+<dependency>
+    <groupId>com.chua</groupId>
+    <artifactId>utils-support-native-filesearch</artifactId>
+    <version>\</version>
+</dependency>
+``
+
+调用方: $(System.Collections.Hashtable.users)
+"@
+        Set-Content -Path (Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch "README.md") -Value  -Encoding UTF8
+        Write-Host "✅ System.Collections.Hashtable.name"
+    }
+}
+
+# 无源码的模块
+ = @("headless","remote","rust-proxy","filesystem","filestorage","ffmpeg","datarecovery","needle","video-processor")
+foreach(System.Collections.Hashtable in ){
+    D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch = Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent "utils-support-native-System.Collections.Hashtable"
+    if(Test-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch){
+         = @"
+# utils-support-native-System.Collections.Hashtable
+
+预编译 native 二进制库（仅 Windows DLL）。
+
+## 构建说明
+
+- **Windows DLL**: ✅ 已预编译
+- **Linux .so**: ❌ 源码不可追溯，需外部提供 Rust/C 源码后重新编译
+
+## 被谁使用
+
+Java 项目通过 \System.loadLibrary()\ 加载 native 库。 -Encoding UTF8
+        Write-Host "✅ System.Collections.Hashtable.name"
+    }
+}
+
+# 无源码的模块
+ = @("headless","remote","rust-proxy","filesystem","filestorage","ffmpeg","datarecovery","needle","video-processor")
+foreach(System.Collections.Hashtable in ){
+    D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-metrics = Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent "utils-support-native-System.Collections.Hashtable"
+    if(Test-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-metrics){
+        # utils-support-native-filesearch
+
+$m.desc
+
+## 构建
+
+``bash
+cd src/main/rust   # 或 src/rust / src/main/c (sqlite)
+./build.sh auto auto release
+# 输出: resources/native/{windows-x86_64|linux-x86_64}/libname.{dll|so}
+``
+
+- Windows: cargo build --target x86_64-pc-windows-msvc → .dll
+- Linux: cargo build --target x86_64-unknown-linux-gnu → .so
+- macOS: cargo build --target x86_64-apple-darwin → .dylib
+
+## 被谁使用
+
+``xml
+<dependency>
+    <groupId>com.chua</groupId>
+    <artifactId>utils-support-native-filesearch</artifactId>
+    <version>\</version>
+</dependency>
+``
+
+调用方: $(System.Collections.Hashtable.users)
+"@
+        Set-Content -Path (Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch "README.md") -Value  -Encoding UTF8
+        Write-Host "✅ System.Collections.Hashtable.name"
+    }
+}
+
+# 无源码的模块
+ = @("headless","remote","rust-proxy","filesystem","filestorage","ffmpeg","datarecovery","needle","video-processor")
+foreach(System.Collections.Hashtable in ){
+    D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch = Join-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent "utils-support-native-System.Collections.Hashtable"
+    if(Test-Path D:\ch\project\utils-support-native-parent\utils-support-native-parent\utils-support-native-filesearch){
+         = @"
+# utils-support-native-System.Collections.Hashtable
+
+预编译 native 二进制库（仅 Windows DLL）。
+
+## 构建说明
+
+- **Windows DLL**: ✅ 已预编译
+- **Linux .so**: ❌ 源码不可追溯，需外部提供 Rust/C 源码后重新编译
+
+## 被谁使用
+
+Java 项目通过 \System.loadLibrary()\ 加载 native 库。 = @"
+# utils-support-native-System.Collections.Hashtable
+
+预编译 native 二进制库（仅 Windows DLL）。
+
+## 构建说明
+
+- **Windows DLL**: ✅ 已预编译
+- **Linux .so**: ❌ 源码不可追溯，需外部提供 Rust/C 源码后重新编译
+
+## 被谁使用
+
+Java 项目通过 \System.loadLibrary()\ 加载 native 库。
