@@ -25,5 +25,7 @@
     <module>utils-support-native-shm-queue</module>
     <module>utils-support-native-shm-queue-http</module>
     <module>utils-support-native-playwright</module>
+    <module>utils-support-native-headless</module>
+    <module>utils-support-native-remote</module>
 </modules>
 </project>
