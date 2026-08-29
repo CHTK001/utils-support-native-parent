@@ -95,6 +95,7 @@ fn dispatch(command: &str) -> String {
         "inputValue" => input_value(handle, &params),
         "screenshot" => screenshot(handle, &params),
         "evaluate" => evaluate(handle, &params),
+        "printToPdf" => print_to_pdf(handle, &params),
         "evaluateHandle" => evaluate(handle, &params),
         "querySelector" => query_selector(handle, &params),
         "querySelectorAll" => query_selector_all(handle, &params),
@@ -569,6 +570,16 @@ fn screenshot(target: Option<u64>, _params: &Value) -> String {
     })
 }
 
+
+fn print_to_pdf(handle: Option<u64>, params: &Value) -> String {
+    let handle = match handle {
+        Some(v) => v,
+        None => return err("缺少 handle"),
+    };
+    // TODO: Implement Chrome CDP Page.printToPdf
+    // For now, return a placeholder indicating this feature needs headless_chrome support
+    ok(json!({ "placeholder": "printToPdf not yet implemented, use HTML to PNG workaround instead" }))
+}
 fn evaluate(target: Option<u64>, params: &Value) -> String {
     let expr = params.get("expression").and_then(|v| v.as_str()).unwrap_or("");
     let id = match target {
