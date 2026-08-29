@@ -21,6 +21,6 @@
     <module>utils-support-native-smb</module>
     <module>utils-support-native-video-codec</module>
     <module>utils-support-native-headless</module>
-    <module>utils-support-native-remote</module>
 </modules>
 </project>
+

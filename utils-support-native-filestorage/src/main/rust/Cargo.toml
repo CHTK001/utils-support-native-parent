@@ -1,0 +1,20 @@
+[package]
+name = "rust_filestorage_processor"
+version = "0.1.0"
+edition = "2021"
+authors = ["CH <ch@utils.com>"]
+license = "Apache-2.0"
+description = "High-performance file storage processor with Rust native library"
+
+[lib]
+name = "rust_filestorage_processor"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
