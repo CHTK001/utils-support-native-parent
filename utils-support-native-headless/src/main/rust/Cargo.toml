@@ -1,0 +1,28 @@
+[package]
+name = "headless-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "headless_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+# 娴忚鍣ㄦ帶鍒?- 浣跨敤 headless_chrome锛堟洿杞婚噺锛屾€ц兘鏇村ソ锛?headless_chrome = "1.0"
+
+# 寮傛杩愯鏃?tokio = { version = "1.35", features = ["full"] }
+
+# 搴忓垪鍖?serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 閿欒澶勭悊
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 鏃ュ織
+log = "0.4"
+env_logger = "0.10"
+
+# 鍗曚緥妯″紡鏀寔
+once_cell = "1.19"
+
