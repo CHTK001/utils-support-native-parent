@@ -1,5 +1,5 @@
 # 动态库二进制
-*.dll
+!utils-support-native-parent/utils-support-native-*/src/main/resources/native/**/*.dll`n!utils-support-native-parent/utils-support-native-*/src/main/resources/native/**/*.so`n*.dll
 *.so
 *.dylib
 
@@ -55,3 +55,4 @@ osgi-cache/
 # OSGi 本地 jar 缓存
 org/
 sys
+

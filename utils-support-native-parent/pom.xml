@@ -23,9 +23,6 @@
     <module>utils-support-native-filestorage</module>
     <module>utils-support-native-smb</module>
     <module>utils-support-native-needle</module>
-    <module>utils-support-native-image</module>
-    <module>utils-support-native-shm-queue</module>
-    <module>utils-support-native-shm-queue-http</module>
     <module>utils-support-native-headless</module>
     <module>utils-support-native-remote</module>
 </modules>
@@ -41,3 +38,4 @@
         </snapshotRepository>
     </distributionManagement>
 </project>
+
