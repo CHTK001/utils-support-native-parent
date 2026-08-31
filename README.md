@@ -4,13 +4,22 @@
 
 ## 模块
 
-| 模块 | 说明 |
-|---|---|
-| `utils-support-native-rust-proxy` | 代理协议 native 库（HTTP / SOCKS5 / RDP / SSH / VNC / FTP） |
-| `utils-support-native-perf` | 性能计数器 native 库 |
-| `utils-support-native-nmap` | Nmap 集成 native 库 |
-| `utils-support-native-ffmpeg` | FFmpeg RTMP native 库 |
-| `utils-support-native-filesystem` | 文件系统压缩/解压 native 库 |
+| 模块 | 说明 | 被以下模块使用 |
+|---|---|---|
+| `utils-support-native-rust-proxy` | 代理协议 native 库（HTTP / SOCKS5 / RDP / SSH / VNC / FTP） | `utils-support-native-video-codec` |
+| `utils-support-native-perf` | 性能计数器 native 库 | — |
+| `utils-support-native-nmap` | Nmap 集成 native 库 | — |
+| `utils-support-native-ffmpeg` | FFmpeg RTMP native 库 | `utils-support-ffmpeg-rust-starter` |
+| `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | — |
+| `utils-support-native-datarecovery` | 数据恢复 Rust native 库 | — |
+| `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI，含预编译 `.dll/.so/.dylib`） | `utils-support-ffmpeg-rust-starter`、`utils-support-example-starter` |
+| `utils-support-native-video-processor` | Video HLS 转码 Rust native 库 | `utils-support-video-processor-starter` |
+| `utils-support-native-filestorage` | 文件存储 Rust native 库（高性能 URL 参数解析 + 图片滤镜 + HEIC/HEIF 预览转码） | `utils-support-filestorage-starter` |
+| `utils-support-native-filesearch` | 文件搜索 Rust native 库（WizTree 能力，跨平台） | — |
+| `utils-support-native-smb` | SMB2/3 服务端 Rust native 库（smb-server crate） | `utils-support-smb-starter` |
+| `utils-support-native-metrics` | 系统指标 Rust native 库 | `utils-support-metrics-starter` |
+| `utils-support-native-cuda` | CUDA 运行时库（cudart/cublas/cudnn）环境检测与自动安装 | `utils-support-common-starter` |
+| `utils-support-native-headless` | 无头环境 native 支持 | — |
 
 ## 使用方式
 
