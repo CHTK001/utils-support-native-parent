@@ -21,6 +21,7 @@
     <module>utils-support-native-video-codec</module>
     <module>utils-support-native-headless</module>
     <module>utils-support-native-cuda</module>
+    <module>utils-support-native-heif</module>
 </modules>
 </project>
 
