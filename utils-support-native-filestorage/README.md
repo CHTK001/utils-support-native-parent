@@ -1,12 +1,15 @@
 # utils-support-native-filestorage
 
-高性能文件存储处理器 Rust native 库，提供文件处理能力（缩放、水印、裁剪、旋转、滤镜等）。
+高性能文件存储处理器 Rust native 库，提供文件处理能力（缩放、水印、裁剪、旋转、滤镜）。
 
 ## 功能场景
 
 - 文件上传处理（缩放/水印/裁剪）
 - 图片过滤器链
 - 文件排除规则
+
+> **注意**：HEIC/HEIF 预览转码能力已迁移至 `utils-support-image-starter` 的纯 Java 实现（`imageio-heif`），
+> 本模块不再包含 HEIC 解码逻辑。
 
 ## 平台支持
 
@@ -17,21 +20,16 @@
 
 ## 构建
 
+```bash
 cd src/main/rust
 ./build.sh auto auto release
+```
 
-Linux: docker run --rm -v D:\ch\project:/src rust:latest bash -c "cd /src && ./build.sh linux x86_64 release"
-
-## JNI 接口
-
-- native_init() - 初始化
-- native_get_version() - 获取版本
-- native_get_capabilities() - 获取能力列表
-- native_parse_params(json) - 解析参数 JSON
-- native_get_filter_capabilities() - 获取过滤器能力
-- native_get_filter_chain_json() - 获取过滤器链
-- native_is_excluded(path, ext) - 检查是否被排除
+Linux docker 构建示例：
+```bash
+docker run --rm -v D:\ch\project:/src rust:latest bash -c "cd /src && ./build.sh linux x86_64 release"
+```
 
 ## 被谁使用
 
-调用方: utils-support-filesystem-parent/utils-support-filestorage-starter
+原生库本身不直接依赖 starter 模块；`utils-support-filestorage-starter` 现采用 JDK 实现，不再引入此 native 库。
