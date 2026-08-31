@@ -10,5 +10,5 @@
     </parent>
     <artifactId>utils-support-native-filestorage</artifactId>
     <packaging>jar</packaging>
-    <description>文件存储 Rust native 库（高性能 URL 参数解析 + 图片滤镜）</description>
+    <description>文件存储 Rust native 库（高性能 URL 参数解析 + 图片滤镜 + HEIC/HEIF 预览转码）</description>
 </project>
