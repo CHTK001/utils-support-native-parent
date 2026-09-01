@@ -1,33 +1,18 @@
-﻿[package]
-name = "file_search"
+[package]
+name = "rust_filesearch"
 version = "0.1.0"
 edition = "2021"
-authors = ["CH <ch@utils.com>"]
-license = "Apache-2.0"
-description = "High-performance cross-platform file search library with C ABI bindings"
+authors = ["CH"]
 
 [lib]
 name = "file_search"
-crate-type = ["cdylib", "lib"]
-
+crate-type = ["cdylib"]
 
 [dependencies]
 walkdir = "2.5"
-jwalk = "0.8"
-byteorder = "1.4"
-rayon = "1.10"
+serde_json = "1.0"
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_Threading",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Console",
-    "Win32_System_SystemServices",
-    "Wdk_Storage_FileSystem",
-    "Wdk_Foundation",
-] }
-
-[features]
-default = []
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
