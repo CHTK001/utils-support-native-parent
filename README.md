@@ -86,6 +86,29 @@ dependencies {
 mvn clean install
 ```
 
+## 测试覆盖
+
+> 最新测试结果：2026-09-01，运行 `com.chua.test.NativeTestSuite`
+
+| 模块 | 测试状态 | 说明 |
+|------|---------|------|
+| video-codec | ✅ 5/5 | h264/h265/h266 编码、H.264 解码、getVersion |
+| datarecovery | ✅ 2/2 | scan (142 files), permanentDelete |
+| filesearch | ✅ 2/2 | searchByName, getTree |
+| metrics | ✅ 2/2 | poll (4396 chars), start/stop cycle |
+| ffmpeg | ✅ 1/1 | h264Encode via bridge (348 bytes) |
+| video-processor | ✅ 2/2 | isAvailable=true, version=1.0.0 |
+| smb | ✅ 2/2 | dllLoaded + smb_start (port 1445) |
+| sqlite | ✅ 2/2 | DLL load success |
+| nmap | ✅ 5/5 | getVersion, isValidIp, port scan, resolve |
+| headless | ⬜ 未测 | DLL 存在但为 C-style exports，无 JNI 符号 |
+| cuda | ⬜ 未测 | 无 DLL，仅 CUDA 环境检测脚本 |
+| filestorage | ⬜ 未测 | DLL 存在但为 C-style exports，无 JNI 符号 |
+
+**已测：23/23 PASS · 待桥接：headless、filestorage · 环境检测：cuda**
+
+详细测试输出：`test-output/native_test_suite.txt`
+
 ## 发布
 
 ```bash
