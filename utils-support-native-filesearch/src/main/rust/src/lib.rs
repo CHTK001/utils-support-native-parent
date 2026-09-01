@@ -887,7 +887,59 @@ pub unsafe extern "C" fn fast_search_cancel() {
 
 // ==================== 内部辅助函数 ====================
 
-fn glob_match(name: &str, pattern: &str) -> bool {
+
+// ==================== JNI-style aliases for Java bridge ====================
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_getVersion() -> *const c_char {
+    fast_get_version()
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_cancel() {
+    fast_search_cancel()
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchByName(
+    root_path: *const c_char,
+    name_pattern: *const c_char,
+    max_results: c_int,
+    callback: Option<FileResultCallback>,
+) -> c_int {
+    fast_search_by_name(root_path, name_pattern, max_results, callback)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchBySize(
+    root_path: *const c_char,
+    min_size: c_longlong,
+    max_size: c_longlong,
+    max_results: c_int,
+    callback: Option<FileResultCallback>,
+) -> c_int {
+    fast_search_by_size(root_path, min_size, max_size, max_results, callback)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_getTree(
+    root_path: *const c_char,
+    max_depth: c_int,
+    max_results: c_int,
+    callback: Option<FileResultCallback>,
+) -> c_int {
+    fast_get_tree(root_path, max_depth, max_results, callback)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchByPath(
+    root_dir: *const c_char,
+    path_pattern: *const c_char,
+    max_results: c_int,
+    callback: Option<FileResultCallback>,
+) -> c_int {
+    fast_search_by_path(root_dir, path_pattern, max_results, callback)
+}fn glob_match(name: &str, pattern: &str) -> bool {
     if pattern == "*" {
         return true;
     }
@@ -946,3 +998,4 @@ fn get_last_modified(path: &Path) -> u64 {
         Err(_) => 0,
     }
 }
+
