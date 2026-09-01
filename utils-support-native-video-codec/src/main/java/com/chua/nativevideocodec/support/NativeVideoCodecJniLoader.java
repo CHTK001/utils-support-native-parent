@@ -1,24 +1,20 @@
 package com.chua.nativevideocodec.support;
 
+import com.chua.common.support.utils.NativeLoader;
+import com.chua.common.support.utils.NativeUtils;
+import java.nio.file.Path;
+
 /**
- * Rust 支持的原生视频编码库加载器。
- *
- * @author CH
- * @since 4.0.0.42
+ * Rust 视频编解码器 JNI 加载器。
+ * 通过 NativeLoader 从 classpath 提取 DLL 并加载。
  */
 final class NativeVideoCodecJniLoader {
 
-    /**
-     * 库是否已加载
-     */
     private static volatile boolean loaded;
 
     private NativeVideoCodecJniLoader() {
     }
 
-    /**
-     * 加载原生视频编码库。
-     */
     static void load() {
         if (loaded) {
             return;
@@ -27,9 +23,17 @@ final class NativeVideoCodecJniLoader {
             if (loaded) {
                 return;
             }
-            String lib = System.mapLibraryName("chua_native_video_codec");
-            System.loadLibrary(lib.replaceFirst("^lib", "").replaceAll("\\.[^.]+$", ""));
-            loaded = true;
+            try {
+                Path target = NativeUtils.tempRoot().resolve("chua_native_video_codec");
+                new NativeLoader("chua_native_video_codec")
+                        .glob("chua_native_video_codec.dll")
+                        .toTarget(target)
+                        .load();
+                loaded = true;
+            } catch (Throwable e) {
+                loaded = false;
+                throw new RuntimeException("Failed to load chua_native_video_codec native library", e);
+            }
         }
     }
 }
