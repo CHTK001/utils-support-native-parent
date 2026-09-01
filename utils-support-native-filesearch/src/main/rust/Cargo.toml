@@ -1,5 +1,5 @@
-[package]
-name = "rust_filesearch"
+﻿[package]
+name = "file_search"
 version = "0.1.0"
 edition = "2021"
 authors = ["CH <ch@utils.com>"]
@@ -7,7 +7,7 @@ license = "Apache-2.0"
 description = "High-performance cross-platform file search library with C ABI bindings"
 
 [lib]
-name = "rust_filesearch"
+name = "file_search"
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
