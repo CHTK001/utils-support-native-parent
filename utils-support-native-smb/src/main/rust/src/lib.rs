@@ -95,9 +95,6 @@ pub extern "C" fn smb_server_start(
             share = share.public();
         } else {
             share = share.user(&user_clone, Access::ReadWrite);
-        } else {
-            // 无用户配置时启用公共模式，允许匿名访问
-            share = share.public();
         }
 
         let mut builder = SmbServer::builder()
