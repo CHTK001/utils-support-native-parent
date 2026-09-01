@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *  7. 双线程 SPSC 压力（10 万条校验和）
  *  8. close 幂等
  */
-public class ShmQueueFunctionTest {
+public class ShmQueueFunctionExample {
 
     private static int failures = 0;
 

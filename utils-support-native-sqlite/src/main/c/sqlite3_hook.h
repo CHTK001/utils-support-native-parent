@@ -23,12 +23,17 @@
 HOOK_API void* hook_open(const char *db_path);
 
 /**
- * 非阻塞轮询下一条变更事件。
+ * 非阻塞轮询下一条变更事件，写入调用者提供的缓冲区。
  *
  * JSON 格式：
  *   {"type":"INSERT|UPDATE|DELETE","database":"main","table":"users","rowId":42}
+ *
+ * @param handle     hook_open 返回的句柄
+ * @param buf        输出缓冲区（由调用者分配）
+ * @param buf_size   缓冲区大小
+ * @return           写入的字节数（不含null），0表示无事件
  */
-HOOK_API char* hook_poll(void *handle);
+HOOK_API int hook_poll(void *handle, char *buf, int buf_size);
 
 /**
  * 阻塞等待下一条变更事件（OS 级别挂起，无 CPU 轮询）。
