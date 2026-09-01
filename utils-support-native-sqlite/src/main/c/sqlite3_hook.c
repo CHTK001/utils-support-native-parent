@@ -19,7 +19,7 @@
  * 运行依赖：系统 PATH / LD_LIBRARY_PATH 中存在 sqlite3 动态库。
  */
 
-#define HOOK_API __declspec(dllexport)
+#define BUILDING_DLL
 #include "sqlite3_hook.h"
 
 #include <stdlib.h>
