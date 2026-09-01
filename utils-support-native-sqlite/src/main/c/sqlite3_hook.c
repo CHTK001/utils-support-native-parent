@@ -1,4 +1,4 @@
-/**
+﻿/**
  * sqlite3_hook — SQLite update_hook 动态库
  *
  * 基于 sqlite3_update_hook() 回调机制，实时捕获 INSERT / UPDATE / DELETE 数据变更。
@@ -16,7 +16,7 @@
  * 运行依赖：系统 PATH / LD_LIBRARY_PATH 中存在 sqlite3 动态库。
  */
 
-#include "sqlite3_hook.h"
+#define HOOK_API __declspec(dllexport)`r`n#include "sqlite3_hook.h"
 
 #include <stdlib.h>
 #include <string.h>
