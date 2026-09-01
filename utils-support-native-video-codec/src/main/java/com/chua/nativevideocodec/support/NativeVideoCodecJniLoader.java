@@ -25,7 +25,7 @@ final class NativeVideoCodecJniLoader {
             }
             try {
                 Path target = NativeUtils.tempRoot().resolve("chua_native_video_codec");
-                new NativeLoader("chua_native_video_codec")
+                NativeLoader.of("chua_native_video_codec")
                         .glob("chua_native_video_codec.dll")
                         .toTarget(target)
                         .load();
