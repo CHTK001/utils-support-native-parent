@@ -23,7 +23,7 @@ import java.util.concurrent.Future;
  *  5. 并发 100 请求
  *  6. 服务重启（start→stop→start）
  */
-public class ShmHttpFunctionTest {
+public class ShmHttpFunctionExample {
 
     private static int failures = 0;
 
