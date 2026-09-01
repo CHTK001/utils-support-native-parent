@@ -1,2 +1,6 @@
-[target.x86_64-pc-windows-msvc]
-linker = "C:/Users/Administrator/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe"
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-linux-gnu-gcc"
+rustflags = ["-C", "link-arg=-Wl,-rpath,\"]
