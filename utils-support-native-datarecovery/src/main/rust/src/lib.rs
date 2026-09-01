@@ -1,4 +1,4 @@
-use jni::JNIEnv;
+﻿use jni::JNIEnv;
 use jni::objects::{JClass, JString, JObjectArray};
 use jni::sys::{jboolean, jint, jstring};
 use serde::Serialize;
@@ -63,7 +63,7 @@ struct DeleteResultJson {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_recovery_DataRecovery_nativeScan(
+pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeScan(
     mut env: JNIEnv,
     _class: JClass,
     device_path: JString,
@@ -110,7 +110,7 @@ pub extern "system" fn Java_com_recovery_DataRecovery_nativeScan(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_recovery_DataRecovery_nativeScanAndRecover(
+pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeScanAndRecover(
     mut env: JNIEnv,
     _class: JClass,
     device_path: JString,
@@ -172,7 +172,7 @@ pub extern "system" fn Java_com_recovery_DataRecovery_nativeScanAndRecover(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_recovery_DataRecovery_nativeRecover(
+pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeRecover(
     mut env: JNIEnv,
     _class: JClass,
     device_path: JString,
@@ -252,7 +252,7 @@ pub extern "system" fn Java_com_recovery_DataRecovery_nativeRecover(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_recovery_DataRecovery_nativeDelete(
+pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeDelete(
     mut env: JNIEnv,
     _class: JClass,
     device_path: JString,
