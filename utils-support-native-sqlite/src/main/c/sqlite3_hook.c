@@ -468,7 +468,6 @@ static void *io_uring_thread(void *arg) {
     struct io_uring *ring = &ctx->ring;
 
     while (ctx->active) {
-        /* 等待管道可读（超时 100ms） */
         struct io_uring_cqe *cqe;
         struct __kernel_timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 };
         int ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
@@ -476,14 +475,12 @@ static void *io_uring_thread(void *arg) {
         if (ret < 0) continue;
 
         if (cqe->res > 0) {
-            /* 管道有数据，读取并回调 */
             char dummy[EVENT_BUF_SIZE];
             read(ctx->pipe_fd[0], dummy, sizeof(dummy));
         }
 
         io_uring_cqe_seen(ring, cqe);
 
-        /* 从环形缓冲区读取并回调 */
         while (ctx->ring_tail != ctx->ring_head) {
             uint32_t tail = ctx->ring_tail;
             if (ctx->on_event) {
@@ -492,7 +489,6 @@ static void *io_uring_thread(void *arg) {
             ctx->ring_tail = (tail + 1) & RING_MASK;
         }
 
-        /* 重新提交异步读 */
         if (ctx->active) {
             struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
             if (sqe) {
@@ -541,7 +537,6 @@ HOOK_API void* hook_open_async(const char *db_path, hook_event_fn on_event, void
     SQLITE.sqlite3_update_hook(ctx->db, async_update_callback, ctx);
 
     pthread_create(&ctx->io_thread, NULL, io_uring_thread, ctx);
-    pthread_detach(ctx->io_thread);
 
     return ctx;
 }
@@ -553,11 +548,22 @@ HOOK_API int hook_exec_async(void *handle, const char *sql) {
 HOOK_API void hook_close_async(void *handle) {
     if (!handle) return;
     HookAsyncContext *ctx = (HookAsyncContext *)handle;
+
+    /* 先移除 hook，防止新事件产生 */
+    SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
+
+    /* 通知线程退出 */
     ctx->active = 0;
 
-    usleep(1000);
+    /* 写入 pipe 唤醒 io_uring_wait_cqe_timeout */
+    if (ctx->pipe_fd[1] >= 0) {
+        write(ctx->pipe_fd[1], "x", 1);
+    }
 
-    SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
+    /* 等待线程退出 */
+    pthread_join(ctx->io_thread, NULL);
+
+    /* 线程退出后再关闭 db、pipe、io_uring */
     SQLITE.sqlite3_close(ctx->db);
 
     if (ctx->pipe_fd[0] >= 0) close(ctx->pipe_fd[0]);
