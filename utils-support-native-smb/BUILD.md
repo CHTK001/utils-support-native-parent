@@ -52,7 +52,7 @@ cd utils-support-native-parent/utils-support-native-smb/src/main/rust
 rustup target add aarch64-apple-darwin
 cargo build --release --target aarch64-apple-darwin
 # Output: target/aarch64-apple-darwin/release/librust_smb_server.dylib
-# Copy to: src/main/resources/native/macos-aarch64/librust_smb_server.dylib
+# Copy to: src/main/resources/native/darwin-aarch64/librust_smb_server.dylib
 ```
 
 ## Cross-Compilation (from Linux to Windows)
