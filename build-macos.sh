@@ -48,23 +48,42 @@ else
 fi
 
 # ---- 工具链选择 ----
+# osxcross 的 clang 包装命名不唯一：可能是 <triple>-clang（aarch64-apple-darwin-clang）
+# 或简写 oa64-clang/o64-clang，按可用性依次探测。
+pick_tool() {
+    local name="$1"; shift
+    for cand in "$@"; do
+        if command -v "$cand" >/dev/null 2>&1; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    echo "$name"  # 回退默认，让 cargo 报错提示
+}
+
 resolve_toolchain() {
     local arch="$1"
     case "$arch" in
         aarch64)
-            local cc="aarch64-apple-darwin-clang"
+            local cc
+            cc="$(pick_tool aarch64-apple-darwin-clang oa64-clang)"
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$cc"
-            export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"
             export CC_aarch64_apple_darwin="$cc"
-            export CXX_aarch64_apple_darwin="${cc}++"
+            export CXX_aarch64_apple_darwin="$(pick_tool "${cc}++" oa64-clang++)"
+            if command -v aarch64-apple-darwin-ar >/dev/null 2>&1; then
+                export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"
+            fi
             echo "aarch64-apple-darwin darwin-aarch64"
             ;;
         x86_64)
-            local cc="x86_64-apple-darwin-clang"
+            local cc
+            cc="$(pick_tool x86_64-apple-darwin-clang o64-clang)"
             export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$cc"
-            export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"
             export CC_x86_64_apple_darwin="$cc"
-            export CXX_x86_64_apple_darwin="${cc}++"
+            export CXX_x86_64_apple_darwin="$(pick_tool "${cc}++" o64-clang++)"
+            if command -v x86_64-apple-darwin-ar >/dev/null 2>&1; then
+                export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"
+            fi
             echo "x86_64-apple-darwin darwin-x86_64"
             ;;
         *) echo "[ERROR] unsupported arch: $arch" >&2; exit 1 ;;
@@ -144,8 +163,8 @@ build_c_module() {
     mkdir -p "${output_dir}"
 
     case "$arch" in
-        aarch64) local cc="aarch64-apple-darwin-clang" ;;
-        x86_64)  local cc="x86_64-apple-darwin-clang" ;;
+        aarch64) local cc="$(pick_tool aarch64-apple-darwin-clang oa64-clang)" ;;
+        x86_64)  local cc="$(pick_tool x86_64-apple-darwin-clang o64-clang)" ;;
     esac
 
     if ! "$cc" -O2 -dynamiclib -fPIC \
