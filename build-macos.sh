@@ -167,8 +167,7 @@ echo "============================================================"
 echo ""
 
 for arch in "${ARCHES[@]}"; do
-    read -r target platform_dir ccname <<<"$(resolve_toolchain "$arch")"
-    export CARGO_TARGET_DIR_ARCH="$arch"
+    read -r target platform_dir <<<"$(resolve_toolchain "$arch")"
 
     echo ""
     echo "========== Building for ${target} (${platform_dir}) =========="
