@@ -299,6 +299,7 @@ struct HookAsyncContext {
     OVERLAPPED overlapped;
     char read_buf[EVENT_BUF_SIZE];
     volatile int pending_read;
+    HANDLE io_thread;
 #else
     /* Linux: io_uring + pipe */
     struct io_uring ring;
@@ -351,29 +352,42 @@ static void async_update_callback(void *ctx_ptr, int action, const char *db_name
  * ═══════════════════════════════════════════════════════════════ */
 #ifdef _WIN32
 
-/* IOCP 完成回调 */
-static void CALLBACK iocp_completion(DWORD err, DWORD bytes, LPOVERLAPPED ov) {
-    HookAsyncContext *ctx = CONTAINING_RECORD(ov, HookAsyncContext, overlapped);
-    if (!ctx || !ctx->active) return;
-    ctx->pending_read = 0;
+/* IOCP 工作线程 */
+static DWORD WINAPI iocp_worker_thread(LPVOID arg) {
+    HookAsyncContext *ctx = (HookAsyncContext *)arg;
+    DWORD bytes;
+    ULONG_PTR completion_key;
+    LPOVERLAPPED ov;
 
-    /* 从环形缓冲区读取并回调 */
-    while (ctx->ring_tail != ctx->ring_head) {
-        uint32_t tail = ctx->ring_tail;
-        if (ctx->on_event) {
-            ctx->on_event(ctx->ring_buf[tail], ctx->user_data);
+    while (ctx->active) {
+        BOOL ok = GetQueuedCompletionStatus(ctx->iocp, &bytes, &completion_key, &ov, 100);
+        if (!ok) {
+            if (GetLastError() == WAIT_TIMEOUT) continue;
+            break;
         }
-        ctx->ring_tail = (tail + 1) & RING_MASK;
-    }
+        if (!ov) break;
 
-    /* 重新投递异步读 */
-    if (ctx->active) {
-        memset(&ctx->overlapped, 0, sizeof(ctx->overlapped));
-        BOOL ok = ReadFile(ctx->pipe_read, ctx->read_buf, EVENT_BUF_SIZE, NULL, &ctx->overlapped);
-        if (ok || GetLastError() == ERROR_IO_PENDING) {
-            ctx->pending_read = 1;
+        ctx->pending_read = 0;
+
+        /* 从环形缓冲区读取并回调 */
+        while (ctx->ring_tail != ctx->ring_head) {
+            uint32_t tail = ctx->ring_tail;
+            if (ctx->on_event) {
+                ctx->on_event(ctx->ring_buf[tail], ctx->user_data);
+            }
+            ctx->ring_tail = (tail + 1) & RING_MASK;
+        }
+
+        /* 重新投递异步读 */
+        if (ctx->active) {
+            memset(&ctx->overlapped, 0, sizeof(ctx->overlapped));
+            BOOL rd = ReadFile(ctx->pipe_read, ctx->read_buf, EVENT_BUF_SIZE, NULL, &ctx->overlapped);
+            if (rd || GetLastError() == ERROR_IO_PENDING) {
+                ctx->pending_read = 1;
+            }
         }
     }
+    return 0;
 }
 
 HOOK_API void* hook_open_async(const char *db_path, hook_event_fn on_event, void *user_data) {
@@ -435,6 +449,9 @@ HOOK_API void* hook_open_async(const char *db_path, hook_event_fn on_event, void
         ctx->pending_read = 1;
     }
 
+    /* 启动 IOCP 工作线程 */
+    ctx->io_thread = CreateThread(NULL, 0, iocp_worker_thread, ctx, 0, NULL);
+
     return ctx;
 }
 
@@ -445,14 +462,24 @@ HOOK_API int hook_exec_async(void *handle, const char *sql) {
 HOOK_API void hook_close_async(void *handle) {
     if (!handle) return;
     HookAsyncContext *ctx = (HookAsyncContext *)handle;
-    ctx->active = 0;
 
     SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
-    SQLITE.sqlite3_close(ctx->db);
+
+    /* 通知线程退出 */
+    ctx->active = 0;
+    PostQueuedCompletionStatus(ctx->iocp, 0, 0, NULL);
+
+    /* 等待线程退出 */
+    if (ctx->io_thread) {
+        WaitForSingleObject(ctx->io_thread, 5000);
+        CloseHandle(ctx->io_thread);
+    }
 
     if (ctx->pipe_write != INVALID_HANDLE_VALUE) CloseHandle(ctx->pipe_write);
     if (ctx->pipe_read != INVALID_HANDLE_VALUE) CloseHandle(ctx->pipe_read);
     if (ctx->iocp) CloseHandle(ctx->iocp);
+
+    SQLITE.sqlite3_close(ctx->db);
 
     free(ctx);
 }
