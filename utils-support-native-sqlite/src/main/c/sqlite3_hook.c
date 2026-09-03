@@ -313,6 +313,8 @@ struct HookAsyncContext {
 static void async_update_callback(void *ctx_ptr, int action, const char *db_name,
                                    const char *table_name, sqlite3_int64 row_id) {
     HookAsyncContext *ctx = (HookAsyncContext *)ctx_ptr;
+    fprintf(stderr, "[HOOK] async_update_callback fired: action=%d table=%s rowId=%lld active=%d\n",
+            action, table_name ? table_name : "?", (long long)row_id, ctx ? ctx->active : -1);
     if (!ctx || !ctx->active) return;
 
     const char *type_str;
