@@ -549,7 +549,7 @@ HOOK_API void hook_close_async(void *handle) {
     if (!handle) return;
     HookAsyncContext *ctx = (HookAsyncContext *)handle;
 
-    /* 先移除 hook，防止新事件产生 */
+    /* 移除 hook，阻止新事件 */
     SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
 
     /* 通知线程退出 */
@@ -557,19 +557,23 @@ HOOK_API void hook_close_async(void *handle) {
 
     /* 写入 pipe 唤醒 io_uring_wait_cqe_timeout */
     if (ctx->pipe_fd[1] >= 0) {
-        write(ctx->pipe_fd[1], "x", 1);
+        char wake = 'x';
+        (void)write(ctx->pipe_fd[1], &wake, 1);
     }
 
     /* 等待线程退出 */
     pthread_join(ctx->io_thread, NULL);
 
-    /* 线程退出后再关闭 db、pipe、io_uring */
+    /* 先销毁 io_uring（取消挂起操作） */
+    io_uring_queue_exit(&ctx->ring);
+
+    /* 再关闭 pipe fd */
+    if (ctx->pipe_fd[0] >= 0) { close(ctx->pipe_fd[0]); ctx->pipe_fd[0] = -1; }
+    if (ctx->pipe_fd[1] >= 0) { close(ctx->pipe_fd[1]); ctx->pipe_fd[1] = -1; }
+
+    /* 关闭数据库 */
     SQLITE.sqlite3_close(ctx->db);
 
-    if (ctx->pipe_fd[0] >= 0) close(ctx->pipe_fd[0]);
-    if (ctx->pipe_fd[1] >= 0) close(ctx->pipe_fd[1]);
-
-    io_uring_queue_exit(&ctx->ring);
     free(ctx);
 }
 
