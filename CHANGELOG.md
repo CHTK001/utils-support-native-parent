@@ -4,6 +4,17 @@ All notable changes to `utils-support-native-parent` will be documented in this 
 
 ---
 
+### Added macOS (osxcross) cross-compilation support
+
+- `build-macos.sh` — one-click dylib build script using osxcross (`aarch64-apple-darwin` / `x86_64-apple-darwin`)
+- `BUILD-MACOS.md` — macOS cross-compile guide
+- `jni-headers/darwin/` — macOS JNI headers (`jni.h`, `jni_md.h`, `classfile_constants.h`)
+- `utils-support-native-sqlite/src/main/c/sqlite3_hook_macos.c` — macOS SQLite hook（POSIX pipe + select + pthread）
+- 目标平台目录 `darwin-aarch64` / `darwin-x86_64`，与 `NativeUtils.getPlatformDir()` 一致
+
+**2026-09-03**
+
+---
 
 ### Added Linux x86_64 native compilation support
 

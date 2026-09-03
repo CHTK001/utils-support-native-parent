@@ -51,7 +51,7 @@ resolve_toolchain() {
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"
             export CC_aarch64_apple_darwin="$cc"
             export CXX_aarch64_apple_darwin="${cc}++"
-            echo "aarch64-apple-darwin aarch64-apple-darwin-clang darwin-aarch64"
+            echo "aarch64-apple-darwin darwin-aarch64"
             ;;
         x86_64)
             local cc="x86_64-apple-darwin-clang"
@@ -59,7 +59,7 @@ resolve_toolchain() {
             export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"
             export CC_x86_64_apple_darwin="$cc"
             export CXX_x86_64_apple_darwin="${cc}++"
-            echo "x86_64-apple-darwin x86_64-apple-darwin-clang darwin-x86_64"
+            echo "x86_64-apple-darwin darwin-x86_64"
             ;;
         *) echo "[ERROR] unsupported arch: $arch" >&2; exit 1 ;;
     esac
