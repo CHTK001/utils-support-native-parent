@@ -39,7 +39,7 @@ $targets = @{
     }
     'macos'        = @{
         RustTarget = 'aarch64-apple-darwin'
-        Dir        = 'macos-aarch64'
+        Dir        = 'darwin-aarch64'
         LibName    = 'librust_smb_server.dylib'
     }
 }
