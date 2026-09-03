@@ -46,14 +46,20 @@ resolve_toolchain() {
     local arch="$1"
     case "$arch" in
         aarch64)
-            export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="aarch64-apple-darwin-clang"
+            local cc="aarch64-apple-darwin-clang"
+            export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$cc"
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"
-            echo "aarch64-apple-darwin aarch64-apple-darwin-clang"
+            export CC_aarch64_apple_darwin="$cc"
+            export CXX_aarch64_apple_darwin="${cc}++"
+            echo "aarch64-apple-darwin aarch64-apple-darwin-clang darwin-aarch64"
             ;;
         x86_64)
-            export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="x86_64-apple-darwin-clang"
+            local cc="x86_64-apple-darwin-clang"
+            export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$cc"
             export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"
-            echo "x86_64-apple-darwin x86_64-apple-darwin-clang"
+            export CC_x86_64_apple_darwin="$cc"
+            export CXX_x86_64_apple_darwin="${cc}++"
+            echo "x86_64-apple-darwin x86_64-apple-darwin-clang darwin-x86_64"
             ;;
         *) echo "[ERROR] unsupported arch: $arch" >&2; exit 1 ;;
     esac
@@ -132,8 +138,8 @@ build_c_module() {
     mkdir -p "${output_dir}"
 
     case "$arch" in
-        aarch64) local cc="oa64-clang" ;;
-        x86_64)  local cc="o64-clang" ;;
+        aarch64) local cc="aarch64-apple-darwin-clang" ;;
+        x86_64)  local cc="x86_64-apple-darwin-clang" ;;
     esac
 
     if ! "$cc" -O2 -dynamiclib -fPIC \
@@ -161,13 +167,13 @@ echo "============================================================"
 echo ""
 
 for arch in "${ARCHES[@]}"; do
-    read -r target platform_dir <<<"$(resolve_toolchain "$arch")"
+    read -r target platform_dir ccname <<<"$(resolve_toolchain "$arch")"
+    export CARGO_TARGET_DIR_ARCH="$arch"
 
     echo ""
     echo "========== Building for ${target} (${platform_dir}) =========="
 
     rustup target add "$target" 2>/dev/null || true
-
     # --- JNI 模块 ---
     build_rust_module "video-codec"      "chua_native_video_codec" "$target" "$platform_dir" || true
     build_rust_module "nmap"             "rust_nmap"               "$target" "$platform_dir" || true
