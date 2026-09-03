@@ -28,6 +28,14 @@
 #include <liburing.h>
 #endif
 
+/* Force stderr unbuffered so debug output is visible */
+__attribute__((constructor))
+static void _hook_init_debug(void) {
+    setvbuf(stderr, NULL, _IONBF, 0);
+    FILE *f = fopen("/tmp/hook_debug.log", "a");
+    if (f) { fprintf(f, "=== hook library loaded ===\n"); fclose(f); }
+}
+
 /* ═══════════════════════════════════════════════════════════════
  *  SQLite 动态加载
  * ═══════════════════════════════════════════════════════════════ */
