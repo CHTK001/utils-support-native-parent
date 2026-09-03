@@ -309,7 +309,6 @@ HOOK_API void* hook_open_async(const char *db_path, hook_event_fn on_event, void
     SQLITE.sqlite3_update_hook(ctx->db, async_update_callback, ctx);
 
     pthread_create(&ctx->io_thread, NULL, select_thread, ctx);
-    pthread_detach(ctx->io_thread);
 
     return ctx;
 }
@@ -321,15 +320,26 @@ HOOK_API int hook_exec_async(void *handle, const char *sql) {
 HOOK_API void hook_close_async(void *handle) {
     if (!handle) return;
     HookAsyncContext *ctx = (HookAsyncContext *)handle;
+
+    /* 移除 hook，阻止新事件 */
+    SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
+
+    /* 通知线程退出 */
     ctx->active = 0;
 
-    usleep(1000);
+    /* 写入 pipe 唤醒 select */
+    if (ctx->pipe_fd[1] >= 0) {
+        char wake = 'x';
+        (void)write(ctx->pipe_fd[1], &wake, 1);
+    }
 
-    SQLITE.sqlite3_update_hook(ctx->db, NULL, NULL);
-    SQLITE.sqlite3_close(ctx->db);
+    /* 等待线程退出，避免 use-after-free */
+    pthread_join(ctx->io_thread, NULL);
 
     if (ctx->pipe_fd[0] >= 0) close(ctx->pipe_fd[0]);
     if (ctx->pipe_fd[1] >= 0) close(ctx->pipe_fd[1]);
+
+    SQLITE.sqlite3_close(ctx->db);
 
     free(ctx);
 }
