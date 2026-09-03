@@ -7,6 +7,7 @@
 #  依赖：
 #    1. GCC 或 Clang
 #    2. SQLite 运行时库（Linux: libsqlite3.so, macOS: /usr/lib/libsqlite3.dylib）
+#    3. Linux: liburing（io_uring 异步 I/O 支持）
 #
 #  用法：
 #    chmod +x build.sh && ./build.sh
@@ -22,12 +23,13 @@ case "$OS" in
     linux)
         OUT_DIR="$SCRIPT_DIR/../resources/native/linux-$ARCH"
         LIB_NAME="libsqlite3_hook.so"
-        LIBS="-lpthread -ldl"
+        LIBS="-lpthread -ldl -luring"
         ;;
     darwin)
-        OUT_DIR="$SCRIPT_DIR/../resources/native/osx-$ARCH"
+        OUT_DIR="$SCRIPT_DIR/../resources/native/darwin-$ARCH"
         LIB_NAME="libsqlite3_hook.dylib"
-        LIBS=""
+        SRC_FILE="sqlite3_hook_macos.c"
+        LIBS="-lpthread"
         ;;
     *)
         echo "Unsupported OS: $OS"
@@ -41,7 +43,7 @@ echo "[sqlite3_hook] Building $LIB_NAME..."
 
 gcc -O2 -shared -fPIC \
     -I"$SCRIPT_DIR" \
-    "$SCRIPT_DIR/sqlite3_hook.c" \
+    "$SCRIPT_DIR/${SRC_FILE:-sqlite3_hook.c}" \
     -o "$OUT_DIR/$LIB_NAME" \
     $LIBS
 
