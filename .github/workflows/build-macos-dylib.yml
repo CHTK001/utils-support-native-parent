@@ -1,0 +1,71 @@
+name: build-macos-dylib
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'build-macos.sh'
+      - 'jni-headers/**'
+      - 'utils-support-native-*/src/main/rust/**'
+      - 'utils-support-native-*/src/rust/**'
+      - 'utils-support-native-*/src/main/c/**'
+      - '.github/workflows/build-macos-dylib.yml'
+
+jobs:
+  osxcross:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, x86_64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-apple-darwin
+
+      - name: Cache osxcross
+        id: cache-osxcross
+        uses: actions/cache@v4
+        with:
+          path: /opt/osxcross
+          key: osxcross-sdk-11.3-1
+
+      - name: Install osxcross
+        if: steps.cache-osxcross.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld cmake libxml2-dev libssl-dev zlib1g-dev libbz2-dev liblzma-dev
+          git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
+          curl -sSL -o /tmp/MacOSX11.3.sdk.tar.xz \
+            https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz
+          mkdir -p /tmp/osxcross/incoming
+          cp /tmp/MacOSX11.3.sdk.tar.xz /tmp/osxcross/incoming/
+          cd /tmp/osxcross
+          UNATTENDED=1 ./build.sh
+          sudo mv target /opt/osxcross
+          echo "::group::osxcross version"
+          /opt/osxcross/bin/o64-clang --version
+          echo "::endgroup::"
+
+      - name: Build dylib (${{ matrix.arch }})
+        run: |
+          export OSXCROSS_ROOT=/opt/osxcross
+          export PATH="/opt/osxcross/bin:$PATH"
+          chmod +x build-macos.sh
+          ./build-macos.sh ${{ matrix.arch }}
+
+      - name: Upload dylib artifacts (${{ matrix.arch }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: dylib-${{ matrix.arch }}
+          path: |
+            utils-support-native-*/src/main/resources/native/darwin-${{ matrix.arch }}/**/*.dylib
+          if-no-files-found: error
