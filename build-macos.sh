@@ -25,14 +25,20 @@ CARGO_TARGET_DIR="$SCRIPT_DIR/target-macos"
 OUTPUT_BASE="$SCRIPT_DIR"
 
 # ---- osxcross 定位 ----
+# 标准 osxcross ./build.sh 将工具链放到 <root>/target/bin；
+# 若手动整理为 <root>/bin（CI 常用），同样支持。
 OSXCROSS_ROOT="${OSXCROSS_ROOT:-/opt/osxcross}"
-OSXCROSS_BIN="$OSXCROSS_ROOT/bin"
-if [ ! -d "$OSXCROSS_BIN" ]; then
-    echo "[ERROR] osxcross not found at $OSXCROSS_ROOT"
-    echo "        export OSXCROSS_ROOT=/path/to/osxcross"
+if [ -d "$OSXCROSS_ROOT/target/bin" ]; then
+    OSXCROSS_BIN="$OSXCROSS_ROOT/target/bin"
+elif [ -d "$OSXCROSS_ROOT/bin" ]; then
+    OSXCROSS_BIN="$OSXCROSS_ROOT/bin"
+else
+    echo "[ERROR] osxcross toolchain not found under $OSXCROSS_ROOT"
+    echo "        run ./build.sh first, or export OSXCROSS_ROOT=/path/to/osxcross"
     exit 1
 fi
 export PATH="$OSXCROSS_BIN:$PATH"
+echo "[INFO] osxcross bin: $OSXCROSS_BIN"
 
 # ---- 目标架构解析（默认 aarch64 / Apple Silicon）----
 if [ "$#" -eq 0 ]; then
