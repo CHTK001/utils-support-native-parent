@@ -321,8 +321,14 @@ struct HookAsyncContext {
 static void async_update_callback(void *ctx_ptr, int action, const char *db_name,
                                    const char *table_name, sqlite3_int64 row_id) {
     HookAsyncContext *ctx = (HookAsyncContext *)ctx_ptr;
-    fprintf(stderr, "[HOOK] async_update_callback fired: action=%d table=%s rowId=%lld active=%d\n",
-            action, table_name ? table_name : "?", (long long)row_id, ctx ? ctx->active : -1);
+    {
+        FILE *f = fopen("/tmp/hook_debug.log", "a");
+        if (f) {
+            fprintf(f, "[HOOK] async_update_callback fired: action=%d table=%s rowId=%lld active=%d\n",
+                    action, table_name ? table_name : "?", (long long)row_id, ctx ? ctx->active : -1);
+            fclose(f);
+        }
+    }
     if (!ctx || !ctx->active) return;
 
     const char *type_str;
@@ -342,7 +348,13 @@ static void async_update_callback(void *ctx_ptr, int action, const char *db_name
              "{\"type\":\"%s\",\"database\":\"%s\",\"table\":\"%s\",\"rowId\":%lld}",
              type_str, db_name ? db_name : "main", table_name ? table_name : "", (long long)row_id);
     ctx->ring_head = next;
-    fprintf(stderr, "[HOOK] async_update_callback: wrote to ring_buf[%u], ring_head=%u\n", head, ctx->ring_head);
+    {
+        FILE *f = fopen("/tmp/hook_debug.log", "a");
+        if (f) {
+            fprintf(f, "[HOOK] async_update_callback: wrote to ring_buf[%u], ring_head=%u\n", head, ctx->ring_head);
+            fclose(f);
+        }
+    }
 
     /* 通知事件循环 */
 #ifdef _WIN32
@@ -353,7 +365,13 @@ static void async_update_callback(void *ctx_ptr, int action, const char *db_name
 #else
     if (ctx->pipe_fd[1] >= 0) {
         ssize_t wr = write(ctx->pipe_fd[1], "x", 1);
-        fprintf(stderr, "[HOOK] pipe write: fd=%d result=%zd errno=%d\n", ctx->pipe_fd[1], wr, (wr < 0) ? errno : 0);
+        {
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) {
+                fprintf(f, "[HOOK] pipe write: fd=%d result=%zd errno=%d\n", ctx->pipe_fd[1], wr, (wr < 0) ? errno : 0);
+                fclose(f);
+            }
+        }
     }
 #endif
 }
@@ -478,7 +496,10 @@ HOOK_API void hook_close_async(void *handle) {
 static void *io_uring_thread(void *arg) {
     HookAsyncContext *ctx = (HookAsyncContext *)arg;
     struct io_uring *ring = &ctx->ring;
-    fprintf(stderr, "[HOOK] io_uring_thread started, pipe_fd[0]=%d\n", ctx->pipe_fd[0]);
+    {
+        FILE *f = fopen("/tmp/hook_debug.log", "a");
+        if (f) { fprintf(f, "[HOOK] io_uring_thread started, pipe_fd[0]=%d\n", ctx->pipe_fd[0]); fclose(f); }
+    }
 
     while (ctx->active) {
         struct io_uring_cqe *cqe;
@@ -486,26 +507,36 @@ static void *io_uring_thread(void *arg) {
         int ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
         if (ret == -ETIME || ret == -EINTR) continue;
         if (ret < 0) {
-            fprintf(stderr, "[HOOK] io_uring_wait_cqe_timeout error: %d\n", ret);
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) { fprintf(f, "[HOOK] io_uring_wait_cqe_timeout error: %d\n", ret); fclose(f); }
             continue;
         }
 
-        fprintf(stderr, "[HOOK] io_uring CQE received: res=%d\n", cqe->res);
+        {
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) { fprintf(f, "[HOOK] io_uring CQE received: res=%d\n", cqe->res); fclose(f); }
+        }
         if (cqe->res > 0) {
             char dummy[EVENT_BUF_SIZE];
             ssize_t rd = read(ctx->pipe_fd[0], dummy, sizeof(dummy));
-            fprintf(stderr, "[HOOK] pipe read: fd=%d result=%zd errno=%d\n", ctx->pipe_fd[0], rd, (rd < 0) ? errno : 0);
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) { fprintf(f, "[HOOK] pipe read: fd=%d result=%zd errno=%d\n", ctx->pipe_fd[0], rd, (rd < 0) ? errno : 0); fclose(f); }
         }
 
         io_uring_cqe_seen(ring, cqe);
-        fprintf(stderr, "[HOOK] ring_tail=%u, ring_head=%u\n", ctx->ring_tail, ctx->ring_head);
+        {
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) { fprintf(f, "[HOOK] ring_tail=%u, ring_head=%u\n", ctx->ring_tail, ctx->ring_head); fclose(f); }
+        }
 
         while (ctx->ring_tail != ctx->ring_head) {
             uint32_t tail = ctx->ring_tail;
-            fprintf(stderr, "[HOOK] processing event %u: %s\n", tail, ctx->ring_buf[tail]);
+            FILE *f = fopen("/tmp/hook_debug.log", "a");
+            if (f) { fprintf(f, "[HOOK] processing event %u: %s\n", tail, ctx->ring_buf[tail]); fclose(f); }
             if (ctx->on_event) {
                 ctx->on_event(ctx->ring_buf[tail], ctx->user_data);
-                fprintf(stderr, "[HOOK] on_event returned for event %u\n", tail);
+                f = fopen("/tmp/hook_debug.log", "a");
+                if (f) { fprintf(f, "[HOOK] on_event returned for event %u\n", tail); fclose(f); }
             }
             ctx->ring_tail = (tail + 1) & RING_MASK;
         }
@@ -515,13 +546,16 @@ static void *io_uring_thread(void *arg) {
             if (sqe) {
                 io_uring_prep_read(sqe, ctx->pipe_fd[0], ctx->read_buf, EVENT_BUF_SIZE, 0);
                 int submit_ret = io_uring_submit(ring);
-                fprintf(stderr, "[HOOK] re-submitted read SQE: submit_ret=%d\n", submit_ret);
+                FILE *f = fopen("/tmp/hook_debug.log", "a");
+                if (f) { fprintf(f, "[HOOK] re-submitted read SQE: submit_ret=%d\n", submit_ret); fclose(f); }
             } else {
-                fprintf(stderr, "[HOOK] failed to get SQE for re-submit\n");
+                FILE *f = fopen("/tmp/hook_debug.log", "a");
+                if (f) { fprintf(f, "[HOOK] failed to get SQE for re-submit\n"); fclose(f); }
             }
         }
     }
-    fprintf(stderr, "[HOOK] io_uring_thread exiting\n");
+    FILE *f = fopen("/tmp/hook_debug.log", "a");
+    if (f) { fprintf(f, "[HOOK] io_uring_thread exiting\n"); fclose(f); }
     return NULL;
 }
 
