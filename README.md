@@ -86,6 +86,22 @@ dependencies {
 mvn clean install
 ```
 
+### Native 库交叉编译
+
+预编译动态库位于各模块 `src/main/resources/native/<platform>/`，可分别按平台交叉编译：
+
+| 平台 | 平台目录 | 构建脚本 | 指南 |
+|------|----------|----------|------|
+| Linux x86_64 | `linux-x86_64` | `build-linux.sh` | [BUILD-LINUX.md](BUILD-LINUX.md) |
+| macOS (osxcross) | `darwin-aarch64` / `darwin-x86_64` | `build-macos.sh` | [BUILD-MACOS.md](BUILD-MACOS.md) |
+
+macOS 示例（需 Linux 主机 + osxcross）：
+
+```bash
+export OSXCROSS_ROOT=/opt/osxcross
+./build-macos.sh aarch64 x86_64   # Apple Silicon + Intel 双架构 dylib
+```
+
 ## 测试覆盖
 
 > 最新测试结果：2026-09-01，运行 `com.chua.test.NativeTestSuite`
