@@ -45,7 +45,7 @@ OSXCROSS_LIB="$(dirname "$OSXCROSS_BIN")/lib"
 [ -d "$OSXCROSS_LIB" ] || OSXCROSS_LIB="$OSXCROSS_ROOT/lib"
 [ -d "$OSXCROSS_LIB" ] || OSXCROSS_LIB="$OSXCROSS_ROOT/target/lib"
 if [ -d "$OSXCROSS_LIB" ]; then
-    export LD_LIBRARY_PATH="$OSXCROSS_LIB:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="$OSXCROSS_LIB:${LD_LIBRARY_PATH:-}"
     echo "[INFO] osxcross lib: $OSXCROSS_LIB"
 fi
 
