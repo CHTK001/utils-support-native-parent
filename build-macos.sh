@@ -40,6 +40,15 @@ fi
 export PATH="$OSXCROSS_BIN:$PATH"
 echo "[INFO] osxcross bin: $OSXCROSS_BIN"
 
+# osxcross 自带的 libxar/libtapi 运行时库（osxcross ld 依赖 libxar.so.1）
+OSXCROSS_LIB="$(dirname "$OSXCROSS_BIN")/lib"
+[ -d "$OSXCROSS_LIB" ] || OSXCROSS_LIB="$OSXCROSS_ROOT/lib"
+[ -d "$OSXCROSS_LIB" ] || OSXCROSS_LIB="$OSXCROSS_ROOT/target/lib"
+if [ -d "$OSXCROSS_LIB" ]; then
+    export LD_LIBRARY_PATH="$OSXCROSS_LIB:$LD_LIBRARY_PATH"
+    echo "[INFO] osxcross lib: $OSXCROSS_LIB"
+fi
+
 # ---- 目标架构解析（默认 aarch64 / Apple Silicon）----
 if [ "$#" -eq 0 ]; then
     ARCHES=(aarch64)

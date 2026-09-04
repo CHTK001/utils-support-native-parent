@@ -45,7 +45,7 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft* /etc/apt/sources.list.d/azure* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld cmake libxml2-dev libssl-dev zlib1g-dev libbz2-dev liblzma-dev libxar1
+            clang lld cmake libxml2-dev libssl-dev zlib1g-dev libbz2-dev liblzma-dev
           git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           curl -sSL -o /tmp/MacOSX11.3.sdk.tar.xz \
             https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz
