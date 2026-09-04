@@ -67,24 +67,24 @@ resolve_toolchain() {
         aarch64)
             local cc
             cc="$(pick_tool aarch64-apple-darwin-clang oa64-clang)"
-            export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$cc"
-            export CC_aarch64_apple_darwin="$cc"
-            export CXX_aarch64_apple_darwin="$(pick_tool "${cc}++" oa64-clang++)"
-            if command -v aarch64-apple-darwin-ar >/dev/null 2>&1; then
-                export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"
-            fi
-            echo "aarch64-apple-darwin darwin-aarch64"
+            cat <<EOF
+export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$cc"
+export CC_aarch64_apple_darwin="$cc"
+$(if command -v aarch64-apple-darwin-ar >/dev/null 2>&1; then echo 'export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"'; fi)
+export TARGET="aarch64-apple-darwin"
+export PLATFORM_DIR="darwin-aarch64"
+EOF
             ;;
         x86_64)
             local cc
             cc="$(pick_tool x86_64-apple-darwin-clang o64-clang)"
-            export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$cc"
-            export CC_x86_64_apple_darwin="$cc"
-            export CXX_x86_64_apple_darwin="$(pick_tool "${cc}++" o64-clang++)"
-            if command -v x86_64-apple-darwin-ar >/dev/null 2>&1; then
-                export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"
-            fi
-            echo "x86_64-apple-darwin darwin-x86_64"
+            cat <<EOF
+export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$cc"
+export CC_x86_64_apple_darwin="$cc"
+$(if command -v x86_64-apple-darwin-ar >/dev/null 2>&1; then echo 'export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"'; fi)
+export TARGET="x86_64-apple-darwin"
+export PLATFORM_DIR="darwin-x86_64"
+EOF
             ;;
         *) echo "[ERROR] unsupported arch: $arch" >&2; exit 1 ;;
     esac
@@ -192,7 +192,10 @@ echo "============================================================"
 echo ""
 
 for arch in "${ARCHES[@]}"; do
-    read -r target platform_dir <<<"$(resolve_toolchain "$arch")"
+    # eval 使 resolve_toolchain 输出的 export 在当前 shell 生效
+    eval "$(resolve_toolchain "$arch")"
+    target="$TARGET"
+    platform_dir="$PLATFORM_DIR"
 
     echo ""
     echo "========== Building for ${target} (${platform_dir}) =========="
