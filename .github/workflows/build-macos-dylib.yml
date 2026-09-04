@@ -40,14 +40,18 @@ jobs:
         if: steps.cache-osxcross.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
+          # GitHub hosted runner 上 packages.microsoft.com 源返回 403，
+          # 先移除这些失效源再 apt-get update，避免安装依赖失败
+          sudo rm -f /etc/apt/sources.list.d/microsoft* /etc/apt/sources.list.d/azure* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang lld cmake libxml2-dev libssl-dev zlib1g-dev libbz2-dev liblzma-dev
           git clone --depth 1 https://github.com/tpoechtrager/osxcross.git /tmp/osxcross
           curl -sSL -o /tmp/MacOSX11.3.sdk.tar.xz \
             https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz
-          mkdir -p /tmp/osxcross/incoming
-          cp /tmp/MacOSX11.3.sdk.tar.xz /tmp/osxcross/incoming/
+          # osxcross 3.x 从 tarballs/ 目录读取 SDK（旧的 incoming/ 已不再扫描）
+          mkdir -p /tmp/osxcross/tarballs
+          cp /tmp/MacOSX11.3.sdk.tar.xz /tmp/osxcross/tarballs/
           cd /tmp/osxcross
           UNATTENDED=1 ./build.sh
           sudo mv target /opt/osxcross
