@@ -70,6 +70,7 @@ resolve_toolchain() {
             cat <<EOF
 export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$cc"
 export CC_aarch64_apple_darwin="$cc"
+export CXX_aarch64_apple_darwin="$(pick_tool "${cc}++" oa64-clang++)"
 $(if command -v aarch64-apple-darwin-ar >/dev/null 2>&1; then echo 'export CARGO_TARGET_AARCH64_APPLE_DARWIN_AR="aarch64-apple-darwin-ar"'; fi)
 export TARGET="aarch64-apple-darwin"
 export PLATFORM_DIR="darwin-aarch64"
@@ -81,6 +82,7 @@ EOF
             cat <<EOF
 export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$cc"
 export CC_x86_64_apple_darwin="$cc"
+export CXX_x86_64_apple_darwin="$(pick_tool "${cc}++" o64-clang++)"
 $(if command -v x86_64-apple-darwin-ar >/dev/null 2>&1; then echo 'export CARGO_TARGET_X86_64_APPLE_DARWIN_AR="x86_64-apple-darwin-ar"'; fi)
 export TARGET="x86_64-apple-darwin"
 export PLATFORM_DIR="darwin-x86_64"
