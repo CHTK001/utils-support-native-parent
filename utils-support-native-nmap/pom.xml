@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+    </parent>
+    <artifactId>utils-support-native-nmap</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native Nmap</name>
+    <description>高性能网络端口扫描库，支持 TCP/UDP 扫描、DNS 解析、服务识别。</description>
+</project>
