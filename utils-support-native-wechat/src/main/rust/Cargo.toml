@@ -1,0 +1,18 @@
+[package]
+name = "wechat_wcdb_ffi"
+version = "0.1.0"
+edition = "2021"
+authors = ["CH"]
+
+[lib]
+name = "wechat_wcdb"
+crate-type = ["cdylib"]
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
