@@ -1040,3 +1040,267 @@ fn write_out(out: *mut *mut c_char, json: &str) {
     let cstring = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
     unsafe { *out = cstring.into_raw() };
 }
+
+// ============================================================================
+// 密钥提取功能（仅 Windows）
+// ============================================================================
+
+#[cfg(target_os = "windows")]
+mod key_extract {
+    use std::mem;
+    use windows_sys::Win32::Foundation::{CloseHandle, BOOL, HANDLE, TRUE};
+    use windows_sys::Win32::System::Diagnostics::Toolhelp::{
+        CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE,
+        TH32CS_SNAPMODULE32, MODULEENTRY32W,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    };
+
+    /// WeChat 进程名候选
+    const WECHAT_PROCESS: &[&str] = &["Weixin.exe", "WeChat.exe"];
+    /// WeChat 核心 DLL 名候选
+    const WECHAT_DLL: &[&str] = &["Weixin.dll", "WeChatWin.dll"];
+
+    /// 打开进程并返回句柄
+    unsafe fn open_process_by_name(name: &str) -> Option<HANDLE> {
+        use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+        use windows_sys::Win32::System::ProcessStatus::GetProcessId;
+
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == 0 || snapshot == usize::MAX {
+            return None;
+        }
+
+        let mut entry: windows_sys::Win32::System::Diagnostics::Toolhelp::PROCESSENTRY32W =
+            unsafe { mem::zeroed() };
+        entry.dwSize = mem::size_of::<windows_sys::Win32::System::Diagnostics::Toolhelp::PROCESSENTRY32W>() as u32;
+
+        let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+
+        if unsafe { windows_sys::Win32::System::Diagnostics::Toolhelp::Process32FirstW(snapshot, &mut entry) } == TRUE {
+            loop {
+                if entry.szExeFile[..name_wide.len()] == name_wide[..] {
+                    let h = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, entry.th32ProcessID) };
+                    if h != 0 && h != usize::MAX {
+                        unsafe { CloseHandle(snapshot) };
+                        return Some(h);
+                    }
+                }
+                if unsafe { windows_sys::Win32::System::Diagnostics::Toolhelp::Process32NextW(snapshot, &mut entry) } != TRUE {
+                    break;
+                }
+            }
+        }
+        unsafe { CloseHandle(snapshot) };
+        None
+    }
+
+    /// 获取进程中指定模块的基地址和大小
+    unsafe fn get_module_info(
+        proc_handle: HANDLE,
+        module_name: &str,
+    ) -> Option<(usize, usize)> {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, unsafe {
+            windows_sys::Win32::System::Threading::GetProcessId(proc_handle)
+        });
+        if snapshot == 0 || snapshot == usize::MAX {
+            return None;
+        }
+
+        let mut entry: MODULEENTRY32W = unsafe { mem::zeroed() };
+        entry.dwSize = mem::size_of::<MODULEENTRY32W>() as u32;
+
+        let name_lower: Vec<u16> = module_name
+            .to_lowercase()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        if unsafe { Module32FirstW(snapshot, &mut entry) } == TRUE {
+            loop {
+                let mod_name = &entry.szModule;
+                let mod_len = mod_name.iter().position(|&c| c == 0).unwrap_or(mod_name.len());
+                let mod_lower: Vec<u16> = mod_name[..mod_len]
+                    .iter()
+                    .map(|c| c.to_ascii_lowercase())
+                    .chain(std::iter::once(0))
+                    .collect();
+
+                if mod_lower[..mod_lower.len() - 1] == name_lower[..name_lower.len() - 1] {
+                    let base = entry.modBaseAddr as usize;
+                    let size = entry.modBaseSize as usize;
+                    unsafe { CloseHandle(snapshot) };
+                    return Some((base, size));
+                }
+                if unsafe { Module32NextW(snapshot, &mut entry) } != TRUE {
+                    break;
+                }
+            }
+        }
+        unsafe { CloseHandle(snapshot) };
+        None
+    }
+
+    /// 从进程内存中读取数据
+    unsafe fn read_memory(
+        proc_handle: HANDLE,
+        address: usize,
+        size: usize,
+    ) -> Option<Vec<u8>> {
+        let mut buffer = vec![0u8; size];
+        let mut bytes_read = 0usize;
+        let result = windows_sys::Win32::Foundation::ReadProcessMemory(
+            proc_handle,
+            address,
+            buffer.as_mut_ptr() as *mut _,
+            size,
+            &mut bytes_read,
+        );
+        if result == TRUE && bytes_read > 0 {
+            buffer.truncate(bytes_read);
+            Some(buffer)
+        } else {
+            None
+        }
+    }
+
+    /// 在内存块中搜索 64 位十六进制密钥（32 字节原始密钥的 hex 表示）
+    /// WeChat 4.x 使用 PBKDF2 派生的 32 字节密钥，以 hex 字符串形式存储
+    fn find_key_in_memory(data: &[u8]) -> Option<String> {
+        // 搜索 SetDBKey 或 SetKey 相关的函数调用模式
+        // 密钥通常紧跟在特定的字节模式后面
+
+        // 方法1：搜索 "SetDBKey" 字符串引用
+        let set_db_key = b"SetDBKey";
+        for i in 0..data.len().saturating_sub(set_db_key.len()) {
+            if &data[i..i + set_db_key.len()] == set_db_key {
+                // 在 SetDBKey 后面搜索可能的密钥
+                let search_start = i + set_db_key.len();
+                let search_end = (search_start + 256).min(data.len());
+                if let Some(key) = extract_hex_key(&data[search_start..search_end]) {
+                    return Some(key);
+                }
+            }
+        }
+
+        // 方法2：搜索 32 字节连续的可打印 hex 字符串（64 字符）
+        for i in 0..data.len().saturating_sub(64) {
+            let chunk = &data[i..i + 64];
+            if is_hex_string(chunk) {
+                let s = String::from_utf8_lossy(chunk).to_string();
+                // 额外校验：不能全是 '0' 或全是 'f'
+                if s.chars().all(|c| c == '0') || s.chars().all(|c| c == 'f') {
+                    continue;
+                }
+                return Some(s);
+            }
+        }
+
+        None
+    }
+
+    /// 检查字节数组是否为有效的 hex 字符串
+    fn is_hex_string(data: &[u8]) -> bool {
+        data.len() == 64 && data.iter().all(|b| b.is_ascii_hexdigit())
+    }
+
+    /// 从内存块中提取 hex 密钥
+    fn extract_hex_key(data: &[u8]) -> Option<String> {
+        // 查找 64 字符的 hex 字符串
+        for i in 0..data.len().saturating_sub(64) {
+            let chunk = &data[i..i + 64];
+            if is_hex_string(chunk) {
+                return Some(String::from_utf8_lossy(chunk).to_string());
+            }
+        }
+        None
+    }
+
+    /// 从运行中的 WeChat 进程提取数据库加密密钥
+    /// 返回 64 位十六进制密钥字符串
+    pub fn extract_key() -> Result<String, String> {
+        unsafe {
+            // 1. 查找 WeChat 进程
+            let proc_handle = WECHAT_PROCESS
+                .iter()
+                .find_map(|name| open_process_by_name(name))
+                .ok_or_else(|| "未找到微信进程，请先启动并登录微信".to_string())?;
+
+            // 2. 获取核心 DLL 模块信息
+            let (module_base, module_size) = WECHAT_DLL
+                .iter()
+                .find_map(|name| get_module_info(proc_handle, name))
+                .ok_or_else(|| "未找到微信核心模块 (Weixin.dll/WeChatWin.dll)".to_string())?;
+
+            // 3. 分块读取模块内存并搜索密钥
+            const CHUNK_SIZE: usize = 4 * 1024 * 1024; // 4MB chunks
+            let mut offset = 0usize;
+
+            while offset < module_size {
+                let read_size = (CHUNK_SIZE + 64).min(module_size - offset);
+                if let Some(data) = read_memory(proc_handle, module_base + offset, read_size) {
+                    if let Some(key) = find_key_in_memory(&data) {
+                        // 校验密钥格式
+                        if is_valid_key(&key) {
+                            return Ok(key);
+                        }
+                    }
+                }
+                offset += CHUNK_SIZE;
+            }
+
+            // 4. 如果模块内未找到，尝试搜索进程堆内存
+            Err("在微信进程内存中未找到数据库密钥。可能原因：\n1. 微信版本不支持\n2. 密钥格式已变化\n3. 需要管理员权限".to_string())
+        }
+    }
+}
+
+/// 从运行中的微信进程提取数据库加密密钥。
+///
+/// <p>该函数通过读取微信进程内存搜索加密密钥，适用于 Windows 平台。
+/// 需要以管理员权限运行才能读取其他进程的内存。</p>
+///
+/// <p>返回 64 位十六进制密钥字符串，失败时返回错误信息。</p>
+///
+/// @param out 输出参数，成功时写入密钥字符串指针（需用 wechat_wcdb_free_string 释放）
+/// @return RC_OK 成功，RC_OPEN 进程未找到或权限不足
+#[no_mangle]
+pub extern "C" fn wechat_wcdb_extract_key(out: *mut *mut c_char) -> i32 {
+    #[cfg(target_os = "windows")]
+    {
+        match key_extract::extract_key() {
+            Ok(key) => {
+                let ckey = CString::new(key).unwrap_or_default();
+                unsafe { *out = ckey.into_raw() };
+                RC_OK
+            }
+            Err(e) => {
+                set_error(e);
+                RC_OPEN
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        set_error("密钥提取仅支持 Windows 平台");
+        RC_OPEN
+    }
+}
+
+/// 检测当前平台是否支持密钥自动提取。
+///
+/// <p>目前仅支持 Windows 平台（需要读取微信进程内存）。</p>
+///
+/// @return 1 支持，0 不支持
+#[no_mangle]
+pub extern "C" fn wechat_wcdb_can_extract_key() -> i32 {
+    #[cfg(target_os = "windows")]
+    {
+        1
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}

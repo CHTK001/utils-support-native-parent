@@ -21,6 +21,14 @@ rusqlite = { version = "0.32", default-features = false, features = [
 ] }
 serde_json = "1.0"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+] }
+
 [profile.release]
 opt-level = 3
 lto = true
