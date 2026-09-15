@@ -225,7 +225,8 @@ public final class WechatWcdbBridge implements AutoCloseable {
         try (Arena confined = Arena.ofConfined()) {
             MemorySegment dbSegment = confined.allocateFrom(dbPath, StandardCharsets.UTF_8);
             MemorySegment keySegment = confined.allocateFrom(key, StandardCharsets.UTF_8);
-            MemorySegment handleOut = confined.allocate(ValueLayout.JAVA_LONG, 0L);
+            MemorySegment handleOut = confined.allocate(ValueLayout.JAVA_LONG);
+            handleOut.set(ValueLayout.JAVA_LONG, 0L, 0L);
             int rc = (int) openAccountHandle.invokeExact(dbSegment, keySegment, handleOut);
             if (rc != RC_OK) {
                 throw new IllegalStateException("wechat_wcdb_open_account 失败, code=" + rc
@@ -315,7 +316,8 @@ public final class WechatWcdbBridge implements AutoCloseable {
     public int getMessageCount(long handle, String username) {
         try (Arena confined = Arena.ofConfined()) {
             MemorySegment usernameSegment = confined.allocateFrom(username, StandardCharsets.UTF_8);
-            MemorySegment countOut = confined.allocate(ValueLayout.JAVA_INT, 0);
+            MemorySegment countOut = confined.allocate(ValueLayout.JAVA_INT);
+            countOut.set(ValueLayout.JAVA_INT, 0L, 0);
             int rc = (int) getMessageCountHandle.invokeExact(handle, usernameSegment, countOut);
             if (rc != RC_OK) {
                 throw new IllegalStateException("wechat_wcdb_get_message_count 失败, code=" + rc

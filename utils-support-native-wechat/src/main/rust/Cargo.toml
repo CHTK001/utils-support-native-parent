@@ -6,10 +6,19 @@ authors = ["CH"]
 
 [lib]
 name = "wechat_wcdb"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "selftest"
+path = "src/bin/selftest.rs"
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
+# 启用 SQLCipher：libsqlite3-sys 的 bundled-sqlcipher 特性会编译 SQLCipher 引擎
+# （sqlcipher/sqlite3.c），并 vendored OpenSSL
+rusqlite = { version = "0.32", default-features = false, features = [
+    "bundled-sqlcipher",
+    "bundled-sqlcipher-vendored-openssl",
+] }
 serde_json = "1.0"
 
 [profile.release]

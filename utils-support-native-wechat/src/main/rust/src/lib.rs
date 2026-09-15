@@ -424,7 +424,7 @@ fn open_account_inner(path: &str, key: &str) -> Result<Account, String> {
     if !db_file.is_file() {
         return Err(format!("数据库文件不存在: {}", path));
     }
-    let conn = open_sqlcipher(&file_uri(&db_file), key)
+    let conn = open_sqlcipher(&file_uri(&db_file), key, &db_file)
         .map_err(|e| format!("打开 session.db 失败（密钥错误或非微信 4.x 库）: {}", e))?;
 
     // 目录结构：<storage>/session/session.db、<storage>/message/message_*.db、<storage>/contact/contact.db
@@ -740,7 +740,14 @@ fn parse_name_request(input: &str) -> Vec<String> {
 }
 
 /// 打开 SQLCipher 加密库（只读 URI），并执行微信 4.x 参数序列。
-fn open_sqlcipher(uri: &str, key: &str) -> Result<Connection, String> {
+///
+/// 微信 4.x 的密钥是 32 字节 raw key（64 位 hex）。SQLCipher 4.x 的二进制模式
+/// 通过 `PRAGMA key = '0x<raw_key_hex>'` 触发（跳过 PBKDF2，直接用 32B 密钥），
+/// salt 由 SQLCipher 自动从文件头读取并在 KDF 阶段处理，无需手动拼接。
+///
+/// 使用参数绑定避免 SQL 字符串字面量对 `x'...'` 的误解析。
+fn open_sqlcipher(uri: &str, key: &str, db_path: &Path) -> Result<Connection, String> {
+    let raw_key = normalize_key(key, db_path);
     let conn = Connection::open_with_flags(
         uri,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
@@ -748,18 +755,26 @@ fn open_sqlcipher(uri: &str, key: &str) -> Result<Connection, String> {
     .map_err(|e| e.to_string())?;
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| e.to_string())?;
+
+    // 先设置 cipher 参数，再设 key（SQLCipher 4.x 中 PRAGMA key 必须在 cipher 参数后生效）
     conn.execute_batch(
         format!(
-            "PRAGMA key = \"x'{}'\";\
-             PRAGMA cipher_page_size = {};\
+            "PRAGMA cipher_page_size = {};\
              PRAGMA kdf_iter = {};\
              PRAGMA cipher_hmac_algorithm = HMAC_SHA512;\
              PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;",
-            key, CIPHER_PAGE_SIZE, KDF_ITER
+            CIPHER_PAGE_SIZE, KDF_ITER
         )
         .as_str(),
     )
     .map_err(|e| e.to_string())?;
+
+    // 二进制模式：PRAGMA key = '0x<raw_key_hex>'（字符串字面量，SQLite PRAGMA 不支持参数绑定）
+    // SQLCipher 4.x 检测到 0x 前缀即进入 binary mode（32B raw key）
+    let key_literal = format!("'0x{}'", raw_key);
+    conn.execute_batch(&format!("PRAGMA key = {}", key_literal))
+        .map_err(|e| e.to_string())?;
+
     // 首次读访问触发密钥派生与 HMAC 校验，验证密钥正确性
     conn.query_row(
         "SELECT count(*) FROM sqlite_master",
@@ -771,18 +786,28 @@ fn open_sqlcipher(uri: &str, key: &str) -> Result<Connection, String> {
 }
 
 /// 在主连接上 ATTACH 一个加密库（只读 URI + 微信 4.x 密码参数）。
+///
+/// 密钥处理与 `open_sqlcipher` 一致：32 字节 raw key 走 SQLCipher 4.x
+/// 二进制模式 `PRAGMA key = '0x<raw_key_hex>'`。
 fn attach_sqlcipher(conn: &Connection, alias: &str, db_path: &Path, key: &str) -> Result<(), String> {
+    let raw_key = normalize_key(key, db_path);
     let uri = file_uri(db_path).replace('\'', "''");
     conn.execute_batch(
         format!(
-            "ATTACH DATABASE '{}' AS {};\
-             PRAGMA {}.key = \"x'{}'\";\
-             PRAGMA {}.cipher_page_size = {};\
+            "ATTACH DATABASE '{}' AS {};",
+            uri, alias
+        )
+        .as_str(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // 对 alias 设置 cipher 参数
+    conn.execute_batch(
+        format!(
+            "PRAGMA {}.cipher_page_size = {};\
              PRAGMA {}.kdf_iter = {};\
              PRAGMA {}.cipher_hmac_algorithm = HMAC_SHA512;\
              PRAGMA {}.cipher_kdf_algorithm = PBKDF2_HMAC_SHA512;",
-            uri, alias,
-            alias, key,
             alias, CIPHER_PAGE_SIZE,
             alias, KDF_ITER,
             alias,
@@ -791,6 +816,12 @@ fn attach_sqlcipher(conn: &Connection, alias: &str, db_path: &Path, key: &str) -
         .as_str(),
     )
     .map_err(|e| e.to_string())?;
+
+    // 二进制模式 key：PRAGMA alias.key = '0x<raw_key_hex>'（字符串字面量）
+    let key_literal = format!("'0x{}'", raw_key);
+    conn.execute_batch(&format!("PRAGMA {}.key = {}", alias, key_literal))
+        .map_err(|e| e.to_string())?;
+
     conn.query_row(
         format!("SELECT count(*) FROM {}.sqlite_master", alias).as_str(),
         rusqlite::params![],
@@ -941,9 +972,24 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// 校验 64 位十六进制密钥。
+/// 校验十六进制密钥：必须为 64 位 hex（32 字节 raw key）。
+/// SQLCipher 4.x 二进制模式通过 `PRAGMA key = '0x<raw_key_hex>'` 触发，
+/// salt 由库自动从 DB 文件头读取并在 KDF 阶段处理，无需手动拼接。
 fn is_valid_key(key: &str) -> bool {
     key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// 归一化密钥为 64 位小写 hex（32 字节 raw key）。
+/// 若传入 96 位 hex（raw key + salt）则取其前 64 位；
+/// 若传入带 `0x` 前缀的字符串则去掉前缀。
+fn normalize_key(key: &str, _db_path: &Path) -> String {
+    let k = key.trim().to_lowercase();
+    let k = k.strip_prefix("0x").unwrap_or(k.as_str()).to_string();
+    if k.len() >= 64 {
+        k[..64].to_string()
+    } else {
+        k
+    }
 }
 
 /// SQL 标识符引用（转义双引号）；alias 为空时不加前缀。

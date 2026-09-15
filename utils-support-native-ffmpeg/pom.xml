@@ -11,4 +11,11 @@
     <artifactId>utils-support-native-ffmpeg</artifactId>
     <packaging>jar</packaging>
     <description>FFmpeg RTMP Rust native 库</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 </project>
