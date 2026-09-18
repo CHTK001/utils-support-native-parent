@@ -75,6 +75,11 @@ public final class WechatKeyExtractor {
         }
     }
 
+    /**
+     * extract键。
+     *
+     * @return 结果字符串
+     */
     public static String extractKey() {
         log.info("开始从微信进程提取数据库密钥...");
 
@@ -114,12 +119,27 @@ public final class WechatKeyExtractor {
         }
     }
 
+    /**
+     * 打开处理。
+     *
+     * @param arena 方法入参 arena
+     * @param pid 方法入参 pid
+     * @return Memory分段 对象
+     */
     private static MemorySegment openProcess(Arena arena, int pid) {
         Object result = invoke(MH_OpenProcess, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
-        if (result instanceof MemorySegment ms) return ms;
+        if (result instanceof MemorySegment ms) {
+            return ms;
+        }
         return null;
     }
 
+    /**
+     * 查找WeChat处理。
+     *
+     * @param arena 方法入参 arena
+     * @return 结果数值
+     */
     private static int findWeChatProcess(Arena arena) {
         String[] targets = {"Weixin.exe", "WeChat.exe"};
         System.err.println("[DEBUG] findWeChatProcess: 创建快照...");
@@ -178,6 +198,14 @@ public final class WechatKeyExtractor {
         return -1;
     }
 
+    /**
+     * 查找Module。
+     *
+     * @param arena 方法入参 arena
+     * @param procHandle proc处理，不允许为 null
+     * @param pid 方法入参 pid
+     * @return 结果值
+     */
     private static long[] findModule(Arena arena, MemorySegment procHandle, int pid) {
         String[] targets = {"Weixin.dll", "WeChatWin.dll"};
         Object snapResult = invoke(MH_CreateToolhelp32Snapshot,
@@ -188,7 +216,9 @@ public final class WechatKeyExtractor {
         } else {
             return null;
         }
-        if (snapshot == null || snapshot.address() == 0) return null;
+        if (snapshot == null || snapshot.address() == 0) {
+            return null;
+        }
 
         try {
             // MODULEENTRY32W: dwSize(4) + th32ModuleID(4) + th32ProcessID(4) + GlblcntUsage(4) +
@@ -216,6 +246,15 @@ public final class WechatKeyExtractor {
         return null;
     }
 
+    /**
+     * scanFor键。
+     *
+     * @param arena 方法入参 arena
+     * @param procHandle proc处理，不允许为 null
+     * @param baseAddr 方法入参 baseAddr
+     * @param size 大小，不允许为 null
+     * @return 结果字符串
+     */
     private static String scanForKey(Arena arena, MemorySegment procHandle, long baseAddr, int size) {
         final long CHUNK = 4L * 1024 * 1024;
         long offset = 0;
@@ -232,7 +271,9 @@ public final class WechatKeyExtractor {
                     byte[] bytes = new byte[(int) actual];
                     buffer.asByteBuffer().get(bytes);
                     String key = searchKey(bytes);
-                    if (key != null) return key;
+                    if (key != null) {
+                        return key;
+                    }
                 }
             }
             offset += CHUNK;
@@ -240,13 +281,21 @@ public final class WechatKeyExtractor {
         return null;
     }
 
+    /**
+     * 搜索键。
+     *
+     * @param bytes 字节数组，不允许为 null
+     * @return 结果字符串
+     */
     private static String searchKey(byte[] bytes) {
         // 方法1：搜索 SetDBKey 后面的 hex 密钥
         byte[] setDbKey = "SetDBKey".getBytes(StandardCharsets.US_ASCII);
         int idx = indexOf(bytes, setDbKey);
         if (idx >= 0) {
             String key = extractHexKeyAt(bytes, idx + setDbKey.length);
-            if (key != null) return key;
+            if (key != null) {
+                return key;
+            }
         }
 
         // 方法2：搜索 SetKey 后面的 hex 密钥
@@ -254,7 +303,9 @@ public final class WechatKeyExtractor {
         idx = indexOf(bytes, setKey);
         if (idx >= 0) {
             String key = extractHexKeyAt(bytes, idx + setKey.length);
-            if (key != null) return key;
+            if (key != null) {
+                return key;
+            }
         }
 
         // 方法3：暴力搜索 64 字符 hex 字符串
@@ -269,6 +320,13 @@ public final class WechatKeyExtractor {
         return null;
     }
 
+    /**
+     * extractHex键At。
+     *
+     * @param bytes 字节数组，不允许为 null
+     * @param start 启动，不允许为 null
+     * @return 结果字符串
+     */
     private static String extractHexKeyAt(byte[] bytes, int start) {
         // 跳过非 hex 字符找到 hex 起始位置
         for (int i = start; i <= Math.min(start + 128, bytes.length - 64); i++) {
@@ -282,17 +340,34 @@ public final class WechatKeyExtractor {
         return null;
     }
 
+    /**
+     * 索引Of。
+     *
+     * @param haystack 方法入参 haystack
+     * @param needle 方法入参 needle
+     * @return 结果数值
+     */
     private static int indexOf(byte[] haystack, byte[] needle) {
         outer:
         for (int i = 0; i <= haystack.length - needle.length; i++) {
             for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) continue outer;
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
             }
             return i;
         }
         return -1;
     }
 
+    /**
+     * 是否HexAt。
+     *
+     * @param bytes 字节数组，不允许为 null
+     * @param offset 偏移量，不允许为 null
+     * @param len 方法入参 len
+     * @return 是否成功（true 表示成功）
+     */
     private static boolean isHexAt(byte[] bytes, int offset, int len) {
         for (int i = offset; i < offset + len; i++) {
             byte b = bytes[i];
@@ -303,16 +378,33 @@ public final class WechatKeyExtractor {
         return true;
     }
 
+    /**
+     * 读取W字符串At偏移量。
+     *
+     * @param struct 方法入参 struct
+     * @param charOffset char偏移量，不允许为 null
+     * @param maxChars 最大值Chars，不允许为 null
+     * @return 结果字符串
+     */
     private static String readWStringAtOffset(MemorySegment struct, int charOffset, int maxChars) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < maxChars; i++) {
             char c = struct.get(ValueLayout.JAVA_CHAR, charOffset + i * 2);
-            if (c == 0) break;
+            if (c == 0) {
+                break;
+            }
             sb.append(c);
         }
         return sb.toString();
     }
 
+    /**
+     * 转为Int。
+     *
+     * @param mh 方法入参 mh
+     * @param args 参数，不允许为 null
+     * @return 结果数值
+     */
     private static int toInt(MethodHandle mh, Object... args) {
         try {
             return (int) mh.invokeWithArguments(args);
@@ -321,6 +413,13 @@ public final class WechatKeyExtractor {
         }
     }
 
+    /**
+     * 调用。
+     *
+     * @param mh 方法入参 mh
+     * @param args 参数，不允许为 null
+     * @return 对象 对象
+     */
     private static Object invoke(MethodHandle mh, Object... args) {
         try {
             return mh.invokeWithArguments(args);
@@ -329,10 +428,25 @@ public final class WechatKeyExtractor {
         }
     }
 
+    /**
+     * 关闭处理。
+     *
+     * @param arena 方法入参 arena
+     * @param handle 处理，不允许为 null
+     */
     private static void closeHandle(Arena arena, MemorySegment handle) {
-        try { MH_CloseHandle.invokeWithArguments(handle); } catch (Throwable ignored) {}
+        try {
+            MH_CloseHandle.invokeWithArguments(handle);
+        } catch (Throwable ignored) {
+            // 关闭失败可忽略
+        }
     }
 
+    /**
+     * 程序入口，运行示例自检。
+     *
+     * @param args 参数，不允许为 null
+     */
     public static void main(String[] args) {
         try {
             String key = extractKey();
