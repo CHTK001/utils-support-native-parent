@@ -12,6 +12,12 @@ import java.util.*;
  */
 public class RpmDiag {
 
+    /**
+     * 程序入口，运行示例自检。
+     *
+     * @param args 参数，不允许为 null
+     * @throws Throwable 当执行过程不满足前置条件时
+     */
     public static void main(String[] args) throws Throwable {
         int targetPid = Integer.parseInt(args[0]);
         boolean selfTest = Boolean.parseBoolean(args.length > 1 ? args[1] : "false");
@@ -125,13 +131,23 @@ public class RpmDiag {
         }
     }
 
+    /**
+     * enumRegions。
+     *
+     * @param h 方法入参 h
+     * @param mbi 方法入参 mbi
+     * @param vqeMH 方法入参 vqeMH
+     * @return 结果列表，无数据时为空列表
+     */
     private static List<long[]> enumRegions(long h, MemorySegment mbi, MethodHandle vqeMH) {
         List<long[]> regions = new ArrayList<>();
         long addr = 0x10000;
         int count = 0;
         while (addr < 0x7FFFFFFFFFFFL && count < 5) {
             long ret = vqeInvoke(h, addr, mbi, vqeMH);
-            if (ret == 0) break;
+            if (ret == 0) {
+                break;
+            }
             long baseAddr = mbi.get(ValueLayout.JAVA_LONG, 0);
             long regionSize = mbi.get(ValueLayout.JAVA_LONG, 24);
             int state = mbi.get(ValueLayout.JAVA_INT, 32);
@@ -143,19 +159,32 @@ public class RpmDiag {
                 regions.add(new long[]{baseAddr, regionSize});
             }
             addr = baseAddr + regionSize;
-            if (regionSize == 0 || addr <= 0x10000) break;
+            if (regionSize == 0 || addr <= 0x10000) {
+                break;
+            }
             count++;
         }
         return regions;
     }
 
+    /**
+     * enumRegions来自。
+     *
+     * @param h 方法入参 h
+     * @param mbi 方法入参 mbi
+     * @param vqeMH 方法入参 vqeMH
+     * @param startAddr 启动Addr，不允许为 null
+     * @return 结果列表，无数据时为空列表
+     */
     private static List<long[]> enumRegionsFrom(long h, MemorySegment mbi, MethodHandle vqeMH, long startAddr) {
         List<long[]> regions = new ArrayList<>();
         long addr = startAddr;
         int count = 0;
         while (addr < 0x7FFFFFFFFFFFL && count < 10) {
             long ret = vqeInvoke(h, addr, mbi, vqeMH);
-            if (ret == 0) break;
+            if (ret == 0) {
+                break;
+            }
             long baseAddr = mbi.get(ValueLayout.JAVA_LONG, 0);
             long regionSize = mbi.get(ValueLayout.JAVA_LONG, 24);
             int state = mbi.get(ValueLayout.JAVA_INT, 32);
@@ -167,12 +196,23 @@ public class RpmDiag {
                         + " state=" + state + " protect=0x" + Integer.toHexString(protect));
             }
             addr = baseAddr + regionSize;
-            if (regionSize == 0 || addr <= startAddr) break;
+            if (regionSize == 0 || addr <= startAddr) {
+                break;
+            }
             count++;
         }
         return regions;
     }
 
+    /**
+     * vqe调用。
+     *
+     * @param h 方法入参 h
+     * @param addr 方法入参 addr
+     * @param mbi 方法入参 mbi
+     * @param vqeMH 方法入参 vqeMH
+     * @return 结果数值
+     */
     private static long vqeInvoke(long h, long addr, MemorySegment mbi, MethodHandle vqeMH) {
         try {
             return (long) vqeMH.invoke(h, addr, mbi.address(), 64L);
@@ -215,6 +255,12 @@ public class RpmDiag {
         }
     }
 
+    /**
+     * print结果。
+     *
+     * @param r 方法入参 r
+     * @param res 方法入参 res
+     */
     private static void printResult(long[] r, Result res) {
         StringBuilder sb = new StringBuilder("  [RPM-OK] 0x" + Long.toHexString(r[0])
                 + " bytesRead=" + res.bytesRead + " first8=");
@@ -222,6 +268,12 @@ public class RpmDiag {
         System.out.println(sb);
     }
 
+    /**
+     * gle名称。
+     *
+     * @param gle 方法入参 gle
+     * @return 结果字符串
+     */
     private static String gleName(int gle) {
         return switch (gle) {
             case 5 -> " (ACCESS_DENIED)";
@@ -232,6 +284,14 @@ public class RpmDiag {
         };
     }
 
+    /**
+     * downcall。
+     *
+     * @param sym 方法入参 sym
+     * @param fd 方法入参 fd
+     * @return 方法处理 对象
+     * @throws Throwable 当执行过程不满足前置条件时
+     */
     private static MethodHandle downcall(MemorySegment sym, FunctionDescriptor fd) throws Throwable {
         return Linker.nativeLinker().downcallHandle(sym, fd);
     }

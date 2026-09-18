@@ -12,9 +12,15 @@ final class NativeFFmpegJniLoader {
 
     private static volatile boolean loaded;
 
+    /**
+     * 构造方法，创建 NativeFFmpegJniLoader 实例。
+     */
     private NativeFFmpegJniLoader() {
     }
 
+    /**
+     * 加载。
+     */
     static void load() {
         if (loaded) {
             return;

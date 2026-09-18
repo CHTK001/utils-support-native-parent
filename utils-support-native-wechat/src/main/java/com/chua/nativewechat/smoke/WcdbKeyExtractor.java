@@ -20,6 +20,12 @@ public class WcdbKeyExtractor {
     private static final int PAGE = 4096;
     private static final int CTX_SIZE = 128;
 
+    /**
+     * 程序入口，运行示例自检。
+     *
+     * @param args 参数，不允许为 null
+     * @throws Throwable 当执行过程不满足前置条件时
+     */
     public static void main(String[] args) throws Throwable {
         int pid = Integer.parseInt(args[0]);
         String dbPath = args.length > 1 ? args[1] : WX_ROOT + "\\" + SESSION_DB_REL;
@@ -82,7 +88,9 @@ public class WcdbKeyExtractor {
                 } catch (Throwable t) {
                     break;
                 }
-                if (ret == 0) break;
+                if (ret == 0) {
+                    break;
+                }
                 long baseAddr = mbi.get(ValueLayout.JAVA_LONG, 0);
                 long regionSize = mbi.get(ValueLayout.JAVA_LONG, 24);
                 int state = mbi.get(ValueLayout.JAVA_INT, 32);
@@ -96,13 +104,17 @@ public class WcdbKeyExtractor {
                     // 将 committed 区域按 4KB 对齐分页
                     long alignedStart = (baseAddr + PAGE - 1) & ~(PAGE - 1L);
                     long alignedEnd = baseAddr + regionSize;
-                    if (alignedStart < baseAddr) alignedStart = baseAddr;
+                    if (alignedStart < baseAddr) {
+                        alignedStart = baseAddr;
+                    }
                     for (long p = alignedStart; p + PAGE <= alignedEnd; p += PAGE) {
                         pages.add(p);
                     }
                 }
                 addr = baseAddr + regionSize;
-                if (regionSize == 0 || addr <= 0x10000) break;
+                if (regionSize == 0 || addr <= 0x10000) {
+                    break;
+                }
                 scanned++;
                 if (scanned % 1000 == 0) {
                     System.out.println("  已枚举 " + scanned + " 区域，committed=" + committed
@@ -139,7 +151,10 @@ public class WcdbKeyExtractor {
                     readFail++;
                     if (totalPages < 5) {
                         int gle = 0;
-                        try { gle = (int) gleMH.invoke(); } catch (Throwable ignored) {}
+                        try {
+                            gle = (int) gleMH.invoke();
+                        } catch (Throwable ignored) {
+                        }
                         System.out.println("[RPM-fail] 0x" + Long.toHexString(pageAddr)
                                 + " n=" + PAGE + " gle=" + gle);
                     }
@@ -171,7 +186,9 @@ public class WcdbKeyExtractor {
             Map<String, Integer> candidateFreq = new LinkedHashMap<>();
             for (Long hit : saltHits) {
                 long ctxStart = hit - 32;
-                if (ctxStart < 0) continue;
+                if (ctxStart < 0) {
+                    continue;
+                }
                 byte[] ctx = new byte[CTX_SIZE];
                 MemorySegment ctxSeg = MemorySegment.ofArray(ctx);
                 boolean ok;
@@ -182,7 +199,9 @@ public class WcdbKeyExtractor {
                 } catch (Throwable t) {
                     continue;
                 }
-                if (!ok) continue;
+                if (!ok) {
+                    continue;
+                }
 
                 // salt 位于 ctx 偏移 32 处
                 byte[] before = Arrays.copyOfRange(ctx, 0, 32);
@@ -253,12 +272,28 @@ public class WcdbKeyExtractor {
         }
     }
 
+    /**
+     * downcall。
+     *
+     * @param sym 方法入参 sym
+     * @param fd 方法入参 fd
+     * @return 方法处理 对象
+     * @throws Throwable 当执行过程不满足前置条件时
+     */
     private static MethodHandle downcall(MemorySegment sym, FunctionDescriptor fd) throws Throwable {
         return Linker.nativeLinker().downcallHandle(sym, fd);
     }
 
+    /**
+     * 是否Valid键Candidate。
+     *
+     * @param hex 方法入参 hex
+     * @return 是否成功（true 表示成功）
+     */
     private static boolean isValidKeyCandidate(String hex) {
-        if (hex.length() != 64) return false;
+        if (hex.length() != 64) {
+            return false;
+        }
         long v = 0;
         try {
             for (int i = 0; i < 8; i++) {
@@ -271,16 +306,34 @@ public class WcdbKeyExtractor {
         return v != 0;
     }
 
+    /**
+     * matches。
+     *
+     * @param data 数据，不允许为 null
+     * @param pos 方法入参 pos
+     * @param needle 方法入参 needle
+     * @return 是否成功（true 表示成功）
+     */
     private static boolean matches(byte[] data, int pos, byte[] needle) {
         for (int j = 0; j < needle.length; j++) {
-            if ((data[pos + j] & 0xFF) != (needle[j] & 0xFF)) return false;
+            if ((data[pos + j] & 0xFF) != (needle[j] & 0xFF)) {
+                return false;
+            }
         }
         return true;
     }
 
+    /**
+     * 转为Hex。
+     *
+     * @param bytes 字节数组，不允许为 null
+     * @return 结果字符串
+     */
     private static String toHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) sb.append(String.format("%02x", b));
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
         return sb.toString();
     }
 }
