@@ -15,6 +15,9 @@ public final class NativeVideoCodec {
         NativeVideoCodecJniLoader.load();
     }
 
+    /**
+     * 构造方法，创建 NativeVideoCodec 实例。
+     */
     private NativeVideoCodec() {
     }
 

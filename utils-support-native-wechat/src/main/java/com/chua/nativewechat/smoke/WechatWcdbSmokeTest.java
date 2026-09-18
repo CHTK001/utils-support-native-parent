@@ -202,6 +202,8 @@ public class WechatWcdbSmokeTest {
 
     /**
      * 字节数组转十六进制字符串。
+     * @param bytes 字节数组，不允许为 null
+     * @return 结果字符串
      */
     private static String toHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);

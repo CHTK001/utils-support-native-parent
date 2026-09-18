@@ -23,6 +23,9 @@ public final class NativeFFmpeg {
         }
     }
 
+    /**
+     * 构造方法，创建 NativeFFmpeg 实例。
+     */
     private NativeFFmpeg() {
     }
 

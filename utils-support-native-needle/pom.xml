@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/2000/Maven-4.0.0.xsd"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <groupId>com.chua</groupId>
         <artifactId>utils-support-native-parent</artifactId>
         <version>4.0.0.42</version>
     </parent>
-    <artifactId>utils-support-native-video-codec</artifactId>
+    <artifactId>utils-support-native-needle</artifactId>
     <packaging>jar</packaging>
-    <description>Native H.264/H.265/H.266 encoder/decoder via Rust JNI</description>
+    <description>Needle C 推理引擎 FFM 门面：本地工具调用与结构化抽取</description>
     <dependencies>
         <dependency>
             <groupId>com.chua</groupId>

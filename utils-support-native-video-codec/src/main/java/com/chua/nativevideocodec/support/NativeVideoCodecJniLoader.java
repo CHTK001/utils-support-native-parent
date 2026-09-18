@@ -12,9 +12,15 @@ final class NativeVideoCodecJniLoader {
 
     private static volatile boolean loaded;
 
+    /**
+     * 构造方法，创建 NativeVideoCodecJniLoader 实例。
+     */
     private NativeVideoCodecJniLoader() {
     }
 
+    /**
+     * 加载。
+     */
     static void load() {
         if (loaded) {
             return;

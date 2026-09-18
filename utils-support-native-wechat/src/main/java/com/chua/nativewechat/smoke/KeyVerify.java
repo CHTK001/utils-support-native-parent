@@ -10,6 +10,12 @@ import com.chua.nativewechat.support.WechatWcdbBridge;
  */
 public class KeyVerify {
 
+    /**
+     * 程序入口，运行示例自检。
+     *
+     * @param args 参数，不允许为 null
+     * @throws Exception 当执行过程不满足前置条件时
+     */
     public static void main(String[] args) throws Exception {
         String sessionDb = "C:\\Users\\Administrator\\Documents\\WXWork\\1688850006200900\\Data\\session.db";
         if (args.length >= 1) {
@@ -35,7 +41,9 @@ public class KeyVerify {
         for (int i = 0; i < candidates.length; i++) {
             String rawKey = candidates[i].trim();
             /* 如果超过 64 位，取前 64 位（normalize_key 行为） */
-            if (rawKey.length() > 64) rawKey = rawKey.substring(0, 64);
+            if (rawKey.length() > 64) {
+                rawKey = rawKey.substring(0, 64);
+            }
             System.out.println("--- 候选 " + (i + 1) + " raw=" + rawKey);
             try {
                 long handle = bridge.openAccount(sessionDb, rawKey);

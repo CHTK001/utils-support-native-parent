@@ -30,6 +30,12 @@ public class PipelineVerify {
 
     private static final String DB_DIR = "target\\test-sqlcipher";
 
+    /**
+     * 程序入口，运行示例自检。
+     *
+     * @param args 参数，不允许为 null
+     * @throws Exception 当执行过程不满足前置条件时
+     */
     public static void main(String[] args) throws Exception {
         Path dbPath = Paths.get(DB_DIR, "session.db");
         if (!Files.isRegularFile(dbPath)) {
@@ -66,6 +72,12 @@ public class PipelineVerify {
         System.out.println(">>> 管道验证通过 <<<");
     }
 
+    /**
+     * 转为Hex。
+     *
+     * @param bytes 字节数组，不允许为 null
+     * @return 结果字符串
+     */
     private static String toHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
         for (byte b : bytes) {

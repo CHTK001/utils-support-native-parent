@@ -9,6 +9,10 @@
     <packaging>pom</packaging>
     <description>预编译 native 二进制库（Rust cdylib），独立于 Java 代码分发</description>
 
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
     <modules>
         <module>utils-support-native-ffmpeg</module>
         <module>utils-support-native-sqlite</module>
@@ -23,6 +27,38 @@
     <module>utils-support-native-cuda</module>
         <module>utils-support-native-nmap</module>
         <module>utils-support-native-wechat</module>
+        <module>utils-support-native-needle</module>
 </modules>
+
+    <repositories>
+        <repository>
+            <id>2676178-release-jmLEdB</id>
+            <name>Aliyun Packages Release</name>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-release-jmledb</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
+        </repository>
+        <repository>
+            <id>2676178-snapshot-FwAJpk</id>
+            <name>Aliyun Packages Snapshot</name>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-snapshot-fwajpk</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
+
+    <distributionManagement>
+        <repository>
+            <id>2676178-release-jmLEdB</id>
+            <name>Aliyun Packages Release</name>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-release-jmledb</url>
+        </repository>
+        <snapshotRepository>
+            <id>2676178-snapshot-FwAJpk</id>
+            <name>Aliyun Packages Snapshot</name>
+            <url>https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-snapshot-fwajpk</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>
+
 
