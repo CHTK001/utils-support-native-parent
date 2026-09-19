@@ -23,7 +23,9 @@ import java.util.Arrays;
  */
 public class PipelineVerify {
 
-    /** 已知 64 位 hex 原始密钥（32 字节），与 create_test_db.py 中使用的 raw key 一致 */
+    /**
+     * 已知 64 位 hex 原始密钥（32 字节），与 create_test_db.py 中使用的 raw key 一致
+    */
     private static final String RAW_KEY =
             "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6" +
             "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
