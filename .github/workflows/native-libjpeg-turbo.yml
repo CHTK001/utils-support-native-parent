@@ -34,21 +34,27 @@ jobs:
             runs-on: windows-2022
             build_os: windows
             build_arch: x86_64
+            smoke: true
             lib: chua_native_turbojpeg.dll
           - platform: linux-x86_64
             runs-on: ubuntu-22.04
             build_os: linux
             build_arch: x86_64
+            smoke: true
             lib: libchua_native_turbojpeg.so
           - platform: darwin-x86_64
-            runs-on: macos-13
+            # 托管 macOS runner 已无 Intel 镜像（macos-13 下架），只能在 arm64 上交叉编；
+            # 没有 x64 JVM 可加载它，故这一腿只验产物架构与导出符号，不跑 FFM 冒烟。
+            runs-on: macos-15
             build_os: darwin
             build_arch: x86_64
+            smoke: false
             lib: libchua_native_turbojpeg.dylib
           - platform: darwin-aarch64
-            runs-on: macos-14
+            runs-on: macos-15
             build_os: darwin
             build_arch: aarch64
+            smoke: true
             lib: libchua_native_turbojpeg.dylib
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
@@ -106,12 +112,28 @@ jobs:
           ls -la "$path"
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
+      - name: Check binary architecture and exports (no-JVM leg)
+        if: matrix.smoke == false
+        run: |
+          file "$LIB_PATH"
+          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          cat "$RUNNER_TEMP/exports.txt"
+          for sym in chua_tj_compress chua_tj_probe chua_tj_decompress chua_tj_free chua_tj_version chua_tj_last_error; do
+            grep -q "$sym" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
+            echo "ASSERT ok   export $sym"
+          done
+          lipo -info "$LIB_PATH"
+          lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
+          echo "ASSERT ok   mach-o x86_64"
+
       - uses: actions/setup-java@v4
+        if: matrix.smoke != false
         with:
           distribution: temurin
           java-version: '25'
 
       - name: Runtime smoke (Panama FFM, no project deps)
+        if: matrix.smoke != false
         run: |
           javac -d target/smoke utils-support-native-libjpeg-turbo/src/smoke/java/ChuaTurboJpegSmoke.java
           java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
