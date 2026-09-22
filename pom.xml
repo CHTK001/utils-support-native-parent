@@ -28,6 +28,7 @@
         <module>utils-support-native-nmap</module>
         <module>utils-support-native-wechat</module>
         <module>utils-support-native-needle</module>
+        <module>utils-support-native-libjpeg-turbo</module>
 </modules>
 
     <repositories>

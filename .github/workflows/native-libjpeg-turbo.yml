@@ -1,0 +1,156 @@
+name: native-libjpeg-turbo
+
+# 三平台产物构建 + 运行时冒烟门。
+# 每个 job 在自己的目标平台上原生构建（不交叉），避免 nasm/NEON 与 Apple Silicon
+# 的工具链 hack；产物字节由 actions 上传，是否回提交由 workflow_dispatch 的输入决定。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把各平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-libjpeg-turbo/**'
+      - '.github/workflows/native-libjpeg-turbo.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-libjpeg-turbo/**'
+
+concurrency:
+  group: turbojpeg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            lib: chua_native_turbojpeg.dll
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            lib: libchua_native_turbojpeg.so
+          - platform: darwin-x86_64
+            runs-on: macos-13
+            build_os: darwin
+            build_arch: x86_64
+            lib: libchua_native_turbojpeg.dylib
+          - platform: darwin-aarch64
+            runs-on: macos-14
+            build_os: darwin
+            build_arch: aarch64
+            lib: libchua_native_turbojpeg.dylib
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nasm/cmake (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm cmake ninja-build
+
+      - name: Install nasm (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm cmake ninja
+
+      - name: Install nasm (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm -y
+            $env:Path += ';C:\Program Files\NASM'
+            "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Toolchain versions
+        run: |
+          cmake --version | head -1
+          nasm -v || nasm --version
+          rustc --version
+          cargo --version
+
+      - name: Build (Windows)
+        if: matrix.build_os == 'windows'
+        shell: pwsh
+        run: >-
+          powershell -NoProfile -ExecutionPolicy Bypass
+          -File utils-support-native-libjpeg-turbo/src/main/rust/build.ps1
+
+      - name: Build (Linux / macOS)
+        if: matrix.build_os != 'windows'
+        run: |
+          chmod +x utils-support-native-libjpeg-turbo/src/main/rust/build.sh
+          ./utils-support-native-libjpeg-turbo/src/main/rust/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}"
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-libjpeg-turbo/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Runtime smoke (Panama FFM, no project deps)
+        run: |
+          javac -d target/smoke utils-support-native-libjpeg-turbo/src/smoke/java/ChuaTurboJpegSmoke.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            -cp target/smoke ChuaTurboJpegSmoke "$(pwd)/$LIB_PATH"
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-turbojpeg
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.commit_back
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-turbojpeg'
+          path: dl
+          merge-multiple: true
+      - name: Place and commit
+        run: |
+          mkdir -p utils-support-native-libjpeg-turbo/src/main/resources/native
+          cp -R dl/. utils-support-native-libjpeg-turbo/src/main/resources/native/
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@users.noreply.github.com"
+          git add utils-support-native-libjpeg-turbo/src/main/resources/native
+          git diff --cached --quiet || git commit -m "build(native): libjpeg-turbo 三平台产物 [skip ci]"
+          git push
