@@ -156,10 +156,8 @@ jobs:
   collect:
     name: commit artifacts back
     needs: build
-    # 与 native-wechat.yml 保持一致：push 与手动 dispatch 都触发，
-    # 回填使用 workflow 自带 GITHUB_TOKEN，无需登录点按钮。
     # always() 保证部分平台失败时成功平台的产物仍能回填。
-    # 提交信息带 [skip ci] 防止回填再次触发 workflow。
+    # push 与手动 dispatch 都触发，回填用 workflow 自带 GITHUB_TOKEN。
     if: >-
       always()
       && (github.event_name == 'push'
@@ -174,12 +172,50 @@ jobs:
           pattern: '*-turbojpeg'
           path: dl
           merge-multiple: true
-      - name: Place and commit
+      - name: Report build outcome per platform
         run: |
-          mkdir -p utils-support-native-libjpeg-turbo/src/main/resources/native
-          cp -R dl/. utils-support-native-libjpeg-turbo/src/main/resources/native/
-          git config user.name "github-actions[bot]"
-          git config user.email "actions@users.noreply.github.com"
-          git add utils-support-native-libjpeg-turbo/src/main/resources/native
-          git diff --cached --quiet || git commit -m "build(native): libjpeg-turbo 三平台产物 [skip ci]"
-          git push
+          echo "### 已回填的产物" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null \
+            | sed 's#^dl/##' >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "build job: ${{ needs.build.result }}（产物已推送到分支 \`build/libjpeg-native-artifacts\`，由维护者合并进 main）" \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 仓库 main 启用 "require pull request" 保护，GITHUB_TOKEN 直推 main
+          # 会被 GH006 拒绝；且仓库设置禁止 Actions 创建 PR。
+          # 但推送到非保护的新分支是允许的，因此改为推分支，由维护者合并。
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/libjpeg-native-artifacts"
+          {
+            mkdir -p utils-support-native-libjpeg-turbo/src/main/resources/native
+            cp -R dl/. utils-support-native-libjpeg-turbo/src/main/resources/native/
+            echo "== 待提交内容 =="
+            git status --porcelain utils-support-native-libjpeg-turbo/src/main/resources/native
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- utils-support-native-libjpeg-turbo/src/main/resources/native \
+               && [ -z "$(git ls-files --others --exclude-standard \
+                    utils-support-native-libjpeg-turbo/src/main/resources/native)" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add utils-support-native-libjpeg-turbo/src/main/resources/native
+            git commit -m "build(native): libjpeg-turbo 多平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH，等待维护者合并"
