@@ -84,6 +84,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential perl pkg-config
 
+      - name: Install nasm (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # SQLCipher 的 vendored OpenSSL 在 MSVC 下需要 nasm 生成汇编，
+          # 缺失会在 openssl-src 的 build.rs 阶段失败。
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm -y
+            "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          nasm -v
+
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
         run: |

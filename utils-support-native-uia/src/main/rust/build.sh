@@ -22,8 +22,10 @@ OS_TYPE="${1:-auto}"
 ARCH="${2:-auto}"
 BUILD_MODE="${3:-release}"
 
-# 离线构建：crates.io 直连不可用时优先使用本地 registry 缓存
-CARGO_OFFLINE_FLAG="${CARGO_OFFLINE:-1}"
+# 离线构建开关：默认 0（联网拉取 crates）。
+# 只有在确认本地 registry 已有全部依赖时才置 1；CI 上必须为 0，
+# 否则干净 runner 会因缺少缓存而直接失败。
+CARGO_OFFLINE_FLAG="${CARGO_OFFLINE:-0}"
 
 detect_os() {
     if   [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* ]]; then echo windows
