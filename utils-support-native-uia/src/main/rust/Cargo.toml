@@ -1,0 +1,37 @@
+[package]
+name = "uia_rust_ffi"
+version = "0.1.0"
+edition = "2021"
+authors = ["CH"]
+
+[lib]
+name = "uia_rust"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "uia_selftest"
+path = "src/bin/selftest.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.11"
+
+[target.'cfg(windows)'.dependencies]
+# windows crate（非 windows-sys）—— UIA 的 IUIAutomation / IUIAutomationElement
+# 等 COM 接口只在前者中生成，windows-sys 仅提供纯 Win32 FFI。
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

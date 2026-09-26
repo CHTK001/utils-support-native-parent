@@ -8,9 +8,9 @@
         <artifactId>utils-support-native-parent</artifactId>
         <version>4.0.0.42</version>
     </parent>
-    <artifactId>utils-support-native-wechat</artifactId>
+    <artifactId>utils-support-native-uia</artifactId>
     <packaging>jar</packaging>
-    <description>微信 4.x WCDB 原生读取库（自研 Rust + SQLCipher，跨平台替代闭源 wcdb_api.dll）</description>
+    <description>Windows UI Automation 通用原生库（自研 Rust + UIA COM，JSON 选择器引擎，供 IM 自动化等上层业务复用）</description>
 
     <properties>
         <lombok.version>1.18.46</lombok.version>
@@ -22,24 +22,11 @@
             <artifactId>utils-support-common-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- 微信 3.9.x 的会话轮询与回信基于通用 UIA 原语 -->
-        <dependency>
-            <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-uia</artifactId>
-            <version>${project.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
             <scope>provided</scope>
-        </dependency>
-        <!-- 冒烟测试读取 key_info.db（SQLite 格式） -->
-        <dependency>
-            <groupId>org.xerial</groupId>
-            <artifactId>sqlite-jdbc</artifactId>
-            <version>3.49.1.0</version>
-            <scope>compile</scope>
         </dependency>
     </dependencies>
     <build>

@@ -26,6 +26,7 @@
     <module>utils-support-native-headless</module>
     <module>utils-support-native-cuda</module>
         <module>utils-support-native-nmap</module>
+        <module>utils-support-native-uia</module>
         <module>utils-support-native-wechat</module>
         <module>utils-support-native-needle</module>
         <module>utils-support-native-libjpeg-turbo</module>
