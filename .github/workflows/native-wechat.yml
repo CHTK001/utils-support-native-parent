@@ -52,11 +52,13 @@ jobs:
             runs-on: windows-2022
             build_os: windows
             build_arch: x86_64
+            lipo_arch: ''
             lib: wechat_wcdb.dll
           - platform: linux-x86_64
             runs-on: ubuntu-22.04
             build_os: linux
             build_arch: x86_64
+            lipo_arch: ''
             lib: libwechat_wcdb.so
           - platform: darwin-x86_64
             # 托管 macOS runner 已无 Intel 镜像，只能在 arm64 上交叉编 x86_64；
@@ -64,11 +66,14 @@ jobs:
             runs-on: macos-15
             build_os: darwin
             build_arch: x86_64
+            lipo_arch: x86_64
             lib: libwechat_wcdb.dylib
           - platform: darwin-aarch64
             runs-on: macos-15
             build_os: darwin
             build_arch: aarch64
+            # Rust 目标三元组叫 aarch64，Mach-O 里叫 arm64，lipo -archs 输出后者
+            lipo_arch: arm64
             lib: libwechat_wcdb.dylib
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
@@ -97,14 +102,34 @@ jobs:
           }
           Write-Host "nasm install requested"
 
-      - name: Install build deps (macOS)
+      - name: Install Text::Template for vendored OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # openssl-src 的 Configure 依赖 Text::Template。GitHub windows-2022 镜像
+          # 自带的 Strawberry Perl 未预装该模块，缺失时 Configure 会以
+          # "BEGIN failed ... OpenSSL/config.pm line 19" 报错并最终
+          # "Error configuring OpenSSL build: 'perl' reported failure with exit code: 2"。
+          perl -MText::Template -e1 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Text::Template 缺失，安装中..."
+            cpan -T Text::Template
+          }
+          perl -MText::Template -e1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Text::Template 仍不可用，vendored OpenSSL 必然构建失败"
+            exit 1
+          }
+          Write-Host "ASSERT ok   Text::Template available"
+
+      - name: Verify build deps (macOS)
         if: runner.os == 'macOS'
         run: |
           # SQLCipher 的 vendored OpenSSL 需要 perl 与 cc；两者在 macOS runner 上已具备，
           # 这里显式校验而不是盲装。
           command -v perl
           command -v cc
-          perl -v | head -2
+          perl -MText::Template -e1 && echo "ASSERT ok   Text::Template available"
 
       - name: Toolchain versions
         run: |
@@ -163,8 +188,9 @@ jobs:
           case "$(uname -s)" in
             Darwin)
               lipo -info "$LIB_PATH"
-              lipo -archs "$LIB_PATH" | grep -q "${{ matrix.build_arch }}" \
-                || { echo "ASSERT FAIL arch mismatch"; exit 1; }
+              lipo -archs "$LIB_PATH" | grep -q "${{ matrix.lipo_arch }}" \
+                || { echo "ASSERT FAIL arch mismatch: 期望 ${{ matrix.lipo_arch }}"; exit 1; }
+              echo "ASSERT ok   mach-o ${{ matrix.lipo_arch }}"
               nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
               ;;
             *)
