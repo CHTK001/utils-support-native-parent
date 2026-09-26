@@ -79,6 +79,21 @@ final class NeedleNativeJniLoader {
     }
 
     /**
+     * 外部目录内只有 CLI 运行器、缺少共享库时的专用诊断。
+     *
+     * <p>单独建型而非复用 {@link IOException}，以便 {@link #load()} 在回退到
+     * classpath 失败后，仍以本诊断作为主因而非被通用文案覆盖。</p>
+     */
+    private static final class RunnerOnlyException extends IOException {
+
+        private static final long serialVersionUID = 1L;
+
+        RunnerOnlyException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * 动态库是否加载成功且符号已解析。
      *
      * @return 加载成功返回 true
@@ -111,17 +126,30 @@ final class NeedleNativeJniLoader {
             }
             attempted = true;
             Path library = null;
+            String specific = null;
             try {
                 library = locateFromExternalDir();
+            } catch (RunnerOnlyException e) {
+                // 外部目录里只有 CLI 运行器：这是最常见的误配，保留其诊断信息
+                specific = e.getMessage();
+                try {
+                    library = extractFromClasspath();
+                } catch (Throwable fromClasspath) {
+                    loadError = new IllegalStateException(specific, fromClasspath);
+                    return;
+                }
             } catch (Throwable external) {
                 try {
                     library = extractFromClasspath();
                 } catch (Throwable fromClasspath) {
                     loadError = new IllegalStateException(
-                            "未找到 needle 引擎动态库（已尝试外部目录与 classpath）。"
-                                    + "该库由 cactus-compute 官方发布、不随本仓库分发，"
-                                    + "请从 HuggingFace 获取 libneedle3 后，通过 -D" + PROP_NATIVE_DIR
-                                    + "=<目录> 或环境变量 " + ENV_NATIVE_DIR + " 指定。",
+                            "未找到 needle 引擎共享库（已尝试外部目录与 classpath）。"
+                                    + "该库由 cactus-compute 官方发布、不随本仓库分发。"
+                                    + "获取方式：pip install cactus-needle 后取 "
+                                    + "~/.cache/cactus-needle/v3/<版本>/libneedle3.dll，"
+                                    + "或从 HuggingFace 的 python/cactus_needle-*-py3-none-<平台标签>.whl "
+                                    + "中抽取 needle/libneedle3.dll；再通过 -D" + PROP_NATIVE_DIR
+                                    + "=<目录> 或环境变量 " + ENV_NATIVE_DIR + " 指定该目录。",
                             fromClasspath);
                     loadError.addSuppressed(external);
                     return;
@@ -158,21 +186,47 @@ final class NeedleNativeJniLoader {
         if (!Files.isDirectory(dir)) {
             throw new IOException("外部原生库目录不存在：" + dir.toAbsolutePath());
         }
-        try (Stream<Path> entries = Files.list(dir)) {
-            List<Path> matched = entries
-                    .filter(Files::isRegularFile)
-                    .filter(path -> matchesLibraryName(path.getFileName().toString()))
-                    .toList();
-            if (matched.isEmpty()) {
-                throw new IOException("外部目录内没有匹配 " + LIBRARY_GLOB
-                        + " 的动态库：" + dir.toAbsolutePath());
-            }
-            // 优先取 Needle 3，避免误加载同目录下的 Needle 2
-            return matched.stream()
-                    .filter(path -> path.getFileName().toString().contains("3"))
-                    .findFirst()
-                    .orElse(matched.get(0));
+        List<Path> entries;
+        try (Stream<Path> stream = Files.list(dir)) {
+            entries = stream.filter(Files::isRegularFile).toList();
         }
+        List<Path> matched = entries.stream()
+                .filter(path -> matchesLibraryName(path.getFileName().toString()))
+                .toList();
+        if (matched.isEmpty()) {
+            // 官方在 <platform>/ 目录下分发的是 CLI 运行器（needle / needle.exe），
+            // 它们没有导出表，不是可加载的共享库。命中时给出准确原因，避免用户
+            // 反复在平台目录里找 libneedle3。
+            boolean onlyRunner = entries.stream()
+                    .map(path -> path.getFileName().toString())
+                    .anyMatch(NeedleNativeJniLoader::isRunnerName);
+            if (onlyRunner) {
+                throw new RunnerOnlyException("外部目录内只有 needle CLI 运行器"
+                        + "（needle / needle.exe），它不导出 C API，无法被 FFM 加载："
+                        + dir.toAbsolutePath() + "。共享库请另行获取——最简单是 "
+                        + "pip install cactus-needle 后取 "
+                        + "~/.cache/cactus-needle/v3/<版本>/libneedle3.dll，"
+                        + "或从 HuggingFace 的 python/cactus_needle-*-py3-none-<平台标签>.whl "
+                        + "中抽取 needle/libneedle3.dll。");
+            }
+            throw new IOException("外部目录内没有匹配 " + LIBRARY_GLOB
+                    + " 的动态库：" + dir.toAbsolutePath());
+        }
+        // 优先取 Needle 3，避免误加载同目录下的 Needle 2
+        return matched.stream()
+                .filter(path -> path.getFileName().toString().contains("3"))
+                .findFirst()
+                .orElse(matched.get(0));
+    }
+
+    /**
+     * 判断是否为官方分发的 CLI 运行器（无导出表，不可加载）。
+     *
+     * @param fileName 文件名
+     * @return 是运行器返回 true
+     */
+    private static boolean isRunnerName(String fileName) {
+        return fileName.equals("needle") || fileName.equals("needle.exe");
     }
 
     /**
