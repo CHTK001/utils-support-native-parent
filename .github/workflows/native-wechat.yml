@@ -106,30 +106,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # openssl-src 的 Configure 依赖 Text::Template。GitHub windows-2022 镜像
-          # 自带的 Strawberry Perl 未预装该模块，缺失时 Configure 会以
-          # "BEGIN failed ... OpenSSL/config.pm line 19" 报错并最终
-          # "Error configuring OpenSSL build: 'perl' reported failure with exit code: 2"。
+          # openssl-src 的 Configure 在 GitHub windows-2022 镜像自带的
+          # Strawberry Perl 下会以 "BEGIN failed ... OpenSSL/config.pm line 19"
+          # 失败，最终报 "Error configuring OpenSSL build: 'perl' reported
+          # failure with exit code: 2"。此处先探测并尝试补装。
+          # 注意：macOS 的系统 perl 不需要该模块（实测其 Build 可成功），
+          # 所以只有 Windows 走这条路径，且失败不阻断——真正的判定在 Build。
           perl -MText::Template -e1 2>$null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Text::Template 缺失，安装中..."
+            Write-Host "Text::Template 缺失，尝试安装..."
             cpan -T Text::Template
+            perl -MText::Template -e1 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "WARN Text::Template 仍不可用；若 Build 仍失败则需改用固定版本的 Strawberry Perl"
+            }
           }
-          perl -MText::Template -e1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Text::Template 仍不可用，vendored OpenSSL 必然构建失败"
-            exit 1
-          }
-          Write-Host "ASSERT ok   Text::Template available"
 
       - name: Verify build deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          # SQLCipher 的 vendored OpenSSL 需要 perl 与 cc；两者在 macOS runner 上已具备，
-          # 这里显式校验而不是盲装。
+          # SQLCipher 的 vendored OpenSSL 需要 perl 与 cc；两者在 macOS runner 上已具备。
+          # 不强制要求 Text::Template：实测 macOS 缺少该模块时 Build 仍可成功。
           command -v perl
           command -v cc
-          perl -MText::Template -e1 && echo "ASSERT ok   Text::Template available"
+          perl -v | head -2
 
       - name: Toolchain versions
         run: |
