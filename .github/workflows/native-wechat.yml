@@ -264,12 +264,13 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Place artifacts and open pull request
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 仓库同时禁止 GITHUB_TOKEN 直推 main 与创建 PR
+          # （实测分别报 GH006 与 "GitHub Actions is not permitted to create
+          # or approve pull requests"）。因此优先使用仓库管理员配置的
+          # ARTIFACT_PUSH_TOKEN；未配置时回退 GITHUB_TOKEN 以便本地/内网
+          # 等无保护规则的场景仍可自动回填。
+          ARTIFACT_TOKEN: ${{ secrets.ARTIFACT_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          # 仓库 main 分支启用了 "Changes must be made through a pull request"
-          # 保护规则，GITHUB_TOKEN 直推 main 会被 GH006 拒绝。
-          # 因此改为推送到专用分支并开 PR：推新分支不受该规则限制，
-          # 合并动作仍由人来做，符合仓库既定的保护策略。
           set +e
           set +o pipefail
           LOG="$RUNNER_TEMP/commit.log"
@@ -289,8 +290,11 @@ jobs:
             fi
             git add utils-support-native-wechat/src/main/resources/native
             git commit -m "build(native): wechat wcdb 多平台产物"
+
             echo "== push branch $BRANCH =="
-            git push --force origin "HEAD:refs/heads/$BRANCH"
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+
             echo "== open PR =="
             if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
               echo "PR 已存在，跳过创建"
@@ -299,13 +303,15 @@ jobs:
                 --base main \
                 --head "$BRANCH" \
                 --title "build(native): wechat wcdb 多平台产物回填" \
-                --body "由 native-wechat workflow 自动回填多平台动态库。 Windows 腿的 vendored OpenSSL 在 runner 自带 Strawberry Perl 下 Configure 失败，故本次仅含 linux 与两个 darwin 产物；Windows 的 wechat_wcdb.dll 已在仓库中。"
+                --body "由 native-wechat workflow 自动回填多平台动态库。Windows 腿的 vendored OpenSSL 在 runner 自带 Strawberry Perl 下 Configure 失败，故本次仅含 linux 与两个 darwin 产物；Windows 的 wechat_wcdb.dll 已在仓库中。"
             fi
           } 2>&1 | tee "$LOG"
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
             echo "::error title=回填失败（exit $code）::$msg"
+            echo "::notice::若报 GH006 或 not permitted to create pull request，"
+            echo "::notice::请配置仓库 secret ARTIFACT_PUSH_TOKEN（PAT，勾选 contents:write 与 pull-requests:write）。"
             exit "$code"
           fi
           echo "回填完成"
