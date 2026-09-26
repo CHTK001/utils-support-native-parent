@@ -24,10 +24,15 @@ ARCH="${2:-auto}"
 BUILD_MODE="${3:-release}"
 
 detect_os() {
-    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then echo "windows"
-    elif [[ "$OSTYPE" == "linux-gnu""* ]]; then echo "linux"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then echo "darwin"
-    else echo "unknown"; fi
+    # 用 case 而非 [[ ]]：原先的 [[ "$OSTYPE" == "linux-gnu""* ]] 中相邻引号拼接
+    # 会让 bash 的条件表达式解析器失衡，表现为 line 28 语法错误并吞掉后续多行，
+    # 在 CI 上四个平台全部以 exit code 2 秒挂。case 无此歧义。
+    case "$OSTYPE" in
+        msys*|cygwin*|win32*) echo "windows" ;;
+        linux-gnu*)           echo "linux" ;;
+        darwin*)              echo "darwin" ;;
+        *)                    echo "unknown" ;;
+    esac
 }
 
 detect_arch() {
@@ -81,7 +86,24 @@ setup_target() {
 
 check_cargo_toml() {
     if [[ ! -f "Cargo.toml" ]]; then echo -e "${RED}[ERROR]${NC} 未找到 Cargo.toml"; exit 1; fi
-    LIB_NAME=$(grep -A1 '^\[lib\]' Cargo.toml | grep -E '^name\s*=' | head -1 | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+    # 用 awk 而非 grep -E '^name\s*='：\s 是 GNU grep 扩展，macOS 自带 BSD grep
+    # 不支持，会静默匹配不到，导致 LIB_NAME 为空、后续报"未找到动态库"这种
+    # 误导性错误。awk 是 POSIX 工具，Linux / macOS / Git Bash 行为一致。
+    # 只取 [lib] 段内的 name，避免与 [package] name 混淆。
+    LIB_NAME=$(awk '
+        /^\[lib\]/            { inlib = 1; next }
+        /^\[/                 { inlib = 0 }
+        inlib && /^[[:space:]]*name[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*"/, "")
+            sub(/".*$/, "")
+            print
+            exit
+        }
+    ' Cargo.toml)
+    if [ -z "$LIB_NAME" ]; then
+        echo -e "${RED}[ERROR]${NC} 未能从 Cargo.toml 的 [lib] 段解析出库名"
+        exit 1
+    fi
     echo -e "${GREEN}[INFO]${NC} 库名称: $LIB_NAME"
 }
 
