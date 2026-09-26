@@ -8,6 +8,13 @@
 #   ./build.sh windows x86_64 release    # Windows x86_64 发布版（产物 wechat_wcdb.dll）
 #   ./build.sh darwin aarch64 release    # macOS ARM64 发布版
 #   ./build.sh auto auto release         # 自动检测平台和架构
+#
+# 依赖（vendored SQLCipher 会从源码构建 OpenSSL）：
+#   Linux : build-essential perl pkg-config
+#   macOS : perl cc（runner 自带）
+#   Windows: nasm + 可用的 perl
+#   产物落在 src/main/resources/native/{platform}/，
+#   由 .github/workflows/native-wechat.yml 负责多平台构建与回填。
 
 set -e
 
