@@ -74,8 +74,23 @@ setup_target() {
 
 check_cargo_toml() {
     if [[ ! -f "Cargo.toml" ]]; then echo -e "${RED}[ERROR]${NC} 未找到 Cargo.toml"; exit 1; fi
-    LIB_NAME=$(grep -A1 '^\[lib\]' Cargo.toml | grep -E '^name\s*=' | head -1 \
-        | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
+    # 用 awk 而非 grep -E '^name\s*='：\s 是 GNU grep 扩展，BSD grep 不保证支持，
+    # 静默匹配不到会得到"未找到动态库"这种误导性错误。
+    # 只取 [lib] 段内的 name，避免与 [package] name 混淆。
+    LIB_NAME=$(awk '
+        /^\[lib\]/            { inlib = 1; next }
+        /^\[/                 { inlib = 0 }
+        inlib && /^[[:space:]]*name[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*"/, "")
+            sub(/".*$/, "")
+            print
+            exit
+        }
+    ' Cargo.toml)
+    if [ -z "$LIB_NAME" ]; then
+        echo -e "${RED}[ERROR]${NC} 未能从 Cargo.toml 的 [lib] 段解析出库名"
+        exit 1
+    fi
     echo -e "${GREEN}[INFO]${NC} 库名: $LIB_NAME"
 }
 
