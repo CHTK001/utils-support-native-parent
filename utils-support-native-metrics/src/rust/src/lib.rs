@@ -76,8 +76,17 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 static RING_BUFFER: once_cell::sync::Lazy<std::sync::Mutex<Vec<Vec<u8>>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(Vec::with_capacity(16)));
 
+/// sysinfo 的 CPU/进程使用率是"两次刷新之间的差值"，必须跨采样周期复用同一个 System；
+/// 每次新建会让 Windows 侧 PDH 计数器永远停在首次采集（无基线），使用率恒为 100。
+static SYSTEM: once_cell::sync::Lazy<std::sync::Mutex<System>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(System::new()));
+
 fn collect() -> Vec<u8> {
-    let mut sys = System::new_all();
+    let mut sys = SYSTEM.lock().unwrap();
+    // usage 与 frequency 必须在同一次刷新里取：两次刷新会各自触发一次 PDH 采集，
+    // 后一次把差值窗口压成微秒，使用率恒为 100
+    sys.refresh_cpu_all();
+    sys.refresh_memory();
     sys.refresh_processes(ProcessesToUpdate::All, true);
 
     let timestamp = SystemTime::now()
@@ -180,6 +189,13 @@ pub extern "C" fn metrics_start_sampler(interval_ms: u64) {
     }
     RUNNING.store(true, Ordering::SeqCst);
     thread::spawn(move || {
+        // 预热：先建立差值基线并等一个采样周期，避免第一份快照带着退化值入库
+        {
+            let mut sys = SYSTEM.lock().unwrap();
+            sys.refresh_cpu_all();
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+        }
+        thread::sleep(Duration::from_millis(interval_ms));
         while RUNNING.load(Ordering::SeqCst) {
             let data = collect();
             let mut ring = RING_BUFFER.lock().unwrap();
