@@ -21,10 +21,12 @@ on:
   push:
     paths:
       - 'utils-support-native-wechat/src/main/rust/**'
+      - 'utils-support-native-wechat/**'
       - '.github/workflows/native-wechat.yml'
   pull_request:
     paths:
       - 'utils-support-native-wechat/src/main/rust/**'
+      - 'utils-support-native-wechat/**'
 
 concurrency:
   group: wechat-${{ github.ref }}
@@ -261,16 +263,30 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Place and commit
         run: |
-          mkdir -p utils-support-native-wechat/src/main/resources/native
-          cp -R dl/. utils-support-native-wechat/src/main/resources/native/
-          echo "== 待提交内容 =="
-          git status --porcelain utils-support-native-wechat/src/main/resources/native
-          git config user.name "github-actions[bot]"
-          git config user.email "actions@users.noreply.github.com"
-          git add utils-support-native-wechat/src/main/resources/native
-          if git diff --cached --quiet; then
-            echo "没有产物变化，跳过提交"
-          else
+          set -o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          {
+            mkdir -p utils-support-native-wechat/src/main/resources/native
+            cp -R dl/. utils-support-native-wechat/src/main/resources/native/
+            echo "== 待提交内容 =="
+            git status --porcelain utils-support-native-wechat/src/main/resources/native
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            git add utils-support-native-wechat/src/main/resources/native
+            if git diff --cached --quiet; then
+              echo "没有产物变化，跳过提交"
+              exit 0
+            fi
+            echo "== commit =="
             git commit -m "build(native): wechat wcdb 多平台产物 [skip ci]"
-            git push
+            echo "== push =="
+            git push origin HEAD:refs/heads/main
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            # 分支保护若拒绝 GITHUB_TOKEN 推送，具体原因只出现在这一步的日志里，
+            # 因此同样编码成注解，避免"回填失败但看不到原因"的黑盒状态。
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
           fi
