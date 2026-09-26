@@ -8,33 +8,41 @@ import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 
 /**
- * 跨平台原生库冒烟门：只用 JDK Panama FFM，不依赖任何 com.chua 构件。
+ * TurboJPEG 原生库往返验证示例。
  *
- * <p>用途是在 CI 的三种操作系统上证明 {@code chua_native_turbojpeg} 真的可加载、
- * 六个导出符号齐备、且压缩/解析/解压往返能得到原图。参数是原生库文件的绝对路径。</p>
+ * <p>本示例只使用 JDK Panama FFM，不依赖生产构件。它可以验证 {@code chua_native_turbojpeg}
+ * 是否可加载、导出符号是否齐全，以及压缩、解析、解压是否能够完成像素往返。</p>
  *
- * <p>编译运行：{@code javac ChuaTurboJpegSmoke.java && java --enable-native-access=ALL-UNNAMED
- * ChuaTurboJpegSmoke /path/to/libchua_native_turbojpeg.so}</p>
+ * <p>运行示例：{@code java --enable-native-access=ALL-UNNAMED
+ * ChuaTurboJpegExample /path/to/libchua_native_turbojpeg.so}</p>
  *
  * @author CH
  * @since 4.0.0.42
  */
-public final class ChuaTurboJpegSmoke {
+public final class ChuaTurboJpegExample {
 
     /**
-     * 与 TurboJpegBridge 保持一致的 TurboJPEG 常量（取自上游 turbojpeg.h 的枚举序数）。
+     * TurboJPEG RGB 像素格式。
      */
     private static final int TJPF_RGB = 0;
+
+    /**
+     * TurboJPEG 4:2:0 色度采样格式。
+     */
     private static final int TJSAMP_420 = 2;
 
     /**
-     * 测试图尺寸，故意取非 16 对齐的宽高以暴露行跨距问题。
+     * 测试图宽度，故意使用非 16 对齐值。
      */
     private static final int WIDTH = 131;
+
+    /**
+     * 测试图高度，故意使用非 16 对齐值。
+     */
     private static final int HEIGHT = 97;
 
     /**
-     * C 的 {@code unsigned long} 宽度：Windows x64 为 4 字节，类 Unix 为 8 字节。
+     * Windows x64 的 C {@code unsigned long} 为 4 字节，其他常见平台为 8 字节。
      */
     private static final boolean WINDOWS =
             System.getProperty("os.name", "").toLowerCase().contains("windows");
@@ -46,12 +54,18 @@ public final class ChuaTurboJpegSmoke {
     private static MethodHandle decompress;
     private static MethodHandle free;
 
-    private ChuaTurboJpegSmoke() {
+    private ChuaTurboJpegExample() {
     }
 
+    /**
+     * 执行一次 TurboJPEG 原生库验证。
+     *
+     * @param args 第一个参数必须是原生库文件路径
+     * @throws Throwable 原生符号绑定或验证失败时抛出
+     */
     public static void main(String[] args) throws Throwable {
         if (args.length != 1) {
-            System.out.println("usage: ChuaTurboJpegSmoke <native library path>");
+            System.out.println("usage: ChuaTurboJpegExample <native library path>");
             System.exit(2);
         }
         Path library = Path.of(args[0]);
@@ -59,10 +73,8 @@ public final class ChuaTurboJpegSmoke {
                 + " / culongBytes=" + (WINDOWS ? 4 : 8));
         try (Arena arena = Arena.ofShared()) {
             SymbolLookup lookup = SymbolLookup.libraryLookup(library.toAbsolutePath().toString(), arena);
-            version = bind(lookup, "chua_tj_version",
-                    FunctionDescriptor.of(ValueLayout.ADDRESS));
-            lastError = bind(lookup, "chua_tj_last_error",
-                    FunctionDescriptor.of(ValueLayout.ADDRESS));
+            version = bind(lookup, "chua_tj_version", FunctionDescriptor.of(ValueLayout.ADDRESS));
+            lastError = bind(lookup, "chua_tj_last_error", FunctionDescriptor.of(ValueLayout.ADDRESS));
             compress = bind(lookup, "chua_tj_compress",
                     FunctionDescriptor.of(ValueLayout.JAVA_INT,
                             ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
@@ -79,18 +91,18 @@ public final class ChuaTurboJpegSmoke {
                             ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
                             ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS,
                             ValueLayout.ADDRESS));
-            free = bind(lookup, "chua_tj_free",
-                    FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+            free = bind(lookup, "chua_tj_free", FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
             observe("version", text((MemorySegment) version.invokeExact()));
             runRoundTrip(arena);
         }
-        System.out.println("SMOKE PASS");
+        System.out.println("EXAMPLE PASS");
     }
 
     /**
-     * 跑一次"像素 -> JPEG -> 头信息 -> 像素"的往返并断言结果。
+     * 执行像素到 JPEG 再到像素的往返验证。
      *
-     * @param arena 共享作用域，用于承载原生分配的缓冲
+     * @param arena 原生缓冲共享作用域
+     * @throws Throwable 原生调用或断言失败时抛出
      */
     private static void runRoundTrip(Arena arena) throws Throwable {
         int pitch = WIDTH * 3;
@@ -159,12 +171,12 @@ public final class ChuaTurboJpegSmoke {
     }
 
     /**
-     * 绑定一个导出符号，缺失即失败。
+     * 绑定一个必需的原生导出符号。
      *
      * @param lookup 符号查找器
      * @param symbol 符号名
      * @param descriptor 函数描述符
-     * @return 下探句柄
+     * @return 原生方法句柄
      */
     private static MethodHandle bind(SymbolLookup lookup, String symbol, FunctionDescriptor descriptor) {
         MemorySegment address = lookup.find(symbol).orElseThrow(
@@ -185,7 +197,7 @@ public final class ChuaTurboJpegSmoke {
     /**
      * 断言观测值为 0。
      *
-     * @param name 断言名
+     * @param name 断言名称
      * @param value 非 0 即失败
      */
     private static void check(String name, long value) {
@@ -198,7 +210,7 @@ public final class ChuaTurboJpegSmoke {
     }
 
     /**
-     * 打印观测值。
+     * 输出观测值。
      *
      * @param name 名称
      * @param value 内容
@@ -208,11 +220,11 @@ public final class ChuaTurboJpegSmoke {
     }
 
     /**
-     * 两个字节的十六进制串。
+     * 格式化两个字节为十六进制字符串。
      *
      * @param hi 高字节
      * @param lo 低字节
-     * @return 形如 FFD8
+     * @return 形如 FFD8 的字符串
      */
     private static String hex(int hi, int lo) {
         return String.format("%02X%02X", hi & 0xFF, lo & 0xFF);
