@@ -1,0 +1,190 @@
+name: native-uia
+
+# UIA 原生库构建 + 运行时冒烟门。
+#
+# ## 为什么只有 windows-x86_64，没有"三平台"产物
+#
+# UI Automation 是 **Windows 独有的 COM API**：`IUIAutomation` / `IUIAutomationElement`
+# 定义在 Windows SDK 的 `UIAutomationCore.dll`，Linux 与 macOS 上不存在任何等价实现。
+# 本库的 `src/main/rust/src/*.rs` 直接使用 `windows::Win32::UI::Accessibility`，
+# 未做 `#[cfg(windows)]` 门控，因此在非 Windows 目标上**无法编译**——
+# 这是被上游 API 决定的硬约束，不是构建配置缺失。
+#
+# 强行产出 linux/darwin 产物只有两种结果，都不可接受：
+#   1. 加门控产出空壳 so/dylib —— 没有任何导出符号，Java 侧 FFM 绑定必然失败；
+#   2. 交叉编译 —— 同样过不了链接期，因为目标系统没有 UIAutomationCore。
+# 因此本模块的平台矩阵**有意保持单平台**，Java 侧 `UiaBridge.isSupported()`
+# 会在非 Windows 上直接返回 false 并给出明确错误。
+#
+# 如果将来需要 Linux/macOS 的界面自动化，应使用 AT-SPI / AX API，
+# 那是另一个独立实现，与本模块不共享代码。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-uia/src/main/rust/**'
+      - '.github/workflows/native-uia.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-uia/src/main/rust/**'
+
+concurrency:
+  group: uia-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIB_NAME: uia_rust
+  EXPORTS: >-
+    uia_create
+    uia_destroy
+    uia_attach_window
+    uia_detach_window
+    uia_is_window_alive
+    uia_find
+    uia_describe
+    uia_get_property
+    uia_get_rect
+    uia_set_value
+    uia_invoke
+    uia_set_focus
+    uia_activate_window
+    uia_click
+    uia_release
+    uia_release_all
+    uia_dump_tree
+    uia_send_keys
+    uia_set_clipboard
+    uia_free_string
+    uia_last_error
+
+jobs:
+  build:
+    name: windows-x86_64
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Build
+        run: |
+          cd utils-support-native-uia/src/main/rust
+          bash ./build.sh windows x86_64 release
+
+      - name: Verify artifact exists
+        run: |
+          $path = "utils-support-native-uia/src/main/resources/native/windows-x86_64/uia_rust.dll"
+          if (-not (Test-Path $path)) { Write-Error "missing artifact: $path"; exit 1 }
+          Get-Item $path | Format-List Name,Length
+          "LIB_PATH=$path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify exports
+        run: |
+          # 读取 PE 导出表，逐一断言 C ABI 符号存在。
+          # 这道门能挡住"改了 #[unsafe(no_mangle)] 或函数名却忘了同步 Java 侧绑定"这类断裂。
+          $dll = (Get-Item $env:LIB_PATH).FullName
+          $bytes = [System.IO.File]::ReadAllBytes($dll)
+          $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+          $optOff = $peOff + 24
+          $numSec = [BitConverter]::ToUInt16($bytes, $peOff + 6)
+          $optSize = [BitConverter]::ToUInt16($bytes, $peOff + 20)
+          $secOff = $optOff + $optSize
+          $secs = @()
+          for ($i = 0; $i -lt $numSec; $i++) {
+            $o = $secOff + 40 * $i
+            $secs += [pscustomobject]@{
+              VA  = [BitConverter]::ToUInt32($bytes, $o + 12)
+              VS  = [BitConverter]::ToUInt32($bytes, $o + 8)
+              Raw = [BitConverter]::ToUInt32($bytes, $o + 20)
+              RS  = [BitConverter]::ToUInt32($bytes, $o + 16)
+            }
+          }
+          function R2O([int]$rva) {
+            foreach ($s in $secs) {
+              if ($rva -ge $s.VA -and $rva -lt ($s.VA + [Math]::Max($s.VS, $s.RS))) {
+                return $s.Raw + ($rva - $s.VA)
+              }
+            }
+            return -1
+          }
+          $expRva = [BitConverter]::ToUInt32($bytes, $optOff + 112)
+          $e = R2O $expRva
+          $nNames = [BitConverter]::ToUInt32($bytes, $e + 24)
+          $nOff = R2O ([BitConverter]::ToUInt32($bytes, $e + 32))
+          $names = @()
+          for ($i = 0; $i -lt $nNames; $i++) {
+            $no = R2O ([BitConverter]::ToUInt32($bytes, $nOff + 4 * $i))
+            $len = 0
+            while ($bytes[$no + $len] -ne 0) { $len++ }
+            $names += [System.Text.Encoding]::ASCII.GetString($bytes, $no, $len)
+          }
+          $names | Where-Object { $_ -like 'uia_*' } | Sort-Object | ForEach-Object { "export $_" }
+          $missing = @()
+          foreach ($sym in ($env:EXPORTS -split '\s+' | Where-Object { $_ })) {
+            if ($names -notcontains $sym) { $missing += $sym }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error ("ASSERT FAIL missing exports: " + ($missing -join ', '))
+            exit 1
+          }
+          Write-Host "ASSERT ok all uia_* exports present"
+
+      - name: Runtime smoke (Rust selftest)
+        run: |
+          # 自测覆盖：COM 初始化 → CoCreateInstance(IUIAutomation) → 桌面根元素遍历
+          # → 选择器查找 → 属性快照 → 控件树导出 → 上下文销毁。
+          # 这是不依赖微信安装的真实运行期冒烟。
+          $exe = "utils-support-native-uia/src/main/rust/target/x86_64-pc-windows-msvc/release/uia_selftest.exe"
+          if (-not (Test-Path $exe)) { Write-Error "missing selftest: $exe"; exit 1 }
+          & $exe
+          if ($LASTEXITCODE -ne 0) { Write-Error "selftest failed: $LASTEXITCODE"; exit 1 }
+
+      - name: Stage artifact for upload
+        run: |
+          New-Item -ItemType Directory -Force -Path stage/native/windows-x86_64 | Out-Null
+          Copy-Item $env:LIB_PATH stage/native/windows-x86_64/
+          Get-ChildItem stage/native/windows-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64-uia
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.commit_back
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-uia'
+          path: dl
+          merge-multiple: true
+      - name: Place and commit
+        run: |
+          mkdir -p utils-support-native-uia/src/main/resources/native
+          cp -R dl/. utils-support-native-uia/src/main/resources/native/
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@users.noreply.github.com"
+          git add utils-support-native-uia/src/main/resources/native
+          git diff --cached --quiet \
+            || git commit -m "build(native): uia windows 产物 [skip ci]"
+          git push
