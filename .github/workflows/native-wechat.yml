@@ -88,13 +88,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # SQLCipher 的 vendored OpenSSL 在 MSVC 下需要 nasm 生成汇编，
-          # 缺失会在 openssl-src 的 build.rs 阶段失败。
+          # SQLCipher 的 vendored OpenSSL 在 MSVC 下需要 nasm 生成汇编。
+          # 注意：GITHUB_PATH 只对后续步骤生效，因此这里不做验证，
+          # 由 Build 步骤再确认 nasm 是否真的可用。
           if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
             choco install nasm -y
             "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           }
-          nasm -v
+          Write-Host "nasm install requested"
 
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
@@ -113,9 +114,28 @@ jobs:
 
       - name: Build
         run: |
-          chmod +x utils-support-native-wechat/src/main/rust/build.sh
-          ./utils-support-native-wechat/src/main/rust/build.sh \
-            "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release
+          set -o pipefail
+          cd utils-support-native-wechat/src/main/rust
+          echo "== pwd =="; pwd
+          echo "== ls =="; ls -la
+          echo "== cargo =="; cargo --version; rustc --version
+          if [ "${{ matrix.build_os }}" = "windows" ]; then
+            echo "== nasm =="; nasm -v || echo "ASSERT WARN nasm 不可用"
+          fi
+          echo "== cargo metadata =="
+          cargo metadata --format-version 1 --no-deps > /dev/null \
+            || { echo "ASSERT FAIL cargo metadata 无法解析 Cargo.toml"; exit 1; }
+          echo "== build =="
+          bash ./build.sh "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release 2>&1 \
+            | tee "$RUNNER_TEMP/build.log"
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.platform }}
+          path: ${{ runner.temp }}/build.log
+          if-no-files-found: ignore
 
       - name: Verify artifact exists
         run: |
