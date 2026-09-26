@@ -239,6 +239,7 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -253,23 +254,26 @@ jobs:
           echo "| 平台 | 结果 |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ needs.build.result }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "build job: ${{ needs.build.result }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "已下载的产物平台：" >> "$GITHUB_STEP_SUMMARY"
+          echo "已下载的产物：" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null \
             | sed 's#^dl/##' >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - name: Place and commit
+      - name: Place artifacts and open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # GitHub 的 shell: bash 默认注入 set -eo pipefail。若保持 -e，
-          # 下面 { ... } | tee 一旦失败会立即退出，来不及读取 PIPESTATUS
-          # 并输出 ::error:: 注解，失败原因将完全不可见。
-          # 因此先关掉 -e / pipefail，手动判定退出码。
+          # 仓库 main 分支启用了 "Changes must be made through a pull request"
+          # 保护规则，GITHUB_TOKEN 直推 main 会被 GH006 拒绝。
+          # 因此改为推送到专用分支并开 PR：推新分支不受该规则限制，
+          # 合并动作仍由人来做，符合仓库既定的保护策略。
           set +e
           set +o pipefail
           LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/wechat-native-artifacts"
           {
             mkdir -p utils-support-native-wechat/src/main/resources/native
             cp -R dl/. utils-support-native-wechat/src/main/resources/native/
@@ -277,20 +281,29 @@ jobs:
             git status --porcelain utils-support-native-wechat/src/main/resources/native
             git config user.name "github-actions[bot]"
             git config user.email "actions@users.noreply.github.com"
-            git add utils-support-native-wechat/src/main/resources/native
-            if git diff --cached --quiet; then
-              echo "没有产物变化，跳过提交"
+            if git diff --quiet -- utils-support-native-wechat/src/main/resources/native \
+               && [ -z "$(git ls-files --others --exclude-standard \
+                    utils-support-native-wechat/src/main/resources/native)" ]; then
+              echo "产物与仓库一致，无需提交"
               exit 0
             fi
-            echo "== commit =="
-            git commit -m "build(native): wechat wcdb 多平台产物 [skip ci]"
-            echo "== push =="
-            git push origin HEAD:refs/heads/main
+            git add utils-support-native-wechat/src/main/resources/native
+            git commit -m "build(native): wechat wcdb 多平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force origin "HEAD:refs/heads/$BRANCH"
+            echo "== open PR =="
+            if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+              echo "PR 已存在，跳过创建"
+            else
+              gh pr create \
+                --base main \
+                --head "$BRANCH" \
+                --title "build(native): wechat wcdb 多平台产物回填" \
+                --body "由 native-wechat workflow 自动回填多平台动态库。 Windows 腿的 vendored OpenSSL 在 runner 自带 Strawberry Perl 下 Configure 失败，故本次仅含 linux 与两个 darwin 产物；Windows 的 wechat_wcdb.dll 已在仓库中。"
+            fi
           } 2>&1 | tee "$LOG"
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            # 分支保护若拒绝 GITHUB_TOKEN 推送，具体原因只出现在这一步的日志里，
-            # 因此同样编码成注解，避免"回填失败但看不到原因"的黑盒状态。
             msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
             echo "::error title=回填失败（exit $code）::$msg"
             exit "$code"
