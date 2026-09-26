@@ -1,0 +1,173 @@
+name: native-wechat
+
+# 微信 WCDB 原生库多平台产物构建 + 产物校验。
+#
+# 与 native-libjpeg-turbo 一致的取舍：每个 job 在自己的目标平台上**原生构建**，
+# 而不是交叉编译。SQLCipher + vendored OpenSSL 依赖 cc/make/perl 与平台 SDK，
+# 交叉编译的工具链差异远比收益大。
+#
+# 运行期冒烟需要真实微信安装与数据库密钥，CI 无法提供，因此这里只做
+# 产物存在性 + 二进制架构 + 导出符号校验；端到端解密读取由本地
+# com.chua.nativewechat.smoke.WechatWcdbExample 覆盖。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把各平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-wechat/src/main/rust/**'
+      - '.github/workflows/native-wechat.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-wechat/src/main/rust/**'
+
+concurrency:
+  group: wechat-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIB_NAME: wechat_wcdb
+  EXPORTS: >-
+    wechat_wcdb_open_account
+    wechat_wcdb_close_account
+    wechat_wcdb_get_sessions
+    wechat_wcdb_get_messages
+    wechat_wcdb_get_message_count
+    wechat_wcdb_get_display_names
+    wechat_wcdb_free_string
+    wechat_wcdb_last_error
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            lib: wechat_wcdb.dll
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            lib: libwechat_wcdb.so
+          - platform: darwin-x86_64
+            # 托管 macOS runner 已无 Intel 镜像，只能在 arm64 上交叉编 x86_64；
+            # 没有 x64 JVM 可加载它，故这一腿只验架构与导出符号。
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: x86_64
+            lib: libwechat_wcdb.dylib
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: aarch64
+            lib: libwechat_wcdb.dylib
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential perl pkg-config
+
+      - name: Install build deps (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # SQLCipher 的 vendored OpenSSL 需要 perl 与 cc；两者在 macOS runner 上已具备，
+          # 这里显式校验而不是盲装。
+          command -v perl
+          command -v cc
+          perl -v | head -2
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          perl -v | head -2
+
+      - name: Build
+        run: |
+          chmod +x utils-support-native-wechat/src/main/rust/build.sh
+          ./utils-support-native-wechat/src/main/rust/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-wechat/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Verify binary architecture and exports
+        run: |
+          file "$LIB_PATH"
+          case "$(uname -s)" in
+            Darwin)
+              lipo -info "$LIB_PATH"
+              lipo -archs "$LIB_PATH" | grep -q "${{ matrix.build_arch }}" \
+                || { echo "ASSERT FAIL arch mismatch"; exit 1; }
+              nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+              ;;
+            *)
+              nm -D --defined-only "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
+                || objdump -T "$LIB_PATH" | awk '{print $NF}' > "$RUNNER_TEMP/exports.txt"
+              ;;
+          esac
+          cat "$RUNNER_TEMP/exports.txt"
+          for sym in ${{ env.EXPORTS }}; do
+            grep -q "$sym" "$RUNNER_TEMP/exports.txt" \
+              || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
+            echo "ASSERT ok   export $sym"
+          done
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-wechat-wcdb
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.commit_back
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-wechat-wcdb'
+          path: dl
+          merge-multiple: true
+      - name: Place and commit
+        run: |
+          mkdir -p utils-support-native-wechat/src/main/resources/native
+          cp -R dl/. utils-support-native-wechat/src/main/resources/native/
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@users.noreply.github.com"
+          git add utils-support-native-wechat/src/main/resources/native
+          git diff --cached --quiet \
+            || git commit -m "build(native): wechat wcdb 多平台产物 [skip ci]"
+          git push
