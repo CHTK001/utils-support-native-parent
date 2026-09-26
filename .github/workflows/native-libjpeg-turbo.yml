@@ -156,7 +156,14 @@ jobs:
   collect:
     name: commit artifacts back
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.commit_back
+    # 与 native-wechat.yml 保持一致：push 与手动 dispatch 都触发，
+    # 回填使用 workflow 自带 GITHUB_TOKEN，无需登录点按钮。
+    # always() 保证部分平台失败时成功平台的产物仍能回填。
+    # 提交信息带 [skip ci] 防止回填再次触发 workflow。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
     runs-on: ubuntu-22.04
     permissions:
       contents: write

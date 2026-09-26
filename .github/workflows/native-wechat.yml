@@ -221,12 +221,19 @@ jobs:
   collect:
     name: commit artifacts back
     needs: build
+    # 自动回填：push 与手动 dispatch 都触发，因此无需登录点按钮
+    # （回填写操作用的是 workflow 自带的 GITHUB_TOKEN）。
     # always() 而非默认的 success()：矩阵里某个平台失败（例如 Windows 的
     # vendored OpenSSL 与 runner 的 Strawberry Perl 不兼容）时，
     # 成功平台的产物仍需回填，否则一次失败就让整批产物全部丢失。
     # download-artifact 按 pattern 只取实际存在的 artifact，
     # 因此天然只收集构建成功的平台。
-    if: always() && github.event_name == 'workflow_dispatch' && inputs.commit_back
+    # 提交信息带 [skip ci]，GitHub Actions 会据此跳过本次提交触发的 workflow，
+    # 避免"回填产物 → 再次构建 → 再次回填"的循环。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
     runs-on: ubuntu-22.04
     permissions:
       contents: write
