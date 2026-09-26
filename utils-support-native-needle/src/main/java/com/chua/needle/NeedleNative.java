@@ -20,8 +20,13 @@ package com.chua.needle;
  * String envelope = NeedleNative.complete("把客厅灯调到 30", 512);
  * }</pre>
  *
- * <p><b>线程安全但无并发吞吐：</b>引擎为进程级单例且权重不可卸载，
- * {@link NeedleEngine} 已将所有原生调用串行化；多线程并发调用会排队而非并行。
+ * <p><b>多轮状态：</b>引擎的 {@code complete} 会延续同一会话上下文，且倾向把
+ * 新指令当成上一轮的后续、沿用历史参数。若每条输入都是独立命令，调用前
+ * 必须 {@link #reset()}；{@link #init} 幂等，<b>不会</b>顺带清历史。</p>
+ *
+ * <p><b>线程安全但无并发吞吐：</b>官方头文件明确
+ * {@code One process-global, non-thread-safe model.}，且权重不可卸载，
+ * {@link NeedleEngine} 已将所有原生调用串行化；多线程并发会排队而非并行。
  * {@link #init} 在 system 与 tools 未变时幂等，可安全地每请求调用。</p>
  *
  * @author CH
@@ -84,8 +89,9 @@ public final class NeedleNative {
     /**
      * 完成一次对话生成。
      *
-     * <p>必须在 {@link #init} 之后调用。多轮对话依赖引擎内部上下文，
-     * 需要清空历史时调用 {@link #reset()}。</p>
+     * <p>必须在 {@link #init} 之后调用。本方法会延续引擎内的会话上下文，
+     * 若本次输入与上一条无关，需先 {@link #reset()}，否则引擎可能沿用
+     * 上一轮的参数。</p>
      *
      * @param prompt    用户提示文本
      * @param maxTokens 最大生成令牌数

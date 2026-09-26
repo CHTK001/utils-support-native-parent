@@ -74,6 +74,15 @@ final class NeedleEngine {
     private static final int DEFAULT_BUFFER_SIZE = 65536;
 
     /**
+     * 读取 {@code needle_last_error} 时用于建立有界窗口的字节数。
+     *
+     * <p>引擎返回的是无长度的 C 字符串指针，必须给定一个可读窗口才能扫描终止符。
+     * 取 8 KiB 足够容纳任何错误描述；{@code getString} 读到首个 NUL 即止，
+     * 不会超出该窗口实际读取。
+     */
+    private static final long MAX_ERROR_BYTES = 8192L;
+
+    /**
      * 引擎锁。引擎为进程级单例且不可卸载权重，故所有原生调用必须串行。
      */
     private static final ReentrantLock ENGINE_LOCK = new ReentrantLock();
@@ -97,6 +106,11 @@ final class NeedleEngine {
      * {@code needle_reset} 绑定
      */
     private static volatile MethodHandle needleReset;
+
+    /**
+     * {@code needle_last_error} 绑定
+     */
+    private static volatile MethodHandle needleLastError;
 
     /**
      * {@code needle_load} 绑定
@@ -151,6 +165,8 @@ final class NeedleEngine {
                         ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
         needleReset = downcall(linker, lookup, "needle_reset",
                 FunctionDescriptor.ofVoid());
+        needleLastError = downcall(linker, lookup, "needle_last_error",
+                FunctionDescriptor.of(ValueLayout.ADDRESS));
         needleLoad = downcall(linker, lookup, "needle_load",
                 FunctionDescriptor.of(ValueLayout.JAVA_INT,
                         ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
@@ -235,8 +251,9 @@ final class NeedleEngine {
                         ? MemorySegment.NULL : arena.allocateFrom(nextTools);
                 int rc = (int) needleInit.invokeExact(systemSeg, toolsSeg, MemorySegment.NULL);
                 if (rc < 0) {
-                    throw new IllegalStateException(
-                            "needle_init 失败，错误码 " + rc + "；请检查 tools 是否为合法 JSON 数组");
+                    throw new IllegalStateException("needle_init 失败，错误码 " + rc + "："
+                            + lastError() + "；常见原因是 system 提示词加静态工具声明"
+                            + "超出模型上下文窗口，或 tools 不是合法 JSON 数组");
                 }
             }
             boundSystem = nextSystem;
@@ -273,8 +290,11 @@ final class NeedleEngine {
                 MemorySegment out = arena.allocate((long) bufferSize + 1L);
                 int rc = (int) needleComplete.invokeExact(textSeg, maxTokens, out, bufferSize);
                 if (rc < 0) {
+                    // 官方约定：失败原因既可能写进 out，也可能只经 needle_last_error 暴露
+                    String fromBuffer = out.getString(0);
+                    String detail = fromBuffer.isBlank() ? lastError() : fromBuffer;
                     throw new IllegalStateException("needle_complete 失败，错误码 " + rc
-                            + "：" + out.getString(0));
+                            + "：" + detail);
                 }
                 return out.getString(0);
             }
@@ -353,6 +373,35 @@ final class NeedleEngine {
     }
 
     /**
+     * 读取引擎的进程级最近一次错误。
+     *
+     * <p>官方头文件说明：该字符串由运行时持有，<b>在下一次 API 调用前有效</b>，
+     * 故必须紧接着失败的那次调用读取。此处不做跨调用缓存。</p>
+     *
+     * @return 引擎错误描述；取不到时返回"引擎未提供错误描述"
+     */
+    private static String lastError() {
+        MethodHandle handle = needleLastError;
+        if (handle == null) {
+            return "引擎未提供错误描述";
+        }
+        try {
+            MemorySegment segment = (MemorySegment) handle.invokeExact();
+            if (segment == null || segment.equals(MemorySegment.NULL)) {
+                return "引擎未提供错误描述";
+            }
+            // 引擎返回的是不带长度的 const char*，FFM 给回的段 byteSize 为 0，
+            // 直接 getString(0) 会因"范围内找不到终止符"抛 IndexOutOfBoundsException。
+            // 故先 reinterpret 出一个有界窗口：getString 只读到第一个 NUL 为止，
+            // 窗口只要覆盖到终止符即安全，不会越界读。
+            String text = segment.reinterpret(MAX_ERROR_BYTES).getString(0);
+            return text == null || text.isBlank() ? "引擎未提供错误描述" : text;
+        } catch (Throwable t) {
+            return "读取引擎错误描述失败：" + t;
+        }
+    }
+
+    /**
      * 定位并绑定权重归档，每个 JVM 进程至多成功一次。
      */
     private static void ensureWeights() {
@@ -376,7 +425,8 @@ final class NeedleEngine {
             int rc = (int) needleLoad.invokeExact(data, (long) bytes.length);
             if (rc < 0) {
                 throw new IllegalStateException("needle_load 失败，错误码 " + rc
-                        + "；归档可能不是受支持的 .cact 格式");
+                        + "：" + lastError() + "；归档可能不是受支持的 .cact 格式"
+                        + "（gen3 魔数为小端 0x05E12A84）");
             }
         } catch (IllegalStateException e) {
             throw e;
