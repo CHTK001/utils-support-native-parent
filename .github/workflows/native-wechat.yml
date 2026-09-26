@@ -116,18 +116,31 @@ jobs:
         run: |
           set -o pipefail
           cd utils-support-native-wechat/src/main/rust
-          echo "== pwd =="; pwd
-          echo "== ls =="; ls -la
-          echo "== cargo =="; cargo --version; rustc --version
-          if [ "${{ matrix.build_os }}" = "windows" ]; then
-            echo "== nasm =="; nasm -v || echo "ASSERT WARN nasm 不可用"
-          fi
-          echo "== cargo metadata =="
-          cargo metadata --format-version 1 --no-deps > /dev/null \
-            || { echo "ASSERT FAIL cargo metadata 无法解析 Cargo.toml"; exit 1; }
-          echo "== build =="
+          LOG="$RUNNER_TEMP/build.log"
+          {
+            echo "== pwd =="; pwd
+            echo "== ls =="; ls -la
+            echo "== toolchain =="; cargo --version; rustc --version
+            echo "== cargo metadata =="
+            cargo metadata --format-version 1 --no-deps > /dev/null \
+              && echo "metadata ok" || echo "metadata FAILED"
+            if [ "${{ matrix.build_os }}" = "windows" ]; then
+              echo "== nasm =="; nasm -v || echo "nasm unavailable"
+            fi
+            echo "== build.sh =="
+          } 2>&1 | tee "$LOG"
+          set +o pipefail
           bash ./build.sh "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release 2>&1 \
-            | tee "$RUNNER_TEMP/build.log"
+            | tee -a "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            # 把失败原因编码成单行 workflow annotation。
+            # 注解显示在 run 摘要页，即使未登录也能看到，
+            # 避免"构建失败但看不到日志"的黑盒状态。
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=wechat build failed on ${{ matrix.platform }} (exit $code)::$msg"
+            exit "$code"
+          fi
 
       - name: Upload build log (always)
         if: always()
