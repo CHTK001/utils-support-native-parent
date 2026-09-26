@@ -263,7 +263,12 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Place and commit
         run: |
-          set -o pipefail
+          # GitHub 的 shell: bash 默认注入 set -eo pipefail。若保持 -e，
+          # 下面 { ... } | tee 一旦失败会立即退出，来不及读取 PIPESTATUS
+          # 并输出 ::error:: 注解，失败原因将完全不可见。
+          # 因此先关掉 -e / pipefail，手动判定退出码。
+          set +e
+          set +o pipefail
           LOG="$RUNNER_TEMP/commit.log"
           {
             mkdir -p utils-support-native-wechat/src/main/resources/native
@@ -290,3 +295,4 @@ jobs:
             echo "::error title=回填失败（exit $code）::$msg"
             exit "$code"
           fi
+          echo "回填完成"
