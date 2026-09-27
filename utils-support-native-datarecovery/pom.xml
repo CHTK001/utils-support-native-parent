@@ -11,4 +11,12 @@
     <artifactId>utils-support-native-datarecovery</artifactId>
     <packaging>jar</packaging>
     <description>Data recovery Rust native 库</description>
+    <dependencies>
+        <!-- JNI 绑定类 DataRecovery 迁入本模块，需要 NativeUtils -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 </project>
