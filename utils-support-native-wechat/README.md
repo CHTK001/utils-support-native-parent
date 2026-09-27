@@ -45,8 +45,32 @@ utils-support-native-wechat/
 
 - `windows-x86_64`：`wechat_wcdb.dll`
 - `linux-x86_64`：`libwechat_wcdb.so`
+- `darwin-x86_64`：`libwechat_wcdb.dylib`
+- `darwin-aarch64`：`libwechat_wcdb.dylib`
 
 `WechatWcdbBridge.load()` 时自动从 classpath 抽取并按平台加载，无需外部配置原生库目录。
+
+### 已知不一致：Windows 产物缺 2 个密钥导出
+
+`src/main/rust/src/lib.rs` 声明了 10 个 `#[no_mangle]` 导出，其中
+`wechat_wcdb_extract_key` 与 `wechat_wcdb_can_extract_key`
+（进程内存取密钥，仅 Windows 有效）在**已提交的 `windows-x86_64/wechat_wcdb.dll` 中不存在**——
+该 DLL 是从早于这两个函数加入的源码构建的。linux 与两个 darwin 产物均包含这两个符号。
+
+影响范围有限，但需明确：
+
+- **当前无运行期影响**。密钥提取的**实际调用路径是纯 Java 实现**
+  `WechatKeyExtractor`，它用 FFM 直连 `kernel32.dll`
+  （`CreateToolhelp32Snapshot` / `OpenProcess` / `ReadProcessMemory`），
+  自行扫描进程内存，**不经过 Rust 动态库**，因此不查这两个符号。
+- **Rust 侧密钥提取在 Windows 上不可用**。直接以 FFM 调用
+  `wechat_wcdb_extract_key` 会得到 `UnsatisfiedLinkError`；
+  `wechat_wcdb_can_extract_key` 同样取不到。
+- 修复方式：由 `.github/workflows/native-wechat.yml` 重建 windows-x86_64 产物
+  （该 workflow 已在 windows-2022 上执行 `build.sh windows x86_64 release`），
+  回填后即一致。本地重建不推荐：`bundled-sqlcipher` +
+  `bundled-sqlcipher-vendored-openssl` 需从源码编译 SQLCipher 与 OpenSSL
+  （需 Perl、nasm、VC 工具链，耗时很长）。
 
 ## 构建
 
@@ -105,11 +129,13 @@ try (WechatWcdbBridge bridge = WechatWcdbBridge.load()) {
 | `wechat_wcdb_get_display_names` | 批量解析发送者显示名称 |
 | `wechat_wcdb_free_string` | 释放本库通过出参返回的字符串 |
 | `wechat_wcdb_last_error` | 返回最近一次错误信息 |
+| `wechat_wcdb_extract_key` | 从运行中的微信进程内存提取数据库密钥（**仅 Windows**，当前 Windows 产物缺失，见上文） |
+| `wechat_wcdb_can_extract_key` | 查询当前平台是否支持密钥提取（**仅 Windows**，当前 Windows 产物缺失，见上文） |
 
 ### 与闭源 wcdb_api.dll 的区别
 
 - 无 `WCDB.dll` / `SDL2.dll` 依赖，无 `electron.exe` 宿主进程名校验，普通 JVM 直接可用。
-- 跨平台（Windows / Linux），错误信息可通过 `lastError()` 获取。
+- 跨平台（Windows / Linux / macOS x86_64 / macOS arm64），错误信息可通过 `lastError()` 获取。
 - 打开失败或查询失败时返回非 0 码，调用方可读取 `lastError()` 定位原因。
 
 ---
