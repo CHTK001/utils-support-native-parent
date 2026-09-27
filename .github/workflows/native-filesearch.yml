@@ -92,10 +92,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check exports and architecture (no-JVM leg)
-        if: matrix.smoke == false
+      - name: Check exports
+        # 四条腿都必须断言。早期把断言挂在 `matrix.smoke == false` 上，
+        # 而该条件只有 darwin-x86_64 一腿为真，导致 windows / linux /
+        # darwin-aarch64 从不校验导出——linux-x86_64 的 libfile_search.so
+        # 因此长期带着 7 个已从源码删除的坏 JNI 导出而无人发现。
         run: |
-          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
+            || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
           for sym in fast_get_version fast_search_cancel fast_search_by_name \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawSearchByName \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawGetTree; do
@@ -112,6 +116,10 @@ jobs:
             fi
             echo "ASSERT ok   removed $gone"
           done
+
+      - name: Check architecture (macOS Intel cross leg)
+        if: matrix.smoke == false
+        run: |
           lipo -info "$LIB_PATH"
           lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
           echo "ASSERT ok   mach-o x86_64"

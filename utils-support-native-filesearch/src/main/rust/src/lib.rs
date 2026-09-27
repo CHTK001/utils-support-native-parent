@@ -37,7 +37,10 @@ fn get_last_modified(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// ????????? JSON ???
+/// 递归遍历目录树并拼装搜索结果 JSON。
+///
+/// <p>遍历深度固定为 3 层（见下方 {@code WalkDir::max_depth}），
+/// 超深层级不会被收录；目录节点本身不进入结果，只收文件。</p>
 fn search_to_json(root: &str, pattern: Option<&str>, max_results: i32) -> String {
     use walkdir::WalkDir;
     let mut results: Vec<serde_json::Value> = Vec::new();
@@ -115,7 +118,7 @@ pub unsafe extern "C" fn fast_search_by_name(
         .unwrap_or(-1)
 }
 
-// ==================== JSON ???????????====================
+// ==================== JSON 返回接口 ====================
 
 #[no_mangle]
 pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawSearchByName(
