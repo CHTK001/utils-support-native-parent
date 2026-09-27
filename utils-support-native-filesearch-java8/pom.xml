@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+    </parent>
+    <artifactId>utils-support-native-filesearch-java8</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native Filesearch Java8</name>
+    <description>文件搜索 Rust native 库的 Java 8 JNA 绑定（面向 JDK 8 运行环境，独立于 Java 25 FFM 主模块）</description>
+    <properties>
+        <jna.version>5.14.0</jna.version>
+        <slf4j.version>1.7.36</slf4j.version>
+        <lombok.version>1.18.46</lombok.version>
+    </properties>
+    <dependencies>
+        <!-- Java 8 侧无法使用 Panama FFM（JDK 22+），改用 JNA 直接绑定同一组扁平 C ABI -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <!--
+          复用 native-filesearch 模块已提交的四平台产物，避免二进制重复入库；
+          打出的 jar 自带 native/ 资源，可脱离 release 25 的主模块在 JDK 8 上独立使用。
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../utils-support-native-filesearch/src/main/resources/native</directory>
+                <targetPath>native</targetPath>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <!-- Java 8 绑定：禁止 record / FFM / switch 表达式等 9+ 语法，产物为 52.0 字节码 -->
+                    <release>8</release>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <!-- 构建 JDK 为 25，需显式启用注解处理 -->
+                        <arg>-proc:full</arg>
+                        <!-- 抑制“源/目标值 8 已过时”的 options 告警 -->
+                        <arg>-Xlint:-options</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
