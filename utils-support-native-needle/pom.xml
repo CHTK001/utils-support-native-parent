@@ -14,8 +14,10 @@
     <properties>
         <!-- FFM（java.lang.foreign）自 JDK 22 转正，父 POM 未配置编译级别，
              默认落到 target 1.8，无法解析 SymbolLookup / Linker。
-             故本模块单独提升到 22；运行时也要求 JDK 22+。 -->
-        <maven.compiler.release>22</maven.compiler.release>
+             本模块统一到 25，与 native-parent 中其它使用 FFM/record 的模块
+             （smb / metrics / libjpeg-turbo / filesearch / wechat / uia）
+             保持一致；运行时也要求 JDK 25。 -->
+        <maven.compiler.release>25</maven.compiler.release>
     </properties>
     <dependencies>
         <dependency>

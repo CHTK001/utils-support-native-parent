@@ -64,8 +64,13 @@ ABI 不同。本模块按 **Needle 3** 绑定；同目录下两代并存时优�
 
 ### 运行时要求
 
-FFM（`java.lang.foreign`）自 JDK 22 转正，本模块 `maven.compiler.release=22`，
-**运行时需 JDK 22+**（父 POM 未统一配置编译级别，本模块单独提升）。
+本模块使用 FFM（`java.lang.foreign`，自 JDK 22 转正），`maven.compiler.release=25`，
+**运行时需 JDK 25**。
+
+选 25 而非最低可用的 22，是为了与 `native-parent` 中其它使用 FFM/record 的模块
+（`smb` / `metrics` / `libjpeg-turbo` / `filesearch` / `wechat` / `uia`）保持一致——
+整个仓库因此只有两档编译级别：纯 Java 模块沿用父 POM 默认的 1.8，
+需要 FFM/record/preview 的模块统一 25。CI 亦为 temurin 25。
 
 `SymbolLookup.libraryLookup`、`Linker.nativeLinker`、`MemorySegment.reinterpret`
 均为 JDK 受限方法，JDK 24 起默认打印告警。需要静默时加：
