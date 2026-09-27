@@ -18,6 +18,28 @@ use eraser::FileEraser;
 
 const VERSION: &str = "1.0.0";
 
+/// 目标路径是否存在。
+///
+/// 设备路径（`\\.\` / `\\?\` / `/dev/`）无法用文件 API 判断存在性，返回 `None`
+/// 表示无法判定，交由底层扫描自行处理；普通路径返回 `Some(bool)`。
+fn target_exists(path: &str) -> Option<bool> {
+    let lower = path.to_lowercase();
+    if lower.starts_with("\\\\.\\") || lower.starts_with("\\\\?\\") || lower.starts_with("/dev/") {
+        return None;
+    }
+    Some(std::path::Path::new(path).exists())
+}
+
+/// 扫描模式名，用于结果消息。
+fn scan_mode_name(mode: i32) -> &'static str {
+    match mode {
+        0 => "walkdir",
+        1 => "raw-disk",
+        2 => "ntfs-deleted",
+        _ => "unknown",
+    }
+}
+
 #[derive(Serialize)]
 struct ScanResultJson {
     success: bool,
@@ -83,13 +105,28 @@ pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeSca
         }
     };
 
+    // 普通路径不存在时直接给出失败结果：底层 scan_walkdir 只会往 stderr 打印
+    // "root does not exist" 并返回空统计，若在此放过，调用方会拿到 success=true
+    // 的假成功。
+    if target_exists(&device_path_str) == Some(false) {
+        let result = ScanResultJson {
+            success: false,
+            files_scanned: 0,
+            files_found: 0,
+            entries: Vec::new(),
+            message: format!("Device path does not exist: {}", device_path_str),
+        };
+        return to_jstring(&mut env, &result);
+    }
+
     let scanner = FileScanner::new(&device_path_str);
     let scan_result = scanner.scan(scan_mode as i32);
 
+    let files_found = scan_result.files_recovered as i64;
     let result = ScanResultJson {
         success: true,
         files_scanned: scan_result.files_scanned as i64,
-        files_found: scan_result.files_recovered as i64,
+        files_found,
         entries: scan_result
             .recovered_list
             .into_iter()
@@ -103,7 +140,12 @@ pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeSca
                 carved_signature: r.extension,
             })
             .collect(),
-        message: "Scan completed".to_string(),
+        message: format!(
+            "Scan completed (mode={}): scanned={}, found={}",
+            scan_mode_name(scan_mode as i32),
+            scan_result.files_scanned,
+            files_found
+        ),
     };
 
     to_jstring(&mut env, &result)
@@ -144,6 +186,40 @@ pub extern "system" fn Java_com_chua_datarecovery_support_DataRecovery_nativeSca
             return to_jstring(&mut env, &result);
         }
     };
+
+    if target_exists(&device_path_str) == Some(false) {
+        let result = ScanResultJson {
+            success: false,
+            files_scanned: 0,
+            files_found: 0,
+            entries: Vec::new(),
+            message: format!("Device path does not exist: {}", device_path_str),
+        };
+        return to_jstring(&mut env, &result);
+    }
+
+    if output_dir_str.trim().is_empty() {
+        let result = ScanResultJson {
+            success: false,
+            files_scanned: 0,
+            files_found: 0,
+            entries: Vec::new(),
+            message: "Output dir is empty".to_string(),
+        };
+        return to_jstring(&mut env, &result);
+    }
+
+    // 输出目录不可用时明确失败，不再返回 success=true 而在底层静默放弃雕刻
+    if let Err(e) = std::fs::create_dir_all(&output_dir_str) {
+        let result = ScanResultJson {
+            success: false,
+            files_scanned: 0,
+            files_found: 0,
+            entries: Vec::new(),
+            message: format!("Cannot create output dir {}: {}", output_dir_str, e),
+        };
+        return to_jstring(&mut env, &result);
+    }
 
     let scanner = FileScanner::new(&device_path_str).with_output_dir(&output_dir_str);
     let scan_result = scanner.scan_and_recover(scan_mode as i32, &output_dir_str);
