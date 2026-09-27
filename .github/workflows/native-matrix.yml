@@ -1,0 +1,212 @@
+name: native-matrix
+
+# 其余 native 模块的四平台交叉编译。与既有的一模块一 workflow
+# （native-libjpeg-turbo / native-uia / native-wechat / native-filesearch /
+#   native-nmap / native-datarecovery）互补，覆盖尚未有 CI 的模块。
+#
+# 产物回填到分支 build/native-matrix-artifacts，由维护者合并到 main。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-filestorage/**'
+      - 'utils-support-native-headless/**'
+      - 'utils-support-native-metrics/**'
+      - 'utils-support-native-smb/**'
+      - 'utils-support-native-video-codec/**'
+      - 'utils-support-native-video-processor/**'
+      - 'utils-support-native-ffmpeg/**'
+      - '.github/workflows/native-matrix.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-filestorage/**'
+      - 'utils-support-native-headless/**'
+      - 'utils-support-native-metrics/**'
+      - 'utils-support-native-smb/**'
+      - 'utils-support-native-video-codec/**'
+      - 'utils-support-native-video-processor/**'
+      - 'utils-support-native-ffmpeg/**'
+
+concurrency:
+  group: native-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - utils-support-native-filestorage
+          - utils-support-native-headless
+          - utils-support-native-metrics
+          - utils-support-native-smb
+          - utils-support-native-video-codec
+          - utils-support-native-video-processor
+          - utils-support-native-ffmpeg
+        platform:
+          - windows-x86_64
+          - linux-x86_64
+          - darwin-x86_64
+          - darwin-aarch64
+    name: ${{ matrix.module }} / ${{ matrix.platform }}
+    # macos-15 只能跑 arm64：darwin-x86_64 一腿仅做交叉编译与导出/架构断言
+    runs-on: >-
+      ${{ matrix.platform == 'windows-x86_64' && 'windows-2022'
+          || matrix.platform == 'linux-x86_64' && 'ubuntu-22.04'
+          || 'macos-15' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve build params
+        id: p
+        run: |
+          case "${{ matrix.platform }}" in
+            windows-x86_64) echo "bos=windows" >> "$GITHUB_OUTPUT"; echo "arch=x86_64"  >> "$GITHUB_OUTPUT"; echo "lib=lib%s"    >> "$GITHUB_OUTPUT"; echo "dll=1" >> "$GITHUB_OUTPUT" ;;
+            linux-x86_64)   echo "bos=linux"   >> "$GITHUB_OUTPUT"; echo "arch=x86_64"  >> "$GITHUB_OUTPUT"; echo "lib=lib%s.so" >> "$GITHUB_OUTPUT" ;;
+            darwin-x86_64)  echo "bos=darwin"  >> "$GITHUB_OUTPUT"; echo "arch=x86_64"  >> "$GITHUB_OUTPUT"; echo "lib=lib%s.dylib" >> "$GITHUB_OUTPUT" ;;
+            darwin-aarch64) echo "bos=darwin"  >> "$GITHUB_OUTPUT"; echo "arch=aarch64" >> "$GITHUB_OUTPUT"; echo "lib=lib%s.dylib" >> "$GITHUB_OUTPUT" ;;
+          esac
+          case "${{ matrix.module }}" in
+            *filestorage)     echo "stem=file_storage" >> "$GITHUB_OUTPUT" ;;
+            *headless)        echo "stem=headless_rust" >> "$GITHUB_OUTPUT" ;;
+            *metrics)         echo "stem=metrics_native" >> "$GITHUB_OUTPUT" ;;
+            *smb)             echo "stem=rust_smb_server" >> "$GITHUB_OUTPUT" ;;
+            *video-codec)     echo "stem=chua_native_video_codec" >> "$GITHUB_OUTPUT" ;;
+            *video-processor) echo "stem=video_processor" >> "$GITHUB_OUTPUT" ;;
+            *ffmpeg)          echo "stem=ffmpeg_rust" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Build
+        run: |
+          R="${{ matrix.module }}/src/main/rust"
+          if [ ! -d "$R" ]; then R="${{ matrix.module }}/src/rust"; fi
+          chmod +x "$R/build.sh"
+          "$R/build.sh" "${{ steps.p.outputs.bos }}" "${{ steps.p.outputs.arch }}" release
+
+      - name: Verify artifact exists
+        run: |
+          D="${{ matrix.module }}/src/main/resources/native/${{ matrix.platform }}"
+          if [ "${{ steps.p.outputs.dll }}" = "1" ]; then
+            EXPECT="${{ steps.p.outputs.stem }}.dll"
+          else
+            EXPECT=$(printf "${{ steps.p.outputs.lib }}" "${{ steps.p.outputs.stem }}")
+          fi
+          test -f "$D/$EXPECT" || { echo "missing artifact: $D/$EXPECT"; ls -la "$D" || true; exit 1; }
+          ls -la "$D/$EXPECT"
+          echo "LIB_PATH=$D/$EXPECT" >> "$GITHUB_ENV"
+
+      - name: Check exports
+        run: |
+          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
+            || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          {
+            echo "### ${{ matrix.module }} / ${{ matrix.platform }} 导出"
+            echo '```'
+            head -40 "$RUNNER_TEMP/exports.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.module }}" in
+            *filestorage)     NEED="native_get_version native_init" ;;
+            *headless)        NEED="download_page screenshot free_string" ;;
+            *metrics)         NEED="metrics_start_sampler metrics_stop_sampler metrics_snapshot_size metrics_get_snapshot" ;;
+            *smb)             NEED="smb_server_start smb_server_stop smb_server_list_shares smb_server_free_string" ;;
+            *video-codec)     NEED="Java_com_chua_nativevideocodec_support_NativeVideoCodec_getVersion Java_com_chua_nativevideocodec_support_NativeVideoCodec_h264Decode" ;;
+            *video-processor) NEED="Java_com_chua_video_processor_support_bridge_VideoProcessorBridge_transcodeToHls Java_com_chua_video_processor_support_bridge_VideoProcessorBridge_getVersion" ;;
+            *ffmpeg)          NEED="ffmpeg_version ffmpeg_codec_available ffmpeg_free_string" ;;
+          esac
+          for s in $NEED; do
+            grep -q "$s" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $s"; exit 1; }
+            echo "ASSERT ok   $s"
+          done
+          if [ "${{ matrix.platform }}" = "darwin-x86_64" ]; then
+            lipo -info "$LIB_PATH"
+            lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
+            echo "ASSERT ok   mach-o x86_64"
+          fi
+
+      - name: Stage artifact for upload
+        run: |
+          M="${{ matrix.module }}"; P="${{ matrix.platform }}"
+          rm -rf stage; mkdir -p "stage/$M/native/$P"
+          cp "$LIB_PATH" "stage/$M/native/$P/"
+          ls -la "stage/$M/native/$P"
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.module }}-${{ matrix.platform }}
+          path: stage
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          merge-multiple: true
+      - name: Report outcome
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/native-matrix-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/native-matrix-artifacts"
+          {
+            for d in dl/*/; do
+              [ -d "$d" ] || continue
+              cp -R "$d." .
+            done
+            echo "== 待提交产物 =="
+            git status --porcelain -- 'utils-support-native-*/src/main/resources/native'
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- 'utils-support-native-*/src/main/resources/native' \
+               && [ -z "$(git ls-files --others --exclude-standard 'utils-support-native-*/src/main/resources/native')" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add 'utils-support-native-*/src/main/resources/native'
+            git commit -m "build(native): matrix 模块四平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH，等待维护者合并"
