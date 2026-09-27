@@ -191,6 +191,18 @@ public class DataRecovery {
 
     public static class RecoverResult {
         /**
+         * 是否成功。
+         *
+         * <p>原生 RecoverResultJson 返回该字段；此前本类没有对应属性，
+         * 而 parse() 用的 ObjectMapper 未关闭 FAIL_ON_UNKNOWN_PROPERTIES，
+         * 于是 recover 即使操作成功也会抛 "Parse JSON failed"。</p>
+        */
+        public boolean success;
+        /**
+         * 结果描述，来自原生 message 字段
+        */
+        public String message;
+        /**
          * 成功数量
         */
         public int successCount;
@@ -362,13 +374,11 @@ public class DataRecovery {
                 return null;
             }
             if (result.success) {
-                if (callback != null) {
-                    callback.onRecovered(filePath, result.bytesOverwritten);
-                }
+                // 删除没有对应的回调语义，仅以进度与结果表达；不误用 onRecovered
+                progress(STAGE_DELETE, 100);
             } else {
                 notifyError(result.message);
             }
-            progress(STAGE_DELETE, 100);
             return result;
         } catch (RuntimeException e) {
             notifyError(STAGE_DELETE + " 失败: " + e.getMessage());
