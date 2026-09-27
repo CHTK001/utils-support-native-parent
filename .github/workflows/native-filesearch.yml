@@ -34,12 +34,16 @@ jobs:
             build_os: windows
             build_arch: x86_64
             smoke: true
+            # Windows 走 NTFS MFT 直读；GH 的 windows runner 以管理员运行，
+            # 因此能真正打开 \\.\X: 读 $MFT（本地非管理员会自动回退 walkdir）
+            engine: mft
             lib: file_search.dll
           - platform: linux-x86_64
             runs-on: ubuntu-22.04
             build_os: linux
             build_arch: x86_64
             smoke: true
+            engine: walkdir
             lib: libfile_search.so
           - platform: darwin-x86_64
             # 中国 macOS runner 已下架 Intel 机型，macos-15 只能跑 arm64；
@@ -48,12 +52,14 @@ jobs:
             build_os: darwin
             build_arch: x86_64
             smoke: false
+            engine: walkdir
             lib: libfile_search.dylib
           - platform: darwin-aarch64
             runs-on: macos-15
             build_os: darwin
             build_arch: aarch64
             smoke: true
+            engine: walkdir
             lib: libfile_search.dylib
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
@@ -140,6 +146,26 @@ jobs:
           javac -d target/smoke utils-support-native-filesearch/src/smoke/java/FilesearchFlatAbiSmoke.java
           java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
             -cp target/smoke FilesearchFlatAbiSmoke "$(pwd)/$LIB_PATH"
+
+      - name: Engine assertion (MFT 直读 vs walkdir 回退)
+        if: matrix.smoke != false
+        # 探针文件放在相对深度 5：walkdir 的 max_depth=3 永远看不到它，只有 MFT 直读能命中，
+        # 同一探针在两种引擎下结果必然不同，据此断言本次实际走的是哪条路径，并校验 size 回传。
+        run: |
+          if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
+            SCAN_ROOT='C:\'
+            # MFT 直读需管理员；若 runner 非管理员必须显式失败，不能悄悄降级成 walkdir
+            # 后还断言 mft（那会变成一条永远不真正测 MFT 的假绿用例）。
+            if ! net session >/dev/null 2>&1; then
+              echo "ASSERT FAIL windows runner 非管理员，无法验证 MFT 直读"
+              exit 1
+            fi
+          else
+            SCAN_ROOT="$RUNNER_TEMP"
+          fi
+          javac -d target/smoke utils-support-native-filesearch/src/smoke/java/FilesearchMftSmoke.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            -cp target/smoke FilesearchMftSmoke "$(pwd)/$LIB_PATH" "$SCAN_ROOT" "${{ matrix.engine }}"
 
       - name: Stage artifact for upload
         run: |
