@@ -132,7 +132,14 @@ if [[ -z "$LIB_FILE" ]]; then
     exit 1
 fi
 
-NATIVE_DIR="$SCRIPT_DIR/../resources/native/$PLATFORM_DIR"
+NATIVE_DIR=""
+if [[ -d "$SCRIPT_DIR/../main/resources" ]]; then
+    # 项目位于 src/rust/（如 metrics / video-codec），资源在 src/main/resources/
+    NATIVE_DIR="$SCRIPT_DIR/../main/resources/native/$PLATFORM_DIR"
+else
+    # 项目位于 src/main/rust/（多数模块），资源在 src/main/resources/
+    NATIVE_DIR="$SCRIPT_DIR/../resources/native/$PLATFORM_DIR"
+fi
 mkdir -p "$NATIVE_DIR"
 cp "$LIB_FILE" "$NATIVE_DIR/"
-echo -e "${GREEN}[SUCCESS]${NC} $(basename "$LIB_FILE") -> native/$PLATFORM_DIR/"
+echo -e "${GREEN}[SUCCESS]${NC} $(basename "$LIB_FILE") -> ${NATIVE_DIR#$SCRIPT_DIR/}"
