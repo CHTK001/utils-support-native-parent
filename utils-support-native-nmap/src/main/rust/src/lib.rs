@@ -21,7 +21,7 @@ pub struct PortScanResult {
 
 // ==================== JNI Functions ====================
 
-/// TCP绔彛鎵弿
+/// TCP端口扫描
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpPorts<'local>(
     mut env: JNIEnv<'local>,
@@ -55,7 +55,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpP
     }
 }
 
-/// TCP绔彛鑼冨洿鎵弿
+/// TCP端口范围扫描
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpPortRange<'local>(
     mut env: JNIEnv<'local>,
@@ -78,7 +78,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpP
     }
 }
 
-/// UDP绔彛鎵弿
+/// UDP端口扫描
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanUdpPorts<'local>(
     mut env: JNIEnv<'local>,
@@ -99,7 +99,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanUdpP
     }
 }
 
-/// 鎵弿鍗曚釜TCP绔彛
+/// 扫描单个TCP端口
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSingleTcpPort<'local>(
     mut env: JNIEnv<'local>,
@@ -137,7 +137,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_pingHost
     env.new_string(&result).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// 鎵弿瀛愮綉
+/// 扫描子网
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSubnet<'local>(
     mut env: JNIEnv<'local>,
@@ -158,7 +158,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSubn
     }
 }
 
-/// 鎵弿IP鑼冨洿
+/// 扫描IP范围
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanIpRange<'local>(
     env: JNIEnv<'local>,
@@ -264,7 +264,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_resolveH
     std::ptr::null_mut()
 }
 
-/// 鍙嶅悜DNS鏌ヨ
+/// 反向DNS查询
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_reverseDns<'local>(
     mut env: JNIEnv<'local>,
@@ -284,7 +284,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_reverseD
     std::ptr::null_mut()
 }
 
-/// 妫€鏌P鍦板潃鏄惁鏈夋晥
+/// 检查IP地址是否有效
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidIp<'local>(
     mut env: JNIEnv<'local>,
@@ -318,7 +318,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidS
     JNI_FALSE
 }
 
-/// 鑾峰彇鏈満IP鍦板潃鍒楄〃
+/// 获取本机IP地址列表
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocalIps<'local>(
     env: JNIEnv<'local>,
@@ -331,7 +331,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocal
     }
 }
 
-/// 鑾峰彇鏈満Mac鍦板潃
+/// 获取本机Mac地址
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocalMac<'local>(
     _env: JNIEnv<'local>,
