@@ -346,11 +346,20 @@ pub fn collect(
     }
     let drive = (bytes[0] as char).to_ascii_uppercase();
     let volume = format!("\\\\.\\{}:", drive);
-    let prefix: Option<String> = if normalized.len() > 2 {
+    let mut prefix: Option<String> = if normalized.len() > 2 {
         Some(normalized.to_string())
     } else {
         None
     };
+    // 把 root 规范化成真实长路径：调用方可能传入 8.3 短名（如 C:\Users\RUNNER~1\...），
+    // 而 MFT 记录里是 Win32 长名，不规范化会导致前缀过滤全部失配。
+    if prefix.is_some() {
+        if let Ok(real) = std::fs::canonicalize(&normalized) {
+            let text = real.to_string_lossy().replace('\\', "/");
+            let text = text.strip_prefix("//?/").unwrap_or(&text).to_string();
+            prefix = Some(text);
+        }
+    }
 
     // 打开卷并读取引导扇区
     let mut file = std::fs::OpenOptions::new()
