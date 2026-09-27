@@ -128,7 +128,12 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_pingHost
         Err(_) => return std::ptr::null_mut(),
     };
     let is_up = is_host_up(&host, timeout as u64);
-    let result = format!(r#"{{"host":"{}","is_up":{}}}"#, host, is_up);
+    // 同样经 serde_json 序列化，host 含引号等字符时不至于破坏 JSON
+    let result = serde_json::json!({
+        "host": host,
+        "is_up": is_up,
+    })
+    .to_string();
     env.new_string(&result).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
@@ -184,7 +189,15 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectSe
     };
     let service = get_common_service(port as u16).unwrap_or_else(|| "unknown".to_string());
     let banner = grab_banner(&host, port as u16, timeout as u64).unwrap_or_default();
-    let result = format!(r#"{{"port":{},"service":"{}","banner":"{}"}}"#, port, service, banner);
+    // 必须经 serde_json 序列化：banner 是服务端原文，含引号或 CR/LF 时手拼会破坏
+    // JSON 结构，调用方解析会直接失败（实测 detectService 因此抛
+    // Illegal unquoted character (CTRL-CHAR, code 13)）。
+    let result = serde_json::json!({
+        "port": port,
+        "service": service,
+        "banner": banner,
+    })
+    .to_string();
     env.new_string(&result).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
