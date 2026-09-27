@@ -82,12 +82,15 @@ jobs:
 
       - name: Check exports and architecture
         run: |
-          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
-            || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          # nm 只用于诊断：Windows Git Bash 的 nm 不解析 PE/COFF（读出空表），
+          # 剥符号的 Linux 构建则报 "no symbols"。断言改用字节串搜索，
+          # 对 PE / ELF / Mach-O 一律有效。
+          { nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || echo "(nm unavailable)"; } \
+            > "$RUNNER_TEMP/exports.txt" || true
           {
-            echo "### ${{ matrix.platform }} 导出符号"
+            echo "### ${{ matrix.platform }} 导出符号 (nm，仅诊断)"
             echo '```'
-            cat "$RUNNER_TEMP/exports.txt"
+            head -40 "$RUNNER_TEMP/exports.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -97,7 +100,7 @@ jobs:
                      pingHost scanSubnet scanIpRange detectService getBanner detectOs \
                      getTtl resolveHostname reverseDns isValidIp isValidSubnet \
                      getLocalIps getLocalMac getVersion; do
-            grep -q "$sym" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
+            grep -aqF "$sym" "$LIB_PATH" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
             echo "ASSERT ok   export $sym"
           done
 
