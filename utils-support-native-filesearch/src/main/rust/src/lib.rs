@@ -1,5 +1,5 @@
 use std::ffi::{c_char, CStr, CString};
-use std::os::raw::{c_int, c_longlong};
+use std::os::raw::c_int;
 
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\")
@@ -78,65 +78,14 @@ fn search_to_json(root: &str, pattern: Option<&str>, max_results: i32) -> String
     serde_json::json!({"rc": 0, "count": count, "results": results}).to_string()
 }
 
-// ==================== JNI ?? ====================
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_getVersion() -> *const c_char {
-    b"1.0.0\0".as_ptr() as *const c_char
-}
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_cancel() {}
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchByName(
-    root_path: *const c_char,
-    name_pattern: *const c_char,
-    max_results: c_int,
-    _callback: *mut std::os::raw::c_void,
-) -> c_int {
-    if root_path.is_null() { return -1; }
-    let root = CStr::from_ptr(root_path).to_string_lossy().into_owned();
-    let pat = if name_pattern.is_null() { None } else {
-        Some(CStr::from_ptr(name_pattern).to_string_lossy().into_owned())
-    };
-    let json = search_to_json(&root, pat.as_deref(), max_results);
-    // ?? count ??? Java
-    serde_json::from_str::<serde_json::Value>(&json)
-        .ok()
-        .and_then(|v| v.get("count").and_then(|c| c.as_u64()))
-        .map(|c| c as c_int)
-        .unwrap_or(-1)
-}
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_getTree(
-    root_path: *const c_char,
-    _max_depth: c_int,
-    max_results: c_int,
-    _callback: *mut std::os::raw::c_void,
-) -> c_int {
-    if root_path.is_null() { return -1; }
-    let root = CStr::from_ptr(root_path).to_string_lossy().into_owned();
-    let json = search_to_json(&root, None, max_results);
-    serde_json::from_str::<serde_json::Value>(&json)
-        .ok()
-        .and_then(|v| v.get("count").and_then(|c| c.as_u64()))
-        .map(|c| c as c_int)
-        .unwrap_or(-1)
-}
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchBySize(
-    _root: *const c_char, _min: c_longlong, _max: c_longlong, _max_results: c_int,
-    _callback: *mut std::os::raw::c_void,
-) -> c_int { -1 }
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_com_chua_filesearch_support_bridge_RustFileSearchBridge_searchByPath(
-    _root: *const c_char, _pat: *const c_char, _max: c_int,
-    _callback: *mut std::os::raw::c_void,
-) -> c_int { -1 }
+// ==================== 已移除的 JNI 层 ====================
+//
+// 此处原有 getVersion / cancel / searchByName / getTree / searchBySize /
+// searchByPath 六个 Java_... JNI 函数，但它们不符合 JNI 约定（缺少
+// JNIEnv* / jclass 前导参数导致参数错位、getVersion 以 *const c_char 冒充
+// jstring 返回并令 JVM 崩溃、回调形参被忽略、两个函数是返回 -1 的桩）。
+// Java 侧 RustFileSearchBridge 已改走下方扁平 C ABI，这些符号不再被引用，
+// 故整体删除以免误用。
 
 // ==================== C ABI ====================
 
