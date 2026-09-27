@@ -4,22 +4,45 @@
 
 ## 模块
 
-| 模块 | 说明 | 被以下模块使用 |
+| 模块 | 说明 | JDK | 被以下模块声明依赖 |
+|---|---|---|---|
+| `utils-support-native-cuda` | CUDA 运行时库（cudart/cublas/cudnn）环境检测与自动安装 | 1.8 | 无 |
+| `utils-support-native-datarecovery` | 数据恢复 Rust native 库（JNI） | 1.8 | `utils-support-datarecovery-starter` |
+| `utils-support-native-ffmpeg` | FFmpeg RTMP native 库（JNI，`RegisterNatives`） | 1.8 | `utils-support-ffmpeg-rust-starter` |
+| `utils-support-native-filesearch` | 文件搜索 Rust native 库（WizTree 能力，JNI） | **25** | `utils-support-filesearch-starter` |
+| `utils-support-native-filestorage` | 文件存储 Rust native 库（URL 参数解析 + 图片滤镜 + HEIC 预览转码） | 1.8 | 无 |
+| `utils-support-native-headless` | 无头环境 native 支持 | 1.8 | 无 |
+| `utils-support-native-libjpeg-turbo` | libjpeg-turbo TurboJPEG（SIMD JPEG 编解码，FFM） | **25** | `utils-support-image-starter` |
+| `utils-support-native-metrics` | 系统指标 Rust native 库（FFM） | **25** | `utils-support-metrics-starter` |
+| `utils-support-native-needle` | Needle 工具调用 / 结构化抽取引擎（cactus-compute，FFM） | **25** | `utils-support-deeplearning-needle-starter` |
+| `utils-support-native-nmap` | Nmap 集成 native 库（JNI） | 1.8 | `utils-support-nmap-starter` |
+| `utils-support-native-smb` | SMB2/3 服务端 Rust native 库（smb-server crate，FFM） | **25** | `utils-support-smb-starter` |
+| `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | 1.8 | `utils-support-sqlite-starter`、`spring-api-support-system-starter` |
+| `utils-support-native-uia` | Windows UI 自动化原语（FFM） | **25** | `utils-support-native-wechat` |
+| `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI） | 1.8 | `utils-support-example-starter` |
+| `utils-support-native-video-processor` | Video HLS 转码 Rust native 库（JNI） | 1.8 | `utils-support-video-processor-starter` |
+| `utils-support-native-wechat` | 微信 4.x WCDB 原生读取（JNI + FFM） | **25** | 无 |
+
+「无」表示当前没有任何 pom 声明依赖它（据全仓 pom 扫描）；这些模块仍可被应用直接引用，
+不代表已废弃。
+
+## 编译级别与运行时要求
+
+父 POM 未配置 `maven.compiler.release`，默认落到 `target 1.8`。整个仓库只维护两档：
+
+| 档位 | 适用 | 模块 |
 |---|---|---|
-| `utils-support-native-rust-proxy` | 代理协议 native 库（HTTP / SOCKS5 / RDP / SSH / VNC / FTP） | `utils-support-native-video-codec` |
-| `utils-support-native-perf` | 性能计数器 native 库 | — |
-| `utils-support-native-nmap` | Nmap 集成 native 库 | — |
-| `utils-support-native-ffmpeg` | FFmpeg RTMP native 库 | `utils-support-ffmpeg-rust-starter` |
-| `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | — |
-| `utils-support-native-datarecovery` | 数据恢复 Rust native 库 | — |
-| `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI，含预编译 `.dll/.so/.dylib`） | `utils-support-ffmpeg-rust-starter`、`utils-support-example-starter` |
-| `utils-support-native-video-processor` | Video HLS 转码 Rust native 库 | `utils-support-video-processor-starter` |
-| `utils-support-native-filestorage` | 文件存储 Rust native 库（高性能 URL 参数解析 + 图片滤镜 + HEIC/HEIF 预览转码） | `utils-support-filestorage-starter` |
-| `utils-support-native-filesearch` | 文件搜索 Rust native 库（WizTree 能力，跨平台） | — |
-| `utils-support-native-smb` | SMB2/3 服务端 Rust native 库（smb-server crate） | `utils-support-smb-starter` |
-| `utils-support-native-metrics` | 系统指标 Rust native 库 | `utils-support-metrics-starter` |
-| `utils-support-native-cuda` | CUDA 运行时库（cudart/cublas/cudnn）环境检测与自动安装 | `utils-support-common-starter` |
-| `utils-support-native-headless` | 无头环境 native 支持 | — |
+| **1.8**（父 POM 默认） | 纯 Java 或传统 JNI（`native` 方法），无新语法 | cuda、datarecovery、ffmpeg、filestorage、headless、nmap、sqlite、video-codec、video-processor |
+| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | filesearch、libjpeg-turbo、metrics、needle、smb、uia、wechat |
+
+**引用 25 档模块的应用运行时必须是 JDK 25**（CI 亦为 temurin 25）；1.8 档模块可运行于更早的 JDK。
+新增 native 模块时请按此二选一，不要引入第三档。
+
+两个细节：
+
+- `native-filesearch` 不含 FFM，但它用到 `record`，父 POM 默认的 1.8 会报「-source 8 中不支持 记录」，故仍归 25 档。
+- `native-needle` 使用 FFM 的**最低**要求是 22，这里取 25 仅为与同档模块一致、便于审计。
+
 
 ## 使用方式
 
