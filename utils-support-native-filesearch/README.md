@@ -2,6 +2,16 @@
 
 跨平台快速文件搜索 Rust native 库（WizTree 能力）
 
+实现方式：**Windows 走 NTFS MFT 直读**（`src/main/rust/src/mft.rs` 解析 `$MFT`，
+直接产出路径 + 大小 + 修改时间，**需管理员权限**）；其它平台或 MFT 打不开时
+回退 `walkdir`（深度上限 3）。两条路径输出**同一份 JSON ABI**，Java 侧无感知。
+
+> 实测（管理员、C: 盘、960,768 条 MFT 记录）：
+> 解析出 696,886 条有效文件记录，全量列举 **559,042** 个文件且大小/时间正确，
+> 单次全盘扫描约 **20~23 秒**（逐条读取 1KB 记录 + 建路径索引；WizTree 走内存映射顺序读，
+> 会更快）。设置环境变量 `CHUA_MFT_DEBUG=1` 可打印解析诊断计数。
+> 非管理员时 `\\.\X:` 打不开，会自动回退到 walkdir（此时只有深度 ≤3 的结果）。
+
 > 需要 JDK 8 运行环境时，改用同目录下的 `utils-support-native-filesearch-java8`：
 > 它以 JNA 绑定**同一组**扁平 C ABI，产物可运行于 JDK 8，无需重建原生库。
 
@@ -58,7 +68,7 @@ cd src/main/rust
 
 | 平台 | 状态 |
 |------|------|
-| `windows-x86_64` | `file_search.dll` 已与当前源码一致（sha256 校验一致） |
+| `windows-x86_64` | `file_search.dll` 已按**含 MFT 的当前源码**重建（`rust-lld` 链接，300,544 字节，sha256 `EAD1D632…`） |
 | `linux-x86_64` | `libfile_search.so` 为**旧构建**，多带 7 个已删除的 JNI 导出；5 个当前导出齐全，功能不受影响 |
 | `darwin-x86_64` | **产物缺失** |
 | `darwin-aarch64` | **产物缺失** |

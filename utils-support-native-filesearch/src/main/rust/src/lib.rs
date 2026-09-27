@@ -1,6 +1,8 @@
 use std::ffi::{c_char, CStr, CString};
 use std::os::raw::c_int;
 
+mod mft;
+
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\")
      .replace('"', "\\\"")
@@ -37,11 +39,40 @@ fn get_last_modified(path: &std::path::Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// 递归遍历目录树并拼装搜索结果 JSON。
+/// 搜索入口：Windows 优先走 NTFS MFT 直读，失败或非 Windows 回退 walkdir。
+fn search_to_json(root: &str, pattern: Option<&str>, max_results: i32) -> String {
+    #[cfg(windows)]
+    {
+        let matcher = |name: &str| pattern.map_or(true, |p| glob_match(name, p));
+        if let Ok(entries) = mft::collect(root, max_results, &matcher) {
+            return entries_to_json(&entries);
+        }
+    }
+    search_to_json_walkdir(root, pattern, max_results)
+}
+
+/// 把 MFT 结果条目拼装为与 walkdir 一致的 JSON。
+#[allow(dead_code)]
+fn entries_to_json(entries: &[mft::SearchEntry]) -> String {
+    let results: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "path": e.path,
+                "size": e.size,
+                "ext": e.ext,
+                "modified": e.modified
+            })
+        })
+        .collect();
+    serde_json::json!({"rc": 0, "count": results.len(), "results": results}).to_string()
+}
+
+/// 递归遍历目录树并拼装搜索结果 JSON（walkdir 回退路径）。
 ///
 /// <p>遍历深度固定为 3 层（见下方 {@code WalkDir::max_depth}），
 /// 超深层级不会被收录；目录节点本身不进入结果，只收文件。</p>
-fn search_to_json(root: &str, pattern: Option<&str>, max_results: i32) -> String {
+fn search_to_json_walkdir(root: &str, pattern: Option<&str>, max_results: i32) -> String {
     use walkdir::WalkDir;
     let mut results: Vec<serde_json::Value> = Vec::new();
     let mut count = 0i32;
