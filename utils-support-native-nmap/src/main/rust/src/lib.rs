@@ -115,7 +115,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSing
     if tcp_connect(&host, port as u16, timeout as u64) { 0 } else { 1 }
 }
 
-/// Ping涓绘満
+/// Ping主机
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_pingHost<'local>(
     mut env: JNIEnv<'local>,
@@ -175,7 +175,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanIpRa
     }
 }
 
-/// 妫€娴嬫湇鍔＄増鏈
+/// 检测服务版本
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectService<'local>(
     mut env: JNIEnv<'local>,
@@ -202,7 +202,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectSe
     env.new_string(&result).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// 鑾峰彇Banner
+/// 获取Banner
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getBanner<'local>(
     mut env: JNIEnv<'local>,
@@ -221,7 +221,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getBanne
     }
 }
 
-/// 妫€娴嬫搷浣滅郴缁
+/// 检测操作系统
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectOs<'local>(
     env: JNIEnv<'local>,
@@ -232,7 +232,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectOs
     env.new_string(r#"{"os":"unknown"}"#).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
 }
 
-/// 鑾峰彇TTL
+/// 获取TTL
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getTtl<'local>(
     _env: JNIEnv<'local>,
@@ -241,7 +241,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getTtl<'
     _timeout: jint,
 ) -> jint { -1 }
 
-/// 瑙ｆ瀽涓绘満鍚
+/// 解析主机名
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_resolveHostname<'local>(
     mut env: JNIEnv<'local>,
@@ -298,7 +298,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidI
     if ip_str.parse::<IpAddr>().is_ok() { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// 妫€鏌ュ瓙缃戞牸寮忔槸鍚︽湁鏁
+/// 检查子网格式是否有效
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidSubnet<'local>(
     mut env: JNIEnv<'local>,
@@ -338,7 +338,7 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocal
     _class: JClass<'local>,
 ) -> jstring { std::ptr::null_mut() }
 
-/// 鑾峰彇Rust Nmap搴撶増鏈
+/// 获取 Rust Nmap 库版本
 #[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getVersion<'local>(
     env: JNIEnv<'local>,
