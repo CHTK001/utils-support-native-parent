@@ -1,6 +1,10 @@
 package com.chua.datarecovery.support;
 
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -17,6 +21,22 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>本文件原位于 {@code utils-support-datarecovery-starter}，为让 JNI 绑定与动态库
  * 同住而迁入本模块；因全限定名保持不变，调用方无需改动。</p>
+ *
+ * <h3>success 字段的口径（重要）</h3>
+ * <p>原生 {@code ScanResultJson.success} 与 {@code message} 是<b>硬编码</b>的
+ * （恒为 {@code true} 与 {@code "Scan completed"}），只有 JNI 取字符串失败时才是
+ * false。原生 {@code scan_walkdir} 遇到不存在的根目录时只往 stderr 打印
+ * "root does not exist" 并返回空统计，不上报错误。因此本类在调用原生之前先做目标
+ * 校验：非设备路径且不存在时，直接返回 {@code success=false} 的失败结果，不调原生。
+ * 设备路径（{@code \\.\} / {@code \\?\} / {@code /dev/}）无法用文件 API 判断，
+ * 仍交由原生处理。</p>
+ *
+ * <h3>回调</h3>
+ * <p>{@link RecoveryCallback} 由本类在 Java 侧触发：各操作开始时
+ * {@code onProgress(阶段, 0)}、结束时 {@code onProgress(阶段, 100)}；扫描类操作对
+ * 每条结果触发 {@code onFileFound}；失败时触发 {@code onError}（随后仍按原语义返回
+ * 失败结果或抛出）。原生侧不接受回调参数，故此前 {@code callback()} 设置的回调
+ * 永远不会被触发。</p>
  *
  * @author CH
  * @since 4.0.0.42
@@ -206,8 +226,28 @@ public class DataRecovery {
      * @return 扫描的结果
      */
     public ScanResult scan(int scanMode) {
-        String json = nativeScan(devicePath, scanMode);
-        return parse(json, ScanResult.class);
+        String reason = validateTarget();
+        if (reason != null) {
+            return failure(reason, STAGE_SCAN);
+        }
+        progress(STAGE_SCAN, 0);
+        try {
+            String json = nativeScan(devicePath, scanMode);
+            ScanResult result = parse(json, ScanResult.class);
+            if (result == null) {
+                return failure("原生返回空结果", STAGE_SCAN);
+            }
+            if (callback != null && result.entries != null) {
+                for (FileEntry entry : result.entries) {
+                    callback.onFileFound(entry);
+                }
+            }
+            progress(STAGE_SCAN, 100);
+            return result;
+        } catch (RuntimeException e) {
+            notifyError(STAGE_SCAN + " 失败: " + e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -218,8 +258,32 @@ public class DataRecovery {
      * @return 扫描和recover的结果
      */
     public ScanResult scanAndRecover(int scanMode, String outputDir) {
-        String json = nativeScanAndRecover(devicePath, scanMode, outputDir);
-        return parse(json, ScanResult.class);
+        String reason = validateTarget();
+        if (reason == null) {
+            reason = validateOutputDir(outputDir);
+        }
+        if (reason != null) {
+            return failure(reason, STAGE_SCAN_RECOVER);
+        }
+        progress(STAGE_SCAN_RECOVER, 0);
+        try {
+            String json = nativeScanAndRecover(devicePath, scanMode, outputDir);
+            ScanResult result = parse(json, ScanResult.class);
+            if (result == null) {
+                return failure("原生返回空结果", STAGE_SCAN_RECOVER);
+            }
+            if (callback != null && result.entries != null) {
+                for (FileEntry entry : result.entries) {
+                    callback.onFileFound(entry);
+                    callback.onRecovered(entry.path, entry.sizeBytes);
+                }
+            }
+            progress(STAGE_SCAN_RECOVER, 100);
+            return result;
+        } catch (RuntimeException e) {
+            notifyError(STAGE_SCAN_RECOVER + " 失败: " + e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -231,8 +295,41 @@ public class DataRecovery {
      * @return recover的结果
      */
     public RecoverResult recover(String[] filePaths, String outputDir, boolean preserveStructure) {
-        String json = nativeRecover(devicePath, filePaths, outputDir, preserveStructure);
-        return parse(json, RecoverResult.class);
+        String reason = validateTarget();
+        if (reason == null) {
+            reason = validateOutputDir(outputDir);
+        }
+        if (reason == null && (filePaths == null || filePaths.length == 0)) {
+            reason = "待恢复文件列表为空";
+        }
+        if (reason != null) {
+            RecoverResult failed = new RecoverResult();
+            failed.successCount = 0;
+            failed.failedCount = filePaths == null ? 0 : filePaths.length;
+            failed.totalBytesWritten = 0;
+            failed.failedList = new FailedItem[0];
+            notifyError(reason);
+            return failed;
+        }
+        progress(STAGE_RECOVER, 0);
+        try {
+            String json = nativeRecover(devicePath, filePaths, outputDir, preserveStructure);
+            RecoverResult result = parse(json, RecoverResult.class);
+            if (result == null) {
+                notifyError("原生返回空结果");
+                return null;
+            }
+            if (callback != null && result.failedList != null) {
+                for (FailedItem item : result.failedList) {
+                    callback.onError(item.path + ": " + item.reason);
+                }
+            }
+            progress(STAGE_RECOVER, 100);
+            return result;
+        } catch (RuntimeException e) {
+            notifyError(STAGE_RECOVER + " 失败: " + e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -243,8 +340,40 @@ public class DataRecovery {
      * @return permanent删除的结果
      */
     public DeleteResult permanentDelete(String filePath, String method) {
-        String json = nativeDelete(devicePath, filePath, method);
-        return parse(json, DeleteResult.class);
+        String reason = validateTarget();
+        if (reason == null && (filePath == null || filePath.isEmpty())) {
+            reason = "待删除文件路径为空";
+        }
+        if (reason != null) {
+            DeleteResult refused = new DeleteResult();
+            refused.success = false;
+            refused.bytesOverwritten = 0;
+            refused.passesCompleted = 0;
+            refused.message = reason;
+            notifyError(reason);
+            return refused;
+        }
+        progress(STAGE_DELETE, 0);
+        try {
+            String json = nativeDelete(devicePath, filePath, method);
+            DeleteResult result = parse(json, DeleteResult.class);
+            if (result == null) {
+                notifyError("原生返回空结果");
+                return null;
+            }
+            if (result.success) {
+                if (callback != null) {
+                    callback.onRecovered(filePath, result.bytesOverwritten);
+                }
+            } else {
+                notifyError(result.message);
+            }
+            progress(STAGE_DELETE, 100);
+            return result;
+        } catch (RuntimeException e) {
+            notifyError(STAGE_DELETE + " 失败: " + e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -278,6 +407,106 @@ public class DataRecovery {
      */
     public CompletableFuture<DeleteResult> deleteAsync(String filePath, String method) {
         return CompletableFuture.supplyAsync(() -> permanentDelete(filePath, method));
+    }
+
+    // ==================== 阶段名 ====================
+
+    /**
+     * 阶段名：扫描
+     */
+    private static final String STAGE_SCAN = "scan";
+
+    /**
+     * 阶段名：扫描并恢复
+     */
+    private static final String STAGE_SCAN_RECOVER = "scanAndRecover";
+
+    /**
+     * 阶段名：恢复
+     */
+    private static final String STAGE_RECOVER = "recover";
+
+    /**
+     * 阶段名：永久删除
+     */
+    private static final String STAGE_DELETE = "permanentDelete";
+
+    // ==================== 目标校验与回调 ====================
+
+    /**
+     * 校验扫描目标。
+     *
+     * <p>原生对不存在的根目录也返回 {@code success=true}（该字段硬编码），故在此前置
+     * 拦截。设备路径（{@code \\.\} / {@code \\?\} / {@code /dev/}）无法用文件 API
+     * 判断存在性，返回 null 交由原生处理。</p>
+     *
+     * @return 不可用原因；可用或无法判定时返回 null
+     */
+    private String validateTarget() {
+        if (devicePath == null || devicePath.isEmpty()) {
+            return "devicePath 为空";
+        }
+        String lower = devicePath.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("\\\\.\\") || lower.startsWith("\\\\?\\") || lower.startsWith("/dev/")) {
+            return null;
+        }
+        try {
+            return Files.exists(Path.of(devicePath)) ? null : "目标路径不存在: " + devicePath;
+        } catch (InvalidPathException e) {
+            return "目标路径非法: " + devicePath;
+        }
+    }
+
+    /**
+     * 校验输出目录参数。
+     *
+     * @param outputDir 输出目录
+     * @return 不可用原因；可用时返回 null
+     */
+    private String validateOutputDir(String outputDir) {
+        return outputDir == null || outputDir.isEmpty() ? "输出目录为空" : null;
+    }
+
+    /**
+     * 构造扫描失败结果并触发错误回调。
+     *
+     * @param reason 失败原因
+     * @param stage  阶段名
+     * @return 失败结果
+     */
+    private ScanResult failure(String reason, String stage) {
+        ScanResult result = new ScanResult();
+        result.success = false;
+        result.filesScanned = 0;
+        result.filesFound = 0;
+        result.entries = new FileEntry[0];
+        result.message = reason;
+        notifyError(reason);
+        progress(stage, 100);
+        return result;
+    }
+
+    /**
+     * 触发进度回调。
+     *
+     * @param stage   阶段名
+     * @param percent 百分比
+     */
+    private void progress(String stage, int percent) {
+        if (callback != null) {
+            callback.onProgress(stage, percent);
+        }
+    }
+
+    /**
+     * 触发错误回调。
+     *
+     * @param error 错误描述
+     */
+    private void notifyError(String error) {
+        if (callback != null) {
+            callback.onError(error);
+        }
     }
 
     /**
