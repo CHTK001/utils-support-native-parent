@@ -97,20 +97,24 @@ jobs:
         # 而该条件只有 darwin-x86_64 一腿为真，导致 windows / linux /
         # darwin-aarch64 从不校验导出——linux-x86_64 的 libfile_search.so
         # 因此长期带着 7 个已从源码删除的坏 JNI 导出而无人发现。
+        #
+        # 断言用字节串搜索而非 nm：Windows Git Bash 的 nm 不解析 PE/COFF
+        # （读出空表），本模块的 Linux release 构建又剥掉了符号表
+        # （nm 报 "no symbols"）。字节串搜索对 PE / ELF / Mach-O 一律有效。
         run: |
-          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
-            || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          { nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || echo "(nm unavailable)"; } \
+            > "$RUNNER_TEMP/exports.txt" || true
           for sym in fast_get_version fast_search_cancel fast_search_by_name \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawSearchByName \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawGetTree; do
-            grep -q "$sym" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
+            grep -aqF "$sym" "$LIB_PATH" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
             echo "ASSERT ok   export $sym"
           done
           # 已移除的那批坏 JNI 符号不得再出现（getVersion 曾令 JVM 崩溃）
           for gone in RustFileSearchBridge_getVersion RustFileSearchBridge_cancel \
                       RustFileSearchBridge_searchByName RustFileSearchBridge_getTree \
                       RustFileSearchBridge_searchBySize RustFileSearchBridge_searchByPath; do
-            if grep -q "$gone" "$RUNNER_TEMP/exports.txt"; then
+            if grep -aqF "$gone" "$LIB_PATH"; then
               echo "ASSERT FAIL 已移除的 JNI 符号仍存在: $gone"
               exit 1
             fi
