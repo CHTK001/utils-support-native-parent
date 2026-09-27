@@ -98,8 +98,9 @@ public class MetricsNativeLibrary implements AutoCloseable {
         /**
          * 触发本持有者的静态初始化，用于探测原生绑定是否可用。
          *
-         * <p>初始化失败时这里会抛出 {@code NoClassDefFoundError}，由
-         * {@link #create()} 统一兜住；成功则为空操作。</p>
+         * <p>初始化失败时这里抛出 {@code ExceptionInInitializerError}（首次访问），
+         * 之后同类访问抛 {@code NoClassDefFoundError}；两者都是 {@code Error}，
+         * 由 {@link #create()} 的 {@code catch (Throwable)} 兜住。成功则为空操作。</p>
          */
         static void ensureAvailable() {
             // 静态初始化已完成即代表绑定可用
