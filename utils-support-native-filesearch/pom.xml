@@ -11,4 +11,46 @@
     <artifactId>utils-support-native-filesearch</artifactId>
     <packaging>jar</packaging>
     <description>文件搜索 Rust native 库（WizTree 能力，跨平台）</description>
+    <properties>
+        <lombok.version>1.18.46</lombok.version>
+    </properties>
+    <dependencies>
+        <!-- JNI 绑定类 RustFileSearchBridge 迁入本模块，需要 NativeLoader / NativeUtils -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <!-- 绑定类用到 record，且原在 utils 侧按 release 25 编译，
+                         不能沿用父 POM 默认的 target 1.8 -->
+                    <release>25</release>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <arg>-proc:full</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
