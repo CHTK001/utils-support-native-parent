@@ -3,12 +3,20 @@ package com.chua.nativeffmpeg.support;
 /**
  * 基于 Rust cdylib 的原生 FFmpeg 门面。
  *
- * <p>所有方法通过 JNI 调用 Rust 原生 FFmpeg 封装库（ffmpeg_rust），
- * 支持 RTMP 推流/拉流、文件转码、截帧、拼接、媒体信息查询、
- * 旋转、水印与图片序列转视频等功能。</p>
+ * <p><b>当前状态：原生侧尚未实现这些能力，本类不可用。</b>动态库
+ * {@code ffmpeg_rust} 只导出三个扁平 C 函数（{@code ffmpeg_version} /
+ * {@code ffmpeg_codec_available} / {@code ffmpeg_free_string}），不含任何
+ * {@code Java_...} JNI 符号，也没有 {@code JNI_OnLoad}；本模块的 Rust 源码同样只有
+ * 那三个函数（{@code Cargo.toml} 仅依赖 {@code libc}，未引入
+ * {@code ffmpeg-sys} / {@code ffmpeg-next}）。</p>
  *
- * <p>原生库缺失或加载失败时，{@link #isLoaded()} 返回 {@code false}，
- * {@link #getLoadError()} 返回具体异常，调用方应据此降级处理。</p>
+ * <p>因此下面这些声明为 {@code native} 的方法在运行时一律抛
+ * {@link UnsatisfiedLinkError}，{@link #isLoaded()} 恒为 {@code false}，
+ * {@link #getLoadError()} 会返回该错误。需要 FFmpeg 能力时请改用本仓库中已实现的
+ * 替代：{@code utils-support-ffmpeg-starter}（JavaCV / Jaffree）、
+ * {@code utils-support-native-video-processor}（HLS 转码）或
+ * {@code utils-support-native-video-codec}（H.264/H.265/H.266 编解码），
+ * 后两者已有可用的四平台原生产物。</p>
  *
  * @author CH
  * @since 4.0.0.42
