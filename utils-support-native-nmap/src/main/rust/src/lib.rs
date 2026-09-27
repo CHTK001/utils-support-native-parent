@@ -175,7 +175,8 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_scanIpRa
     }
 }
 
-/// 妫€娴嬫湇鍔＄増鏈?#[no_mangle]
+/// 妫€娴嬫湇鍔＄増鏈
+#[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectService<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -220,7 +221,8 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getBanne
     }
 }
 
-/// 妫€娴嬫搷浣滅郴缁?#[no_mangle]
+/// 妫€娴嬫搷浣滅郴缁
+#[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_detectOs<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -239,7 +241,8 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getTtl<'
     _timeout: jint,
 ) -> jint { -1 }
 
-/// 瑙ｆ瀽涓绘満鍚?#[no_mangle]
+/// 瑙ｆ瀽涓绘満鍚
+#[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_resolveHostname<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -295,7 +298,8 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidI
     if ip_str.parse::<IpAddr>().is_ok() { JNI_TRUE } else { JNI_FALSE }
 }
 
-/// 妫€鏌ュ瓙缃戞牸寮忔槸鍚︽湁鏁?#[no_mangle]
+/// 妫€鏌ュ瓙缃戞牸寮忔槸鍚︽湁鏁
+#[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidSubnet<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -334,7 +338,8 @@ pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocal
     _class: JClass<'local>,
 ) -> jstring { std::ptr::null_mut() }
 
-/// 鑾峰彇Rust Nmap搴撶増鏈?#[no_mangle]
+/// 鑾峰彇Rust Nmap搴撶増鏈
+#[no_mangle]
 pub extern "system" fn Java_com_chua_nmap_support_bridge_RustNmapBridge_getVersion<'local>(
     env: JNIEnv<'local>,
     _class: JClass<'local>,
