@@ -12,4 +12,51 @@
     <packaging>jar</packaging>
     <name>Utils Support Native Nmap</name>
     <description>高性能网络端口扫描库，支持 TCP/UDP 扫描、DNS 解析、服务识别。</description>
+    <properties>
+        <lombok.version>1.18.46</lombok.version>
+    </properties>
+    <dependencies>
+        <!-- JNI 绑定类 RustNmapBridge 迁入本模块，需要 NativeLoader / NativeUtils -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- RustNmapBridge 用到 javax.annotation.Nonnull / Nullable（原在 starter 中
+             由依赖树传递提供），注解只在编译期需要 -->
+        <dependency>
+            <groupId>com.google.code.findbugs</groupId>
+            <artifactId>jsr305</artifactId>
+            <version>3.0.2</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <arg>-proc:full</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
