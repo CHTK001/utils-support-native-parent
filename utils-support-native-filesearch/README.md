@@ -2,6 +2,9 @@
 
 跨平台快速文件搜索 Rust native 库（WizTree 能力）
 
+> 需要 JDK 8 运行环境时，改用同目录下的 `utils-support-native-filesearch-java8`：
+> 它以 JNA 绑定**同一组**扁平 C ABI，产物可运行于 JDK 8，无需重建原生库。
+
 ---
 
 ## 快速开始
