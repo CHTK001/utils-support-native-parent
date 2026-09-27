@@ -1,5 +1,15 @@
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld"
+# cargo 配置
+#
+# 原先此文件有两个问题，会导致本模块无法构建：
+#   1. rustflags 写成 "link-arg=-Wl,-rpath,\"
+#      其中 \" 是转义引号，令 TOML 解析报 unclosed array，cargo 直接退出；
+#   2. [build] target 硬编码为某个固定目标，
+#      在其它平台直接 cargo build 会跑去交叉编译。
+#
+# 现改为：不设硬编码默认目标，由 build.sh 显式传 --target 覆盖；
+# Linux 专用的 linker 与 rpath 仅挂在 target 段下，只在 Linux 生效。
 
 [target.x86_64-unknown-linux-gnu]
 linker = "x86_64-linux-gnu-gcc"
+# $ORIGIN 让 .so 在自身所在目录查找依赖，便于随包分发后仍能找到
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
