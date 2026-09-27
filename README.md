@@ -11,8 +11,6 @@
 | `utils-support-native-ffmpeg` | FFmpeg RTMP native 库（JNI，`RegisterNatives`） | 1.8 | `utils-support-ffmpeg-rust-starter` |
 | `utils-support-native-filesearch` | 文件搜索 Rust native 库（WizTree 能力，JNI） | **25** | `utils-support-filesearch-starter` |
 | `utils-support-native-filesearch-java8` | 文件搜索 Rust native 库的 Java 8 JNA 绑定（同一组扁平 C ABI，独立于 25 档主模块） | 1.8 | 无 |
-| `utils-support-native-fastfilesearch` | Windows NTFS MFT 直读文件搜索（预编译 `fast_file_search`，需管理员权限） | **25** | `utils-support-syslog-starter` |
-| `utils-support-native-fastfilesearch-java8` | 同上 MFT 库的 Java 8 JNA 绑定（同一份 `fast_file_search.dll`） | 1.8 | 无 |
 | `utils-support-native-filestorage` | 文件存储 Rust native 库（URL 参数解析 + 图片滤镜 + HEIC 预览转码） | 1.8 | 无 |
 | `utils-support-native-headless` | 无头环境 native 支持 | 1.8 | 无 |
 | `utils-support-native-libjpeg-turbo` | libjpeg-turbo TurboJPEG（SIMD JPEG 编解码，FFM） | **25** | `utils-support-image-starter` |
@@ -35,8 +33,8 @@
 
 | 档位 | 适用 | 模块 |
 |---|---|---|
-| **1.8**（父 POM 默认） | 纯 Java / 传统 JNI（`native` 方法）/ JNA 绑定，无新语法 | cuda、datarecovery、fastfilesearch-java8、ffmpeg、filesearch-java8、filestorage、headless、nmap、sqlite、video-codec、video-processor |
-| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | fastfilesearch、filesearch、libjpeg-turbo、metrics、needle、smb、uia、wechat |
+| **1.8**（父 POM 默认） | 纯 Java / 传统 JNI（`native` 方法）/ JNA 绑定，无新语法 | cuda、datarecovery、ffmpeg、filesearch-java8、filestorage、headless、nmap、sqlite、video-codec、video-processor |
+| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | filesearch、libjpeg-turbo、metrics、needle、smb、uia、wechat |
 
 **引用 25 档模块的应用运行时必须是 JDK 25**（CI 亦为 temurin 25）；1.8 档模块可运行于更早的 JDK。
 新增 native 模块时请按此二选一，不要引入第三档。
