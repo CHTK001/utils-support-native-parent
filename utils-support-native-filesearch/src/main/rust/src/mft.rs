@@ -298,41 +298,169 @@ pub fn collect(
         None
     }
 
-    /// 按 $MFT 数据流偏移读取一段字节（跨运行列表）。
-    fn read_stream(
-        file: &mut File,
-        runs: &[Run],
+    /// $MFT 顺序预取读取器。
+    ///
+    /// 原实现对每条记录单独 `seek` + 读 1024 字节，141 万条记录即 141 万次系统调用。
+    /// 而 $MFT 在卷上是按 extent 顺序连续排列的，顺序读的实际吞吐远高于随机定位，
+    /// 因此改成沿 extent 顺序一次预取一整块，主循环从内存切片取记录。
+    ///
+    /// 语义与原逐条 `seek` + 1024 字节读的实现完全一致，只是把「随机定位单条」
+    /// 换成「顺序批量」。块大小取 2 MiB：既能摊薄系统调用开销，
+    /// 又不会为小卷浪费内存。
+    struct StreamPrefetcher<'a> {
+        /// 底层卷句柄
+        file: &'a mut File,
+        /// $MFT 的 extent 列表
+        runs: &'a [Run],
+        /// 簇大小（字节）
         cluster_size: u64,
-        mut off: u64,
-        len: usize,
-    ) -> std::io::Result<Vec<u8>> {
-        let mut out = vec![0u8; len];
-        let mut filled = 0usize;
-        for run in runs {
-            let run_bytes = run.len * cluster_size;
-            if off >= run_bytes {
-                off -= run_bytes;
-                continue;
-            }
-            let vol_off = (run.lcn as u64) * cluster_size + off;
-            let take = std::cmp::min(run_bytes - off, (len - filled) as u64) as usize;
-            file.seek(SeekFrom::Start(vol_off))?;
-            let mut got = 0usize;
-            while got < take {
-                let n = file.read(&mut out[filled + got..filled + take])?;
-                if n == 0 {
-                    break;
-                }
-                got += n;
-            }
-            filled += got;
-            off = 0;
-            if filled >= len {
-                break;
+        /// 单条记录大小（字节）
+        record_size: usize,
+        /// 预取块大小（字节）
+        block_size: usize,
+        /// 预取块覆盖的数据流起始偏移
+        block_off: u64,
+        /// 预取块内已填充的字节数
+        block_len: usize,
+        /// 预取块缓冲
+        block: Vec<u8>,
+        /// I/O 错误：读失败时记录下来，交给调用方回退 walkdir
+        io_err: Option<String>,
+    }
+
+    impl<'a> StreamPrefetcher<'a> {
+        /// 创建一个预取器。
+        ///
+        /// @param file         卷句柄
+        /// @param runs         $MFT 的 extent 列表
+        /// @param cluster_size 簇大小（字节）
+        /// @param record_size  单条记录大小（字节）
+        fn new(
+            file: &'a mut File,
+            runs: &'a [Run],
+            cluster_size: u64,
+            record_size: usize,
+        ) -> Self {
+            // 块至少要装下 1 条记录，且向上取整到 4 KiB 以贴合页大小
+            let mut block_size = (2usize << 20).max(record_size);
+            block_size = block_size.next_multiple_of(4096);
+            StreamPrefetcher {
+                file,
+                runs,
+                cluster_size,
+                record_size,
+                block_size,
+                block_off: 0,
+                block_len: 0,
+                // 缓冲只分配一次：fill 只覆写实际读到的区间，不重新清零，
+                // 避免每条记录都 memset 整块
+                block: vec![0u8; block_size],
+                io_err: None,
             }
         }
-        out.truncate(filled);
-        Ok(out)
+
+        /// 把一条记录拷贝进调用方提供的缓冲。
+        ///
+        /// 复用同一个缓冲，避免 142 万条记录各分配一次 1KB。
+        /// 记录内容在本次调用后即失效，解析结果由 `parse_record` 拷成自有数据。
+        ///
+        /// @param rec_num 记录序号
+        /// @param buf     复用缓冲（内部按记录大小调整长度）
+        /// @return 成功读到完整记录返回 `true`
+        fn record_into(&mut self, rec_num: u64, buf: &mut Vec<u8>) -> bool {
+            let off = match rec_num.checked_mul(self.record_size as u64) {
+                Some(v) => v,
+                None => return false,
+            };
+            if !(off >= self.block_off && off + self.record_size as u64 <= self.block_off + self.block_len as u64)
+            {
+                if self.fill(off).is_none() {
+                    return false;
+                }
+            }
+            let start = (off - self.block_off) as usize;
+            if start + self.record_size > self.block_len {
+                return false;
+            }
+            buf.clear();
+            buf.extend_from_slice(&self.block[start..start + self.record_size]);
+            true
+        }
+
+        /// 预取覆盖 `off` 起始的一个块。
+        ///
+        /// 一次尽量读满整个块（`block_size`），而不是只读调用方要的那几条 ——
+        /// 调用方总是顺序遍历记录，下一次命中本块即可摊薄系统调用开销。
+        /// 跨 extent 边界时把剩余部分接到下一个 extent，读不满则按实际长度收尾。
+        ///
+        /// 不重新分配也不清零缓冲：只有 `[0, out)` 区间被读入的新数据覆盖，
+        /// 越界部分由 `block_len` 拦住，外部读不到上一块的残留内容。
+        ///
+        /// 读失败不是「流到尾」，必须记进 `io_err` 让调用方回退 walkdir，
+        /// 否则会静默少返回一批记录。
+        ///
+        /// @param off 数据流偏移（字节）
+        /// @return 填充到任意长度返回 `Some`；I/O 失败或完全无数据返回 `None`
+        fn fill(&mut self, off: u64) -> Option<bool> {
+            let mut out = 0usize;
+            let want = self.block_size;
+            let mut cur = off;
+            while out < want {
+                // 流已到尾时保留已读到的部分并收尾：不能把整块丢掉，
+                // 否则最后一个不满的块里、已读入的记录会被静默跳过
+                let (vol_off, avail) = match self.locate(cur) {
+                    Some(v) => v,
+                    None => break,
+                };
+                if avail == 0 {
+                    break;
+                }
+                // avail 是 u64（extent 内剩余字节数），切片索引需要 usize
+                let avail = avail.min((want - out) as u64) as usize;
+                if avail == 0 {
+                    break;
+                }
+                if let Err(e) = self.file.seek(SeekFrom::Start(vol_off)) {
+                    self.io_err = Some(format!("seek {} 失败: {}", vol_off, e));
+                    return None;
+                }
+                let mut got = 0usize;
+                while got < avail {
+                    match self.file.read(&mut self.block[out + got..out + avail]) {
+                        Ok(0) => break,
+                        Ok(n) => got += n,
+                        Err(e) => {
+                            self.io_err =
+                                Some(format!("读取卷偏移 {} 失败: {}", vol_off, e));
+                            break;
+                        }
+                    }
+                }
+                if got == 0 {
+                    break;
+                }
+                out += got;
+                cur += got as u64;
+            }
+            self.block_off = off;
+            self.block_len = out;
+            Some(out > 0)
+        }
+
+        /// 把数据流偏移映射为卷内物理偏移与该处可用字节数。
+        ///
+        /// @param off 数据流偏移（字节）
+        /// @return `(卷内偏移, 该 extent 剩余字节数)`；越界返回 `None`
+        fn locate(&self, mut off: u64) -> Option<(u64, u64)> {
+            for run in self.runs {
+                let run_bytes = run.len * self.cluster_size;
+                if off < run_bytes {
+                    return Some(((run.lcn as u64) * self.cluster_size + off, run_bytes - off));
+                }
+                off -= run_bytes;
+            }
+            None
+        }
     }
 
     // ---- 入口 ----
@@ -415,16 +543,21 @@ pub fn collect(
     let mut n_base0: u64 = 0;
     let mut n_named: u64 = 0;
     let mut map: HashMap<u64, RecordInfo> = HashMap::with_capacity((total_records as usize).min(1 << 20));
+    // 命中文件名模式的文件条目。文件是路径的叶子、不是路径组件，
+    // 因此无需进 map（map 只服务 build_path 的父链回溯）；
+    // 不命中模式的文件连 String 都不用留。
+    let mut matched: Vec<(u64, RecordInfo)> = Vec::new();
+    // 复用记录缓冲：142 万条记录逐条新建 1KB Vec 会产生等量堆分配
+    let mut rec = vec![0u8; record_size as usize];
+    let mut pf = StreamPrefetcher::new(&mut file, &mft_runs, cluster_size, record_size as usize);
     for rec_num in 0..total_records {
         // 系统文件（0..16）不必输出，但根目录 5 需保留用于拼路径
-        let mut rec = read_stream(
-            &mut file,
-            &mft_runs,
-            cluster_size,
-            rec_num * record_size,
-            record_size as usize,
-        )
-        .map_err(|e| format!("读取 MFT 记录 {} 失败: {}", rec_num, e))?;
+        // 记录读取改为顺序预取：预取块未命中才补读，不再逐条 seek
+        if !pf.record_into(rec_num, &mut rec) {
+            // 预取块未覆盖（理论上不会发生，块大小恒 ≥ 1 条记录）或流已到尾：
+            // 保持与原实现一致的容错语义——短记录跳过，不中断整轮扫描
+            continue;
+        }
         if rec.len() < record_size as usize {
             continue;
         }
@@ -443,9 +576,18 @@ pub fn collect(
         }
         n_base0 += 1;
         if let Some(info) = parse_record(&rec) {
-            map.insert(rec_num, info);
+            if info.is_dir {
+                map.insert(rec_num, info);
+            } else if name_match(&info.name) {
+                matched.push((rec_num, info));
+            }
             n_named += 1;
         }
+    }
+    // 预取过程中的 I/O 失败不能当作「流到尾」：原实现遇错即返回 Err 由调用方
+    // 回退 walkdir，静默继续会少返回一批记录
+    if let Some(e) = pf.io_err.take() {
+        return Err(format!("读取 MFT 失败: {}", e));
     }
     if dbg {
         eprintln!(
@@ -460,23 +602,36 @@ pub fn collect(
             mft_runs.len()
         );
         eprintln!(
-            "[mft] read={} file_sig={} inuse={} base0={} named={}",
-            n_read, n_file, n_inuse, n_base0, n_named
+            "[mft] read={} file_sig={} inuse={} base0={} named={} dir={} matched={}",
+            n_read, n_file, n_inuse, n_base0, n_named, map.len(), matched.len()
         );
     }
 
-    // 自底向上拼路径
-    fn build_path(map: &HashMap<u64, RecordInfo>, drive: char, rec_num: u64) -> Option<String> {
-        let mut parts: Vec<String> = Vec::new();
-        let mut cur = rec_num;
+    /// 自底向上拼路径。
+    ///
+    /// 起点条目自身不入 `map`（`map` 只存目录），故由调用方直接给出起始条目，
+    /// 回溯从它的父记录开始；根记录 5 只用作终止标记，不计入路径。
+    ///
+    /// @param map   目录记录表（父链回溯用）
+    /// @param drive 盘符
+    /// @param info  起始条目
+    /// @return 完整路径；父链断裂或超深返回 `None`
+    fn build_path<'a>(
+        map: &'a HashMap<u64, RecordInfo>,
+        drive: char,
+        info: &'a RecordInfo,
+    ) -> Option<String> {
+        let mut parts: Vec<&'a str> = Vec::with_capacity(8);
+        parts.push(&info.name);
+        let mut cur = info.parent;
         let mut guard = 0;
         loop {
             if cur == 5 {
                 break;
             }
-            let info = map.get(&cur)?;
-            parts.push(info.name.clone());
-            cur = info.parent;
+            let parent = map.get(&cur)?;
+            parts.push(&parent.name);
+            cur = parent.parent;
             guard += 1;
             if guard > 256 || parts.len() > 256 {
                 return None;
@@ -490,19 +645,19 @@ pub fn collect(
     }
 
     let mut entries: Vec<SearchEntry> = Vec::new();
-    for (rec_num, info) in &map {
-        if *rec_num < 16 || info.is_dir {
+    // 前缀只与路径形态有关，循环外小写化一次即可
+    let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
+    // 只遍历命中集：map 现在只有目录，文件名模式已在遍历阶段判定过
+    for (rec_num, info) in &matched {
+        if *rec_num < 16 {
             continue;
         }
-        if !name_match(&info.name) {
-            continue;
-        }
-        let path = match build_path(&map, drive, *rec_num) {
+        let path = match build_path(&map, drive, info) {
             Some(p) => p,
             None => continue,
         };
-        if let Some(pref) = &prefix {
-            if !path.to_ascii_lowercase().starts_with(&pref.to_ascii_lowercase()) {
+        if let Some(pref) = &prefix_lower {
+            if !path.to_ascii_lowercase().starts_with(pref) {
                 continue;
             }
         }
