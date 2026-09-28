@@ -126,8 +126,13 @@ jobs:
         #   metrics_start_sampler ⊂ Rust v0 mangled 名（…14metrics_native21metrics_start_sampler0uEs_…）
         #   ..._h264Decode        是 ..._h264DecoderCreate / ..._h264DecoderFree 的前缀
         # 整 token 匹配对这三处都正确拒绝（已用截断负例验证）。
+        #
+        # LC_ALL=C 对 tr 和 sort 都必须加，不能只加 sort。macOS 的 BSD tr 在 UTF-8 locale 下
+        # 遇到二进制里的非法多字节序列会直接报 "tr: Illegal byte sequence" 并以非 0 退出，
+        # 于是 14 条 darwin 腿全红（linux/windows 的 GNU tr 按字节处理，所以本地与前两者看不出来）。
+        # 置 C locale 让 tr 进入字节模式，非法字节与其他非标识符字节一样被替换成换行。
         run: |
-          tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
           {
             echo "### ${{ matrix.module }} / ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
             echo '```'
