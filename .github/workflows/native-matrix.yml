@@ -131,8 +131,20 @@ jobs:
         # 遇到二进制里的非法多字节序列会直接报 "tr: Illegal byte sequence" 并以非 0 退出，
         # 于是 14 条 darwin 腿全红（linux/windows 的 GNU tr 按字节处理，所以本地与前两者看不出来）。
         # 置 C locale 让 tr 进入字节模式，非法字节与其他非标识符字节一样被替换成换行。
+        #
+        # Mach-O 的 C 符号在符号表里带**一个前导下划线**，dyld 解析时才剥掉。所以 dylib 里是
+        # `_native_get_version`，而 PE/ELF 里是 `native_get_version`；`dlsym` / Java NativeLoader
+        # 用裸名就能取到，运行期完全正常，库本身没问题。CI run 36420746600 里 12 条 darwin 腿报的
+        # `ASSERT FAIL missing export: native_get_version` 就是这个原因：`_` 属于标识符字符，
+        # token 是 `_native_get_version`，而 `grep -qxF` 要求整行相等，裸名必然匹配不上。
+        # 匹配用的集合因此额外并入「去掉一个前导下划线」的形式，同一份期望清单四个平台通用。
+        # 摘要里仍打原始 token，便于人工排查真实符号名。
         run: |
           LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
           {
             echo "### ${{ matrix.module }} / ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
             echo '```'
@@ -150,7 +162,7 @@ jobs:
           esac
           test -n "$NEED" || { echo "ASSERT FAIL no expectation defined for module ${{ matrix.module }}"; exit 1; }
           for s in $NEED; do
-            grep -qxF -- "$s" "$RUNNER_TEMP/symbols.txt" \
+            grep -qxF -- "$s" "$RUNNER_TEMP/symbols_match.txt" \
               || { echo "ASSERT FAIL missing export: $s"; exit 1; }
             echo "ASSERT ok   $s"
           done
