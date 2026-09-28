@@ -181,13 +181,19 @@ jobs:
           mvn -q -B -f utils-support-native-filesearch-java8/pom.xml -DskipTests package
           mvn -q -B -f utils-support-native-filesearch-java8/pom.xml \
             dependency:build-classpath "-Dmdep.outputFile=target/cp.txt"
-          CP="utils-support-native-filesearch-java8/target/classes:$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          # 分隔符必须问 JVM 自己要：dependency:build-classpath 输出的是
+          # 平台分隔符（Windows 是 ';'，Linux/macOS 是 ':'），写死 ':' 会让
+          # Windows 上整个 target/classes 段被并进第一个 jar 路径，编译报
+          # "package ... does not exist"。这条是本 step 唯一的跨平台隐患。
+          SEP=$(java -XshowSettings:properties -version 2>&1 |
+            sed -n 's/^[[:space:]]*path\.separator = //p')
+          CP="utils-support-native-filesearch-java8/target/classes${SEP}$(cat utils-support-native-filesearch-java8/target/cp.txt)"
           javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
             utils-support-native-filesearch-java8/src/smoke/java/FilesearchJnaBridgeSmoke.java
           # 用本腿刚编出的库覆盖 classpath 抽取，确保测的是当前源码的产物
           java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
             "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
-            -cp "target/smoke-jna:$CP" FilesearchJnaBridgeSmoke
+            -cp "target/smoke-jna${SEP}$CP" FilesearchJnaBridgeSmoke
 
       - name: Engine assertion (JNA bridge, Java 8 module)
         if: matrix.smoke != false
@@ -197,7 +203,10 @@ jobs:
         # Windows 侧的管理员断言已在上一个 step 做过，这里不重复。
         run: |
           set -e
-          CP="utils-support-native-filesearch-java8/target/classes:$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          # 上一个 step 已生成 target/cp.txt；分隔符同样问 JVM 要，理由见该 step。
+          SEP=$(java -XshowSettings:properties -version 2>&1 |
+            sed -n 's/^[[:space:]]*path\.separator = //p')
+          CP="utils-support-native-filesearch-java8/target/classes${SEP}$(cat utils-support-native-filesearch-java8/target/cp.txt)"
           if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
             SCAN_ROOT='C:\'
           else
@@ -207,7 +216,7 @@ jobs:
             utils-support-native-filesearch-java8/src/smoke/java/FilesearchMftJnaSmoke.java
           java -Dstdout.encoding=UTF-8 \
             "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
-            -cp "target/smoke-jna:$CP" FilesearchMftJnaSmoke "$SCAN_ROOT" "${{ matrix.engine }}"
+            -cp "target/smoke-jna${SEP}$CP" FilesearchMftJnaSmoke "$SCAN_ROOT" "${{ matrix.engine }}"
 
       - name: Stage artifact for upload
         run: |
