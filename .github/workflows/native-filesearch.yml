@@ -250,16 +250,6 @@ jobs:
           pattern: '*-filesearch'
           path: dl
           merge-multiple: true
-      - name: Report build outcome per platform
-        run: |
-          {
-            echo "### 已回填的产物"
-            echo '```'
-            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
-            echo '```'
-            echo ""
-            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/filesearch-native-artifacts\`，请维护者合并回 main。"
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Place artifacts and push branch
         env:
           ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -267,33 +257,92 @@ jobs:
           # 仓库 main 开启 "require pull request"，GITHUB_TOKEN 直接 push main
           # 会被 GH006 拒绝，且本仓库禁止 Actions 创建 PR；故回填到独立分支，
           # 由维护者合并。
-          set +e
-          set +o pipefail
-          LOG="$RUNNER_TEMP/commit.log"
+          #
+          # 基底必须是回填分支自己的上一版，不能是 main。
+          # 原因：产物上传排在冒烟 step 之后，某个平台冒红时它本轮没有产物。
+          # 旧脚本仍以 main 为基底再 --force，于是把上轮那份好产物覆盖回 main
+          # 里的旧值：实测 run@1ef0be8 把 windows 从 4e5cdf29/307712B 退成
+          # c705b29c/306688B，而 job 依然全绿、没有任何一行提示。
+          # 改用上一版作基底后推送是快进，回退结构上不可能再发生，
+          # --force 也就没有存在理由了。
+          set -e
+          set -o pipefail
           BRANCH="build/filesearch-native-artifacts"
-          {
-            mkdir -p utils-support-native-filesearch/src/main/resources/native
-            cp -R dl/. utils-support-native-filesearch/src/main/resources/native/
-            echo "== 待提交产物 =="
-            git status --porcelain utils-support-native-filesearch/src/main/resources/native
+          ART="utils-support-native-filesearch/src/main/resources/native"
+          PLATFORMS="windows-x86_64 linux-x86_64 darwin-x86_64 darwin-aarch64"
+          # 用进程替换而不是 `2>&1 | tee`：后者会要求 PIPESTATUS 兜错误码，
+          # 而代价是 set -e 失效，块中间任何一步失败都会被末尾的 push 掩盖。
+          exec > >(tee "$RUNNER_TEMP/commit.log") 2>&1
+
+          echo "== build job: ${{ needs.build.result }} =="
+          echo "== dl 实际布局 =="
+          find dl -type f | sort | sed 's/^/  /' || true
+
+          BASE=""
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "refs/heads/$BRANCH"
+            BASE=$(git rev-parse FETCH_HEAD)
+            git checkout -q -B "$BRANCH" "$BASE"
+            echo "== 基底: 回填分支上一版 $BASE =="
+          else
+            git checkout -q -B "$BRANCH"
+            echo "== 基底: main（回填分支尚不存在）=="
+          fi
+          mkdir -p "$ART"
+
+          # 只把本轮真正产出的平台叠上去；没产出的平台保留基底里的上一版产物。
+          FRESH=""
+          CARRIED=""
+          MISSING=""
+          for plat in $PLATFORMS; do
+            if [ -n "$(ls -A "dl/$plat" 2>/dev/null)" ]; then
+              FRESH="$FRESH $plat"
+            elif [ -n "$BASE" ] && git cat-file -e "$BASE:$ART/$plat" 2>/dev/null; then
+              CARRIED="$CARRIED $plat"
+            else
+              MISSING="$MISSING $plat"
+            fi
+          done
+          for plat in $FRESH; do
+            rm -rf "${ART:?}/$plat"
+            cp -R "dl/$plat" "$ART/$plat"
+          done
+
+          echo "== 本轮新产出 :$FRESH =="
+          echo "== 沿用上一版 :$CARRIED =="
+          echo "== 本轮缺失   :$MISSING =="
+          # 缺平台必须响，不能只躺在日志里等人翻
+          if [ -n "$MISSING" ]; then
+            echo "::warning title=回填缺少平台::本轮无产物且基底中也没有：$MISSING，请人工补齐"
+          fi
+
+          echo "== 待提交 =="
+          git status --porcelain "$ART"
+          if git diff --quiet -- "$ART" \
+             && [ -z "$(git ls-files --others --exclude-standard "$ART")" ]; then
+            echo "与回填分支上一版一致，无需提交"
+          else
             git config user.name "github-actions[bot]"
             git config user.email "actions@users.noreply.github.com"
-            if git diff --quiet -- utils-support-native-filesearch/src/main/resources/native \
-               && [ -z "$(git ls-files --others --exclude-standard \
-                    utils-support-native-filesearch/src/main/resources/native)" ]; then
-              echo "产物与仓库一致，无需提交"
-              exit 0
-            fi
-            git add utils-support-native-filesearch/src/main/resources/native
+            git add "$ART"
             git commit -m "build(native): filesearch 四平台产物"
-            echo "== push branch $BRANCH =="
-            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            echo "== 快进推送 $BRANCH（无 --force） =="
+            git push "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
               "HEAD:refs/heads/$BRANCH"
-          } 2>&1 | tee "$LOG"
-          code=${PIPESTATUS[0]}
-          if [ "$code" -ne 0 ]; then
-            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
-            echo "::error title=回填失败（exit $code）::$msg"
-            exit "$code"
           fi
-          echo "产物已推送到 $BRANCH，等待维护者合并"
+
+          {
+            echo "### 产物回填明细"
+            echo ""
+            echo "| 平台 | 来源 |"
+            echo "| --- | --- |"
+            for plat in $PLATFORMS; do
+              case " $FRESH " in
+                *" $plat "*) src="本轮新产出";;
+                *) src="沿用上一版";;
+              esac
+              echo "| $plat | $src |"
+            done
+            echo ""
+            echo "build job: ${{ needs.build.result }}；分支 \`$BRANCH\` 已快进推送（不再强推），请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
