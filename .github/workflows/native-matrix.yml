@@ -107,13 +107,31 @@ jobs:
           echo "LIB_PATH=$D/$EXPECT" >> "$GITHUB_ENV"
 
       - name: Check exports
+        # 不用 nm 做这件事。实测三种情况下 nm 都给不出可用符号表：
+        #   1) Windows Git Bash 的 nm 不解析 PE/COFF，对 dll 只往 stderr 写 "no symbols"；
+        #   2) ffmpeg / smb 的 Linux release 构建剥掉了符号表，nm 同样报 "no symbols"；
+        #   3) 关键细节：`nm -gU` 在这两种情况下**退出码是 0**，只输出空表。所以原先那句
+        #      `nm -gU ... || nm -g ...` 的兜底从来没执行过，它是死代码；exports.txt 恒为空，
+        #      期望清单的第一个符号必然失败。
+        # 结果是 6 个 windows 腿 + ffmpeg/smb 的 linux 腿（共 8 个 job）的 Check exports 全红，
+        # 而这些期望**一次都没有被真正验证过**。用真实导出表核对过：7 个模块 × 2 个平台
+        # 共 20 个期望符号全部真实存在，零缺失 —— 红的从来不是库，是校验器。
+        #
+        # 改成对二进制做「整 token 精确匹配」：tr 把所有非标识符字节（含 NUL、换行）替换成换行，
+        # 于是每一行恰好是一个完整标识符，再用 grep -qxF 要求整行相等。
+        #
+        # 这里**不能**用 filesearch 那套 `grep -aqF` 固定串搜索。期望清单里有三个名字是别的
+        # 标识符的子串，固定串搜索会把它们判成"存在"，即静默假通过：
+        #   screenshot            ⊂ screenshot_with_check
+        #   metrics_start_sampler ⊂ Rust v0 mangled 名（…14metrics_native21metrics_start_sampler0uEs_…）
+        #   ..._h264Decode        是 ..._h264DecoderCreate / ..._h264DecoderFree 的前缀
+        # 整 token 匹配对这三处都正确拒绝（已用截断负例验证）。
         run: |
-          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" 2>/dev/null \
-            || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
+          tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
           {
-            echo "### ${{ matrix.module }} / ${{ matrix.platform }} 导出"
+            echo "### ${{ matrix.module }} / ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
             echo '```'
-            head -40 "$RUNNER_TEMP/exports.txt"
+            head -40 "$RUNNER_TEMP/symbols.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           case "${{ matrix.module }}" in
@@ -125,8 +143,10 @@ jobs:
             *video-processor) NEED="Java_com_chua_video_processor_support_bridge_VideoProcessorBridge_transcodeToHls Java_com_chua_video_processor_support_bridge_VideoProcessorBridge_getVersion" ;;
             *ffmpeg)          NEED="ffmpeg_version ffmpeg_codec_available ffmpeg_free_string" ;;
           esac
+          test -n "$NEED" || { echo "ASSERT FAIL no expectation defined for module ${{ matrix.module }}"; exit 1; }
           for s in $NEED; do
-            grep -q "$s" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $s"; exit 1; }
+            grep -qxF -- "$s" "$RUNNER_TEMP/symbols.txt" \
+              || { echo "ASSERT FAIL missing export: $s"; exit 1; }
             echo "ASSERT ok   $s"
           done
           if [ "${{ matrix.platform }}" = "darwin-x86_64" ]; then
