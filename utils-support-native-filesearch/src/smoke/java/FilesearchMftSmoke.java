@@ -14,17 +14,26 @@ import java.util.Comparator;
 /**
  * 决定性区分「NTFS MFT 直读」与「walkdir 回退」的冒烟测试。
  *
- * <p>在扫描根目录下放置一个<b>深度 5</b> 的探针文件：walkdir 的 {@code WalkDir::max_depth(3)}
- * 永远看不到它，只有 MFT 直读能命中。因此同一个探针在两种引擎下的结果必然不同，
- * 可用来断言「本次构建/本次运行到底走了哪条路径」，而不是只看能否搜索。</p>
+ * <p>放置两个<b>同名</b>探针文件，只有目录深度不同：</p>
+ * <ul>
+ *   <li>深度 1：两条引擎都必须命中；</li>
+ *   <li>深度 5：walkdir 的 {@code WalkDir::max_depth(3)} 永远看不到，只有 MFT 直读能命中。</li>
+ * </ul>
+ *
+ * <p>因此同一次搜索在 MFT 下应返回 <b>2</b> 条、在 walkdir 下应返回 <b>1</b> 条，
+ * 差值即本次实际走的是哪条路径，不依赖「能否搜索」这种弱判据。</p>
+ *
+ * <p>深度 1 探针是<b>与引擎无关的正向断言</b>：少了它，walkdir 分支只剩
+ * {@code count == 0} 一条断言，一个「永远返回空」「size 恒为 0」的构建照样全绿。
+ * 它同时校验 size 回传，等于在每个平台上都断言了「真的检索到了、且元数据正确」。</p>
  *
  * <p>用法（需 JDK 25）：</p>
  * <pre>
  *   java --enable-native-access=ALL-UNNAMED FilesearchMftSmoke &lt;库路径&gt; &lt;扫描根目录&gt; mft|walkdir
  * </pre>
  *
- * <p>预期：Windows + 管理员 → {@code mft}（命中且带回正确 size）；
- * 其它平台或非管理员 → {@code walkdir}（不命中）。</p>
+ * <p>预期：Windows + 管理员 → {@code mft}（count=2）；
+ * 其它平台或非管理员 → {@code walkdir}（count=1）。</p>
  *
  * @author CH
  * @since 4.0.0.42
@@ -63,18 +72,24 @@ public final class FilesearchMftSmoke {
         String engine = argv[2];
 
         String tag = "mft-probe-" + System.nanoTime();
-        Path probeRoot = root.resolve(tag + "-1");
-        Path probe = probeRoot.resolve(tag + "-2").resolve(tag + "-3")
+        // 两个探针同名，只差目录深度：同一次搜索即可同时验「能不能搜到」和「走的是哪条路」
+        Path flatProbe = root.resolve(tag + ".txt");
+        Path deepRoot = root.resolve(tag + "-1");
+        Path deepProbe = deepRoot.resolve(tag + "-2").resolve(tag + "-3")
                 .resolve(tag + "-4").resolve(tag + ".txt");
-        Files.createDirectories(probe.getParent());
+        Files.createDirectories(deepProbe.getParent());
         byte[] payload = new byte[PROBE_BYTES];
         Arrays.fill(payload, (byte) 'x');
-        Files.write(probe, payload);
+        Files.write(flatProbe, payload);
+        Files.write(deepProbe, payload);
         log("扫描根目录 = " + root);
-        log("探针文件   = " + probe + "  (" + PROBE_BYTES + " 字节, 相对深度 5)");
+        log("探针(深1) = " + flatProbe + "  (" + PROBE_BYTES + " 字节, 相对深度 1)");
+        log("探针(深5) = " + deepProbe + "  (" + PROBE_BYTES + " 字节, 相对深度 5)");
         log("期望引擎   = " + engine);
 
         Linker linker = Linker.nativeLinker();
+        // 清理必须放在 finally：断言失败时异常会直接抛出探针目录树，
+        // 对着长期存在的扫描根反复跑就会不断堆积垃圾。
         try (Arena arena = Arena.ofShared()) {
             SymbolLookup lookup = SymbolLookup.libraryLookup(lib, arena);
             MethodHandle raw = linker.downcallHandle(
@@ -90,19 +105,27 @@ public final class FilesearchMftSmoke {
                 String json = rp.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);
                 int count = extractCount(json);
                 log("返回 count = " + count);
+
+                // 以下两条与引擎无关：每个平台都必须真的检索到东西并带回正确 size。
+                // walkdir 分支若只断言 count==0，「永远返回空」「size 恒为 0」的构建会全绿。
+                require(count >= 1, "连深度 1 的探针都搜不到，引擎没有返回任何结果: " + json);
+                require(json.contains("\"size\":" + PROBE_BYTES),
+                        "未回传正确大小（期望 " + PROBE_BYTES + "）: " + json);
+
+                // 引擎判别：同名探针，深度 1 两条引擎都命中，深度 5 只有 MFT 能命中
                 if ("mft".equals(engine)) {
-                    require(count >= 1, "MFT 应命中深度 5 的探针文件，实际 " + count + "  " + json);
-                    require(json.contains("\"size\":" + PROBE_BYTES),
-                            "未回传正确大小（期望 " + PROBE_BYTES + "）: " + json);
-                    require(json.contains(tag + ".txt"), "结果未包含探针文件名: " + json);
+                    require(count == 2,
+                            "MFT 应同时命中深度 1 与深度 5 两个同名探针，实际 " + count + "  " + json);
                 } else {
-                    require(count == 0,
-                            "walkdir(max_depth=3) 不应命中深度 5 的探针文件，实际 " + count + "  " + json);
+                    require(count == 1,
+                            "walkdir(max_depth=3) 只应命中深度 1 的探针，实际 " + count + "  " + json);
                 }
             }
+        } finally {
+            deleteQuietly(flatProbe);
+            deleteQuietly(deepRoot);
         }
 
-        deleteQuietly(probeRoot);
         log("SMOKE OK");
         System.out.println(LOG);
     }
@@ -141,14 +164,16 @@ public final class FilesearchMftSmoke {
     }
 
     /**
-     * 尽力删除探针目录树。
+     * 尽力删除探针。
      *
-     * <p>入参必须是本次创建探针时用的<b>根目录</b>，而不是探针文件：
+     * <p>传入<b>目录</b>时必须传本次建探针用的根目录，而不是最深处的那个文件：
      * {@code Files.walk} 传入文件路径时只产出该文件自身，不会向上展开目录树；
      * 传文件或只传文件的父目录，都会把更上层的空目录留在磁盘根上。
      * 逆序遍历保证先删子、后删父。</p>
      *
-     * @param probeRoot 本次创建的探针根目录
+     * <p>传入<b>文件</b>时（深度 1 探针）这正是想要的语义：只删该文件本身。</p>
+     *
+     * @param target 本次创建的探针根目录或探针文件
      */
     private static void deleteQuietly(Path probeRoot) {
         try {
