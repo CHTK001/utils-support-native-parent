@@ -63,7 +63,8 @@ public final class FilesearchMftSmoke {
         String engine = argv[2];
 
         String tag = "mft-probe-" + System.nanoTime();
-        Path probe = root.resolve(tag + "-1").resolve(tag + "-2").resolve(tag + "-3")
+        Path probeRoot = root.resolve(tag + "-1");
+        Path probe = probeRoot.resolve(tag + "-2").resolve(tag + "-3")
                 .resolve(tag + "-4").resolve(tag + ".txt");
         Files.createDirectories(probe.getParent());
         byte[] payload = new byte[PROBE_BYTES];
@@ -101,7 +102,7 @@ public final class FilesearchMftSmoke {
             }
         }
 
-        deleteQuietly(probe);
+        deleteQuietly(probeRoot);
         log("SMOKE OK");
         System.out.println(LOG);
     }
@@ -140,18 +141,22 @@ public final class FilesearchMftSmoke {
     }
 
     /**
-     * 尽力删除探针文件及其父目录。
+     * 尽力删除探针目录树。
      *
-     * @param path 探针文件
+     * <p>入参必须是本次创建探针时用的<b>根目录</b>，而不是探针文件：
+     * {@code Files.walk} 传入文件路径时只产出该文件自身，不会向上展开目录树；
+     * 传文件或只传文件的父目录，都会把更上层的空目录留在磁盘根上。
+     * 逆序遍历保证先删子、后删父。</p>
+     *
+     * @param probeRoot 本次创建的探针根目录
      */
-    private static void deleteQuietly(Path path) {
+    private static void deleteQuietly(Path probeRoot) {
         try {
-            if (!Files.exists(path)) {
+            if (!Files.exists(probeRoot)) {
                 return;
             }
-            Files.walk(path)
+            Files.walk(probeRoot)
                     .sorted(Comparator.reverseOrder())
-                    .limit(6)
                     .forEach(p -> {
                         try {
                             Files.deleteIfExists(p);
