@@ -78,10 +78,30 @@ setup_target() {
     echo -e "${GREEN}[INFO]${NC} 目标平台: $TARGET"
 }
 
+# 解析 cargo 实际产出的库文件名。
+# cargo 优先用 [lib] 的 name；没写 [lib] name 时才回退到 package 名并把 '-' 换成 '_'。
+# 之前这里只 grep [package] name，于是 filestorage 去找 librust_filestorage_processor.so，
+# 而 cargo 产出的是 libfile_storage.so（[lib] name = "file_storage"），
+# 结果构建成功后仍然报"未找到动态库"，四个平台全红。
 check_cargo_toml() {
     if [[ ! -f "Cargo.toml" ]]; then echo -e "${RED}[ERROR]${NC} 未找到 Cargo.toml"; exit 1; fi
-    PROJECT_NAME=$(grep -E '^name\s*=' Cargo.toml | head -1 | sed -E 's/^name\s*=\s*"([^"]+)".*/\1/')
-    echo -e "${GREEN}[INFO]${NC} 项目名称: $PROJECT_NAME"
+    PROJECT_NAME=$(awk '
+        /^\[lib\]/ { inlib=1; next }
+        /^\[/      { inlib=0 }
+        inlib && /^[[:space:]]*name[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*"/, "")
+            sub(/".*$/, "")
+            print
+            exit
+        }
+    ' Cargo.toml)
+    if [[ -z "$PROJECT_NAME" ]]; then
+        PROJECT_NAME=$(sed -nE 's/^name[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' Cargo.toml | head -1 | tr '-' '_')
+    fi
+    if [[ -z "$PROJECT_NAME" ]]; then
+        echo -e "${RED}[ERROR]${NC} 无法从 Cargo.toml 解析出库名"; exit 1
+    fi
+    echo -e "${GREEN}[INFO]${NC} 库名: $PROJECT_NAME"
 }
 
 build_project() {
@@ -114,7 +134,6 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     check_cargo_toml
     setup_target
-    check_cargo_toml
     if ! command -v cargo &>/dev/null; then echo -e "${RED}[ERROR]${NC} 未找到 cargo"; exit 1; fi
     if ! rustup target list --installed | grep -q "^$TARGET$"; then
         echo -e "${YELLOW}[INFO]${NC} 安装目标平台: $TARGET"
