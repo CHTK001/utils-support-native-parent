@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+    </parent>
+    <artifactId>utils-support-native-needle</artifactId>
+    <packaging>jar</packaging>
+    <description>Needle C 推理引擎 FFM 门面：本地工具调用与结构化抽取</description>
+    <properties>
+        <!-- FFM（java.lang.foreign）自 JDK 22 转正，父 POM 未配置编译级别，
+             默认落到 target 1.8，无法解析 SymbolLookup / Linker。
+             本模块统一到 25，与 native-parent 中其它使用 FFM/record 的模块
+             （smb / metrics / libjpeg-turbo / filesearch / wechat / uia）
+             保持一致；运行时也要求 JDK 25。 -->
+        <maven.compiler.release>25</maven.compiler.release>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+</project>

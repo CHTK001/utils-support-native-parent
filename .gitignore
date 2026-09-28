@@ -1,0 +1,23 @@
+target/
+*.iml
+.idea/
+.classpath
+.project
+.settings/
+*.class
+*.jar
+
+# Rust
+**/Cargo.lock
+**/*.log
+**/target/
+
+# CMake / MSVC build output
+**/build-vs/
+
+# 临时/备份残留
+*.orig
+*.bak
+replay_pid*
+hs_err*
+__pycache__/

@@ -1,0 +1,251 @@
+package com.chua.nativeffmpeg.support;
+
+/**
+ * 基于 Rust cdylib 的原生 FFmpeg 门面。
+ *
+ * <p><b>当前状态：原生侧尚未实现这些能力，本类不可用。</b>动态库
+ * {@code ffmpeg_rust} 只导出三个扁平 C 函数（{@code ffmpeg_version} /
+ * {@code ffmpeg_codec_available} / {@code ffmpeg_free_string}），不含任何
+ * {@code Java_...} JNI 符号，也没有 {@code JNI_OnLoad}；本模块的 Rust 源码同样只有
+ * 那三个函数（{@code Cargo.toml} 仅依赖 {@code libc}，未引入
+ * {@code ffmpeg-sys} / {@code ffmpeg-next}）。</p>
+ *
+ * <p>因此下面这些声明为 {@code native} 的方法在运行时一律抛
+ * {@link UnsatisfiedLinkError}，{@link #isLoaded()} 恒为 {@code false}，
+ * {@link #getLoadError()} 会返回该错误。需要 FFmpeg 能力时请改用本仓库中已实现的
+ * 替代：{@code utils-support-ffmpeg-starter}（JavaCV / Jaffree）、
+ * {@code utils-support-native-video-processor}（HLS 转码）或
+ * {@code utils-support-native-video-codec}（H.264/H.265/H.266 编解码），
+ * 后两者已有可用的四平台原生产物。</p>
+ *
+ * @author CH
+ * @since 4.0.0.42
+ */
+public final class NativeFFmpeg {
+
+    static {
+        try {
+            NativeFFmpegJniLoader.load();
+        } catch (Throwable ignored) {
+            // 原生库缺失时降级：isLoaded() 返回 false，不阻断类加载
+        }
+    }
+
+    /**
+     * 构造方法，创建 NativeFFmpeg 实例。
+     */
+    private NativeFFmpeg() {
+    }
+
+    /**
+     * 帧回调接口，推流/拉流回调模式下逐帧触发。
+     */
+    @FunctionalInterface
+    public interface FrameCallback {
+
+        /**
+         * 帧回调。
+         *
+         * @param frameNumber 帧序号（从 0 开始）
+         * @param timestampMs 帧时间戳（毫秒）
+         * @param width 视频宽度
+         * @param height 视频高度
+         * @param codec 视频编码器名称
+         * @param fps 帧率
+         * @param keyFrame 是否为关键帧
+         */
+        void onFrame(long frameNumber, long timestampMs, int width, int height,
+                     String codec, double fps, boolean keyFrame);
+    }
+
+    /**
+     * 原生库是否加载成功。
+     *
+     * @return true 表示已加载
+     */
+    public static boolean isLoaded() {
+        try {
+            getVersion();
+            return true;
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    /**
+     * 获取原生库加载失败原因。
+     *
+     * @return 加载失败异常，加载成功返回 null
+     */
+    public static Throwable getLoadError() {
+        try {
+            getVersion();
+            return null;
+        } catch (Throwable e) {
+            return e;
+        }
+    }
+
+    /**
+     * 获取原生库版本号。
+     *
+     * @return 版本号
+     */
+    public static native String getVersion();
+
+    // ---- 推流/拉流 ----
+
+    /**
+     * RTMP 推流（无回调）。
+     *
+     * @param inputUrl 输入文件 URL 或本地路径
+     * @param streamUrl 推流地址
+     * @param videoCodec 视频编码器，为空时使用默认值
+     * @param audioCodec 音频编码器，为空时使用默认值
+     * @param width 视频宽度，0 表示自动
+     * @param height 视频高度，0 表示自动
+     * @param fps 帧率，0 表示自动
+     * @return 0 表示成功
+     */
+    public static native int pushStream(String inputUrl, String streamUrl,
+                                        String videoCodec, String audioCodec,
+                                        int width, int height, int fps);
+
+    /**
+     * RTMP 推流（带帧回调）。
+     *
+     * @param inputUrl 输入文件 URL 或本地路径
+     * @param streamUrl 推流地址
+     * @param videoCodec 视频编码器，为空时使用默认值
+     * @param audioCodec 音频编码器，为空时使用默认值
+     * @param width 视频宽度，0 表示自动
+     * @param height 视频高度，0 表示自动
+     * @param fps 帧率，0 表示自动
+     * @param callback 帧回调
+     * @return 0 表示成功
+     */
+    public static native int pushStreamWithCallback(String inputUrl, String streamUrl,
+                                                    String videoCodec, String audioCodec,
+                                                    int width, int height, int fps,
+                                                    FrameCallback callback);
+
+    /**
+     * RTMP 拉流（无回调）。
+     *
+     * @param streamUrl 拉流地址
+     * @param outputPath 输出文件路径
+     * @param duration 拉流时长，0 表示不限制
+     * @return 0 表示成功
+     */
+    public static native int pullStream(String streamUrl, String outputPath, double duration);
+
+    /**
+     * RTMP 拉流（带帧回调）。
+     *
+     * @param streamUrl 拉流地址
+     * @param outputPath 输出文件路径
+     * @param duration 拉流时长，0 表示不限制
+     * @param callback 帧回调
+     * @return 0 表示成功
+     */
+    public static native int pullStreamWithCallback(String streamUrl, String outputPath,
+                                                    double duration, FrameCallback callback);
+
+    /**
+     * 获取媒体时长。
+     *
+     * @param inputUrl 输入文件 URL 或本地路径
+     * @return 时长（秒），失败返回 -1
+     */
+    public static native double getDuration(String inputUrl);
+
+    // ---- 文件转码 ----
+
+    /**
+     * 转码文件。
+     *
+     * @param inputUrl 输入文件路径
+     * @param outputPath 输出文件路径
+     * @param videoCodec 视频编码器，为空时使用默认值
+     * @param audioCodec 音频编码器，为空时使用默认值
+     * @param width 视频宽度，0 表示自动
+     * @param height 视频高度，0 表示自动
+     * @param fps 帧率，0 表示自动
+     * @param startTime 开始时间（秒），0 表示从头开始
+     * @param duration 转码时长（秒），0 表示全部
+     * @param removeVideo 是否移除视频流
+     * @param removeAudio 是否移除音频流
+     * @return 0 表示成功
+     */
+    public static native int convertFile(String inputUrl, String outputPath,
+                                         String videoCodec, String audioCodec,
+                                         int width, int height, int fps,
+                                         double startTime, double duration,
+                                         boolean removeVideo, boolean removeAudio);
+
+    /**
+     * 截取某一帧为图片。
+     *
+     * @param inputUrl 输入文件路径
+     * @param timestampMs 截取时间点（毫秒）
+     * @param outputPath 输出图片路径
+     * @return 0 表示成功
+     */
+    public static native int captureFrame(String inputUrl, long timestampMs, String outputPath);
+
+    /**
+     * 拼接多个文件。
+     *
+     * @param inputPaths 输入文件路径，多个以文件分隔符分隔
+     * @param outputPath 输出文件路径
+     * @return 0 表示成功
+     */
+    public static native int concatFiles(String inputPaths, String outputPath);
+
+    /**
+     * 获取媒体信息（JSON 格式）。
+     *
+     * @param inputUrl 输入文件 URL 或本地路径
+     * @return JSON 字符串，失败返回 null
+     */
+    public static native String getMediaInfo(String inputUrl);
+
+    // ---- 后处理 ----
+
+    /**
+     * 旋转视频（90/180/270 度）。
+     *
+     * @param inputUrl 输入文件路径
+     * @param outputPath 输出文件路径
+     * @param angle 旋转角度，仅支持 90/180/270
+     * @return 0 表示成功
+     */
+    public static native int rotate(String inputUrl, String outputPath, int angle);
+
+    /**
+     * 添加水印。
+     *
+     * @param inputUrl 输入视频路径
+     * @param watermarkPath 水印图片路径
+     * @param outputPath 输出文件路径
+     * @param x 水印 X 坐标
+     * @param y 水印 Y 坐标
+     * @return 0 表示成功
+     */
+    public static native int addWatermark(String inputUrl, String watermarkPath,
+                                          String outputPath, int x, int y);
+
+    // ---- 图片序列 ----
+
+    /**
+     * 将图片序列转为视频。
+     *
+     * @param imageDir 图片所在目录
+     * @param outputPath 输出视频路径
+     * @param fps 帧率
+     * @param imagePattern 图片命名模式，如 "帧_%06d.jpg"
+     * @return 0 表示成功
+     */
+    public static native int imagesToVideo(String imageDir, String outputPath,
+                                           int fps, String imagePattern);
+}

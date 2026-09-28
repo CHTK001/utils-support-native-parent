@@ -1,0 +1,16 @@
+[package]
+name = "rust_libjpeg_turbo"
+version = "0.1.0"
+edition = "2021"
+authors = ["CH <ch@utils.com>"]
+license = "Apache-2.0"
+description = "libjpeg-turbo TurboJPEG facade exposed as a flat C ABI for Panama FFM"
+
+[lib]
+name = "chua_native_turbojpeg"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

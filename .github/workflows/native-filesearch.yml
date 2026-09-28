@@ -1,0 +1,299 @@
+name: native-filesearch
+
+# 四平台交叉编译 + 导出符号断言 + 运行时冒烟（Panama FFM，无项目依赖）。
+# 产物回填到分支 build/filesearch-native-artifacts，由维护者合并到 main。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把四平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-filesearch/**'
+      # JNA 版（Java 8 绑定）改的是同一份动态库的另一半调用路径，
+      # 不纳入触发范围就等于该模块的冒烟永不运行。
+      - 'utils-support-native-filesearch-java8/**'
+      - '.github/workflows/native-filesearch.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-filesearch/**'
+      - 'utils-support-native-filesearch-java8/**'
+
+concurrency:
+  group: filesearch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            smoke: true
+            # Windows 走 NTFS MFT 直读；GH 的 windows runner 以管理员运行，
+            # 因此能真正打开 \\.\X: 读 $MFT（本地非管理员会自动回退 walkdir）
+            engine: mft
+            lib: file_search.dll
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            smoke: true
+            engine: walkdir
+            lib: libfile_search.so
+          - platform: darwin-x86_64
+            # 中国 macOS runner 已下架 Intel 机型，macos-15 只能跑 arm64；
+            # 无 x64 JVM 可做冒烟，这一腿只校验架构与导出符号。
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: x86_64
+            smoke: false
+            engine: walkdir
+            lib: libfile_search.dylib
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: aarch64
+            smoke: true
+            engine: walkdir
+            lib: libfile_search.dylib
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Build
+        # build.sh 自身用 uname 探测，但矩阵是显式声明的，直接传参更可预期；
+        # windows-2022 与 ubuntu/macos runner 均自带 bash。
+        run: |
+          chmod +x utils-support-native-filesearch/src/main/rust/build.sh
+          ./utils-support-native-filesearch/src/main/rust/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-filesearch/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Export list (for diagnostics)
+        run: |
+          {
+            echo "### ${{ matrix.platform }} 导出符号"
+            echo '```'
+            nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check exports
+        # 四条腿都必须断言。早期把断言挂在 `matrix.smoke == false` 上，
+        # 而该条件只有 darwin-x86_64 一腿为真，导致 windows / linux /
+        # darwin-aarch64 从不校验导出——linux-x86_64 的 libfile_search.so
+        # 因此长期带着 7 个已从源码删除的坏 JNI 导出而无人发现。
+        #
+        # 断言用字节串搜索而非 nm：Windows Git Bash 的 nm 不解析 PE/COFF
+        # （读出空表），本模块的 Linux release 构建又剥掉了符号表
+        # （nm 报 "no symbols"）。字节串搜索对 PE / ELF / Mach-O 一律有效。
+        run: |
+          { nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || echo "(nm unavailable)"; } \
+            > "$RUNNER_TEMP/exports.txt" || true
+          for sym in fast_get_version fast_search_cancel fast_search_by_name \
+                     Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawSearchByName \
+                     Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawGetTree; do
+            grep -aqF "$sym" "$LIB_PATH" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
+            echo "ASSERT ok   export $sym"
+          done
+          # 已移除的那批坏 JNI 符号不得再出现（getVersion 曾令 JVM 崩溃）
+          for gone in RustFileSearchBridge_getVersion RustFileSearchBridge_cancel \
+                      RustFileSearchBridge_searchByName RustFileSearchBridge_getTree \
+                      RustFileSearchBridge_searchBySize RustFileSearchBridge_searchByPath; do
+            if grep -aqF "$gone" "$LIB_PATH"; then
+              echo "ASSERT FAIL 已移除的 JNI 符号仍存在: $gone"
+              exit 1
+            fi
+            echo "ASSERT ok   removed $gone"
+          done
+
+      - name: Check architecture (macOS Intel cross leg)
+        if: matrix.smoke == false
+        run: |
+          lipo -info "$LIB_PATH"
+          lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
+          echo "ASSERT ok   mach-o x86_64"
+
+      - uses: actions/setup-java@v4
+        if: matrix.smoke != false
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Runtime smoke (Panama FFM, no project deps)
+        if: matrix.smoke != false
+        run: |
+          javac -d target/smoke utils-support-native-filesearch/src/smoke/java/FilesearchFlatAbiSmoke.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            -cp target/smoke FilesearchFlatAbiSmoke "$(pwd)/$LIB_PATH"
+
+      - name: Engine assertion (MFT 直读 vs walkdir 回退)
+        if: matrix.smoke != false
+        # 探针文件放在相对深度 5：walkdir 的 max_depth=3 永远看不到它，只有 MFT 直读能命中，
+        # 同一探针在两种引擎下结果必然不同，据此断言本次实际走的是哪条路径，并校验 size 回传。
+        run: |
+          if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
+            SCAN_ROOT='C:\'
+            # MFT 直读需管理员；若 runner 非管理员必须显式失败，不能悄悄降级成 walkdir
+            # 后还断言 mft（那会变成一条永远不真正测 MFT 的假绿用例）。
+            if ! net session >/dev/null 2>&1; then
+              echo "ASSERT FAIL windows runner 非管理员，无法验证 MFT 直读"
+              exit 1
+            fi
+          else
+            SCAN_ROOT="$RUNNER_TEMP"
+          fi
+          javac -d target/smoke utils-support-native-filesearch/src/smoke/java/FilesearchMftSmoke.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            -cp target/smoke FilesearchMftSmoke "$(pwd)/$LIB_PATH" "$SCAN_ROOT" "${{ matrix.engine }}"
+
+      - name: Runtime smoke (JNA bridge, Java 8 module)
+        if: matrix.smoke != false
+        # 上一条只验了 FFM 裸 ABI，JNA 绑定（Java 8 侧唯一的正式绑定）
+        # 在 CI 上从未运行过：它有自己的一套 UTF-8 手工编组与 JSON 解析，
+        # 平台行为与 FFM 版不同，必须单独跑。
+        run: |
+          set -e
+          mvn -q -B -f utils-support-native-filesearch-java8/pom.xml -DskipTests package
+          mvn -q -B -f utils-support-native-filesearch-java8/pom.xml \
+            dependency:build-classpath "-Dmdep.outputFile=target/cp.txt"
+          # 分隔符必须问 JVM 自己要：dependency:build-classpath 输出的是
+          # 平台分隔符（Windows 是 ';'，Linux/macOS 是 ':'），写死 ':' 会让
+          # Windows 上整个 target/classes 段被并进第一个 jar 路径，编译报
+          # "package ... does not exist"。这条是本 step 唯一的跨平台隐患。
+          SEP=$(java -XshowSettings:properties -version 2>&1 |
+            sed -n 's/^[[:space:]]*path\.separator = //p')
+          CP="utils-support-native-filesearch-java8/target/classes${SEP}$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
+            utils-support-native-filesearch-java8/src/smoke/java/FilesearchJnaBridgeSmoke.java
+          # 用本腿刚编出的库覆盖 classpath 抽取，确保测的是当前源码的产物
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
+            -cp "target/smoke-jna${SEP}$CP" FilesearchJnaBridgeSmoke
+
+      - name: Engine assertion (JNA bridge, Java 8 module)
+        if: matrix.smoke != false
+        # 上一条只验功能：MFT 直读与 walkdir 回退都能搜到临时目录里的文件，
+        # 判不出本次实际走的是哪条路径。这里用相对深度 5 的探针补上引擎判定，
+        # 同时作为 FFM 侧结果的交叉印证 —— 两条 Java 通路调用同一个原生符号。
+        # Windows 侧的管理员断言已在上一个 step 做过，这里不重复。
+        run: |
+          set -e
+          # 上一个 step 已生成 target/cp.txt；分隔符同样问 JVM 要，理由见该 step。
+          SEP=$(java -XshowSettings:properties -version 2>&1 |
+            sed -n 's/^[[:space:]]*path\.separator = //p')
+          CP="utils-support-native-filesearch-java8/target/classes${SEP}$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
+            SCAN_ROOT='C:\'
+          else
+            SCAN_ROOT="$RUNNER_TEMP"
+          fi
+          javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
+            utils-support-native-filesearch-java8/src/smoke/java/FilesearchMftJnaSmoke.java
+          java -Dstdout.encoding=UTF-8 \
+            "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
+            -cp "target/smoke-jna${SEP}$CP" FilesearchMftJnaSmoke "$SCAN_ROOT" "${{ matrix.engine }}"
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-filesearch
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    # always() 保证部分平台失败时已成功平台的产物仍能回填。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-filesearch'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/filesearch-native-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 仓库 main 开启 "require pull request"，GITHUB_TOKEN 直接 push main
+          # 会被 GH006 拒绝，且本仓库禁止 Actions 创建 PR；故回填到独立分支，
+          # 由维护者合并。
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/filesearch-native-artifacts"
+          {
+            mkdir -p utils-support-native-filesearch/src/main/resources/native
+            cp -R dl/. utils-support-native-filesearch/src/main/resources/native/
+            echo "== 待提交产物 =="
+            git status --porcelain utils-support-native-filesearch/src/main/resources/native
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- utils-support-native-filesearch/src/main/resources/native \
+               && [ -z "$(git ls-files --others --exclude-standard \
+                    utils-support-native-filesearch/src/main/resources/native)" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add utils-support-native-filesearch/src/main/resources/native
+            git commit -m "build(native): filesearch 四平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH，等待维护者合并"
