@@ -14,10 +14,14 @@ on:
   push:
     paths:
       - 'utils-support-native-filesearch/**'
+      # JNA 版（Java 8 绑定）改的是同一份动态库的另一半调用路径，
+      # 不纳入触发范围就等于该模块的冒烟永不运行。
+      - 'utils-support-native-filesearch-java8/**'
       - '.github/workflows/native-filesearch.yml'
   pull_request:
     paths:
       - 'utils-support-native-filesearch/**'
+      - 'utils-support-native-filesearch-java8/**'
 
 concurrency:
   group: filesearch-${{ github.ref }}
@@ -166,6 +170,44 @@ jobs:
           javac -d target/smoke utils-support-native-filesearch/src/smoke/java/FilesearchMftSmoke.java
           java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
             -cp target/smoke FilesearchMftSmoke "$(pwd)/$LIB_PATH" "$SCAN_ROOT" "${{ matrix.engine }}"
+
+      - name: Runtime smoke (JNA bridge, Java 8 module)
+        if: matrix.smoke != false
+        # 上一条只验了 FFM 裸 ABI，JNA 绑定（Java 8 侧唯一的正式绑定）
+        # 在 CI 上从未运行过：它有自己的一套 UTF-8 手工编组与 JSON 解析，
+        # 平台行为与 FFM 版不同，必须单独跑。
+        run: |
+          set -e
+          mvn -q -B -f utils-support-native-filesearch-java8/pom.xml -DskipTests package
+          mvn -q -B -f utils-support-native-filesearch-java8/pom.xml \
+            dependency:build-classpath "-Dmdep.outputFile=target/cp.txt"
+          CP="utils-support-native-filesearch-java8/target/classes:$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
+            utils-support-native-filesearch-java8/src/smoke/java/FilesearchJnaBridgeSmoke.java
+          # 用本腿刚编出的库覆盖 classpath 抽取，确保测的是当前源码的产物
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
+            -cp "target/smoke-jna:$CP" FilesearchJnaBridgeSmoke
+
+      - name: Engine assertion (JNA bridge, Java 8 module)
+        if: matrix.smoke != false
+        # 上一条只验功能：MFT 直读与 walkdir 回退都能搜到临时目录里的文件，
+        # 判不出本次实际走的是哪条路径。这里用相对深度 5 的探针补上引擎判定，
+        # 同时作为 FFM 侧结果的交叉印证 —— 两条 Java 通路调用同一个原生符号。
+        # Windows 侧的管理员断言已在上一个 step 做过，这里不重复。
+        run: |
+          set -e
+          CP="utils-support-native-filesearch-java8/target/classes:$(cat utils-support-native-filesearch-java8/target/cp.txt)"
+          if [ "${{ matrix.platform }}" = "windows-x86_64" ]; then
+            SCAN_ROOT='C:\'
+          else
+            SCAN_ROOT="$RUNNER_TEMP"
+          fi
+          javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
+            utils-support-native-filesearch-java8/src/smoke/java/FilesearchMftJnaSmoke.java
+          java -Dstdout.encoding=UTF-8 \
+            "-Dchua.filesearch.native.path=$(pwd)/$LIB_PATH" \
+            -cp "target/smoke-jna:$CP" FilesearchMftJnaSmoke "$SCAN_ROOT" "${{ matrix.engine }}"
 
       - name: Stage artifact for upload
         run: |
