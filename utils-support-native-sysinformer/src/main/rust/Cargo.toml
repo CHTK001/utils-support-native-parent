@@ -1,0 +1,43 @@
+[package]
+name = "sysinformer"
+version = "0.1.0"
+edition = "2021"
+description = "System Informer 能力的跨平台可移植子集：系统与进程内省、按需深度查询、事件驱动通知"
+
+[lib]
+name = "sysinformer"
+crate-type = ["cdylib"]
+
+[dependencies]
+# 跨平台系统/进程基线。选它是因为它已在本仓 metrics 模块中长期使用并被 CI 验证。
+sysinfo = "0.33"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+once_cell = "1.20"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# 这里预置的是**超集**：三个平台实现由不同 agent 并行编写，若各自来改 Cargo.toml
+# 必然冲突。故一次性给足，未用到的 feature 不产生开销（Rust 只链接实际用到的）。
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_SystemInformation",
+    "Win32_System_Services",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Environment",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_Memory",
+    "Win32_System_IO",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Credentials",
+    "Win32_UI_Shell",
+]}

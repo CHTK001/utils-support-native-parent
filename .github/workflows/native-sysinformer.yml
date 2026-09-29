@@ -1,0 +1,331 @@
+name: native-sysinformer
+
+# 四平台构建 + 导出符号断言 + 架构断言 + 运行时冒烟（真加载库并调用）。
+# 产物回填到分支 build/sysinformer-native-artifacts，由维护者合并回 main。
+#
+# 本模块的 Rust 源在 src/main/rust，产物目录 src/main/resources/native/<平台>/。
+# 构建脚本 build.sh 负责交叉编译与搬运，四个平台的参数与 native-matrix 一致。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把四平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-sysinformer/**'
+      - '.github/workflows/native-sysinformer.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-sysinformer/**'
+
+concurrency:
+  group: sysinformer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            lib: sysinformer.dll
+            file_expect: 'PE32\+.*x86-64'
+            smoke: true
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            lib: libsysinformer.so
+            file_expect: 'ELF 64-bit.*x86-64'
+            smoke: true
+          - platform: darwin-x86_64
+            # macos-15 主机是 arm64，x86_64 dylib 由 build.sh 交叉编译产出；
+            # 本机 python 是 arm64，装不上 x86_64 dylib，故本腿不做运行时冒烟
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: x86_64
+            lib: libsysinformer.dylib
+            file_expect: 'Mach-O 64-bit.*x86_64'
+            smoke: false
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: aarch64
+            lib: libsysinformer.dylib
+            file_expect: 'Mach-O 64-bit.*arm64'
+            smoke: true
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          chmod +x utils-support-native-sysinformer/src/main/rust/build.sh
+          ./utils-support-native-sysinformer/src/main/rust/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-sysinformer/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "ASSERT FAIL missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Check exports
+        # 整 token 精确匹配。命名说明：本库导出的是 C ABI（非 JNI），
+        # 名字本身即 sysinformer_*，不存在"裸名是尾部子串"的情况；
+        # 但仍用整 token 匹配而非子串搜索，因为子串搜索会把
+        # sysinformer_free_string 的期望名在只存在 sysinformer_free_stringX 时误判为存在。
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sym in sysinformer_call sysinformer_free_string sysinformer_version; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+          # 负例对照：一个必然不存在的名字必须查不到，证明上面的检查不是恒真
+          if grep -qxF -- "sysinformer_no_such_symbol" "$RUNNER_TEMP/symbols_match.txt"; then
+            echo "ASSERT FAIL 负例对照命中了不存在的符号，检查无效"
+            exit 1
+          fi
+          echo "ASSERT ok   negative control"
+
+      - name: Check architecture
+        run: |
+          file "$LIB_PATH"
+          file "$LIB_PATH" | grep -qE '${{ matrix.file_expect }}' \
+            || { echo "ASSERT FAIL architecture mismatch, expected /${{ matrix.file_expect }}/"; exit 1; }
+          echo "ASSERT ok   architecture"
+          if [ "${{ matrix.build_os }}" = "darwin" ]; then
+            lipo -info "$LIB_PATH"
+            lipo -archs "$LIB_PATH"
+          fi
+
+      - name: Runtime smoke (dlopen + version + system.snapshot)
+        # 真加载库并真调用。断言三件事：
+        #   1) 库能 dlopen；
+        #   2) sysinformer_version() 返回可解析的 JSON 且 platform 与预期一致；
+        #   3) sysinformer_call("system.snapshot","{}") 返回 ok:true 且 data 里
+        #      真的带 cpu / memory / host 等字段 —— 这是功能级断言，不是"符号存在"。
+        #     （此前多次踩过：只验符号存在，库根本跑不起来也照样绿。）
+        if: matrix.smoke != false
+        run: |
+          python3 -X utf8 - "$LIB_PATH" "${{ matrix.build_os }}" <<'PY'
+          import ctypes
+          import json
+          import sys
+
+          lib_path, expect_platform = sys.argv[1], sys.argv[2]
+          # Rust 侧的 PLATFORM 常量对 macOS 返回 "macos"，而 matrix 的 build_os 是
+          # "darwin"（贴近 Rust target 三元组）。此处归一化，避免为命名差异改 matrix。
+          if expect_platform == "darwin":
+              expect_platform = "macos"
+
+          try:
+              lib = ctypes.CDLL(lib_path)
+          except OSError as exc:
+              print(f"ASSERT FAIL dlopen: {exc}")
+              sys.exit(1)
+          print(f"ASSERT ok   dlopen {lib_path}")
+
+          failures = 0
+
+          # --- 1) version ---
+          lib.sysinformer_version.restype = ctypes.c_void_p
+          lib.sysinformer_free_string.argtypes = [ctypes.c_void_p]
+          p = lib.sysinformer_version()
+          if not p:
+              print("ASSERT FAIL sysinformer_version() 返回空指针")
+              sys.exit(1)
+          ver = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+          lib.sysinformer_free_string(p)
+          try:
+              vj = json.loads(ver)
+          except Exception as exc:
+              print(f"ASSERT FAIL version 不是合法 JSON: {ver!r} ({exc})")
+              sys.exit(1)
+          if vj.get("platform") == expect_platform:
+              print(f"ASSERT ok   version platform = {vj.get('platform')} version = {vj.get('version')}")
+          else:
+              print(f"ASSERT FAIL version platform = {vj.get('platform')!r}, expected {expect_platform!r}")
+              failures += 1
+
+          # --- 2) system.snapshot 功能断言 ---
+          lib.sysinformer_call.restype = ctypes.c_void_p
+          lib.sysinformer_call.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+          op = b"system.snapshot"
+          args = b"{}"
+          p = lib.sysinformer_call(op, args)
+          if not p:
+              print("ASSERT FAIL sysinformer_call 返回空指针")
+              sys.exit(1)
+          raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+          lib.sysinformer_free_string(p)
+          try:
+              env = json.loads(raw)
+          except Exception as exc:
+              print(f"ASSERT FAIL 信封不是合法 JSON ({exc})，前 200 字符: {raw[:200]!r}")
+              sys.exit(1)
+          if env.get("ok") is not True:
+              print(f"ASSERT FAIL system.snapshot ok != true: {env.get('error')}")
+              failures += 1
+          else:
+              data = env.get("data") or {}
+              for key in ("cpu", "cpu_cores", "memory", "host", "disks", "networks"):
+                  if key not in data:
+                      print(f"ASSERT FAIL system.snapshot 缺少字段: {key}")
+                      failures += 1
+                  else:
+                      print(f"ASSERT ok   system.snapshot.{key} 存在")
+              host = data.get("host") or {}
+              if not host.get("hostname"):
+                  print("ASSERT FAIL host.hostname 为空 —— 进程信息采集异常")
+                  failures += 1
+              else:
+                  print(f"ASSERT ok   host.hostname = {host.get('hostname')}")
+
+          # --- 3) process.list 功能断言（本条最能证明库真的在工作）---
+          p = lib.sysinformer_call(b"process.list", b"{}")
+          if not p:
+              print("ASSERT FAIL process.list 返回空指针")
+              sys.exit(1)
+          raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+          lib.sysinformer_free_string(p)
+          try:
+              env = json.loads(raw)
+          except Exception as exc:
+              print(f"ASSERT FAIL process.list 信封非法 ({exc})")
+              sys.exit(1)
+          if env.get("ok") is not True:
+              print(f"ASSERT FAIL process.list ok != true: {env.get('error')}")
+              failures += 1
+          else:
+              procs = env.get("data") or []
+              if len(procs) < 1:
+                  print("ASSERT FAIL process.list 为空 —— 至少应有当前进程")
+                  failures += 1
+              else:
+                  print(f"ASSERT ok   process.list 返回 {len(procs)} 个进程")
+                  first = procs[0]
+                  for key in ("pid", "name", "cpu_usage", "rss", "thread_count"):
+                      if key not in first:
+                          print(f"ASSERT FAIL 进程项缺少字段: {key}")
+                          failures += 1
+                  if not any(p_.get("name") for p_ in procs):
+                      print("ASSERT FAIL 所有进程都没有 name")
+                      failures += 1
+
+          # --- 4) 未知 op 必须被显式拒绝，而不是返回空 ---
+          p = lib.sysinformer_call(b"__no_such_op__", b"{}")
+          raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+          lib.sysinformer_free_string(p)
+          env = json.loads(raw)
+          if env.get("ok") is False and env.get("error"):
+              print(f"ASSERT ok   未知 op 被拒绝: {env.get('error')[:60]}")
+          else:
+              print(f"ASSERT FAIL 未知 op 未被拒绝: {raw[:120]!r}")
+              failures += 1
+
+          if failures:
+              print(f"SYNINFORMER_SMOKE_FAILED failures={failures}")
+              sys.exit(1)
+          print("SYSINFORMER_SMOKE_OK")
+          PY
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-sysinformer
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sysinformer'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/sysinformer-native-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 保留 set +e 以便失败时也把日志打出来，但末尾显式 exit "$rc" 透传真实退出码，
+          # 不让 push 失败被尾随的 cat 掩盖成 success（本仓踩过这个坑）。
+          set +e
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/sysinformer-native-artifacts"
+          REPO_DIR="utils-support-native-sysinformer/src/main/resources/native"
+          {
+            mkdir -p "$REPO_DIR"
+            cp -R dl/. "$REPO_DIR/"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$REPO_DIR"
+            if git diff --cached --quiet; then
+              echo "产物与仓库一致，无需提交"
+            else
+              echo "产物有变化（入库产物与本次源码构建不一致）："
+              git diff --cached --stat
+              git commit -m "由 native-sysinformer workflow 自动回填多平台动态库"
+              git push --force \
+                "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+                "HEAD:refs/heads/${BRANCH}"
+            fi
+          } 2>&1 | tee "$LOG"
+          rc=${PIPESTATUS[0]}
+          echo "----- 提交结果（退出码 $rc）-----"
+          cat "$LOG"
+          exit "$rc"
