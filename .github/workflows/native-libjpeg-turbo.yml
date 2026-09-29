@@ -112,16 +112,40 @@ jobs:
           ls -la "$path"
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
-      - name: Check binary architecture and exports (no-JVM leg)
+      - name: Check exports
+        # 不用 nm。Windows 的 Git Bash nm 不解析 PE/COFF（只往 stderr 写 "no symbols"，
+        # 退出码却是 0），所以 `nm -gU ... || nm -g ...` 的兜底是死代码、exports.txt 恒为空。
+        # 改成对二进制做「整 token 精确匹配」：tr 把所有非标识符字节（含 NUL、换行）替换成
+        # 换行，每行恰好一个完整标识符，再用 grep -qxF 要求整行相等。
+        # LC_ALL=C 对 tr 和 sort 都必须加：macOS 的 BSD tr 在 UTF-8 locale 下遇到二进制里的
+        # 非法多字节序列会报 "Illegal byte sequence" 并非 0 退出。Mach-O 的 C 符号带一个
+        # 前导下划线（dyld 解析时剥掉），故匹配集合并入「去掉一个前导下划线」的形式，
+        # 同一份清单四平台通用。
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sym in chua_tj_compress chua_tj_probe chua_tj_decompress chua_tj_free chua_tj_version chua_tj_last_error; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+
+      - name: Check mach-o architecture
         if: matrix.smoke == false
         run: |
           file "$LIB_PATH"
-          nm -gU "$LIB_PATH" > "$RUNNER_TEMP/exports.txt" || nm -g "$LIB_PATH" > "$RUNNER_TEMP/exports.txt"
-          cat "$RUNNER_TEMP/exports.txt"
-          for sym in chua_tj_compress chua_tj_probe chua_tj_decompress chua_tj_free chua_tj_version chua_tj_last_error; do
-            grep -q "$sym" "$RUNNER_TEMP/exports.txt" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
-            echo "ASSERT ok   export $sym"
-          done
           lipo -info "$LIB_PATH"
           lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
           echo "ASSERT ok   mach-o x86_64"
@@ -132,12 +156,181 @@ jobs:
           distribution: temurin
           java-version: '25'
 
-      - name: Runtime smoke (Panama FFM, no project deps)
+      - name: Runtime round trip (Panama FFM, no project deps)
+        # 原来的冒烟引用 src/smoke/java/ChuaTurboJpegSmoke.java，该文件在 81c6781
+        # 被搬到 src/test/java/ChuaTurboJpegExample.java，又在 514316e
+        # （迁入 TurboJpegBridge FFM 绑定）里被删除，现在全仓都不存在，
+        # 于是 run 36501895966 的 windows / linux / darwin-aarch64 三条腿都报
+        # `error: file not found`。darwin-x86_64 绿只是因为它 smoke=false，从没跑到这步。
+        #
+        # TurboJpegBridge 本身不能用在这里：它 import 了
+        # com.chua.common.support.utils.NativeLoader 并用 Lombok 的 @Slf4j，
+        # 依赖 utils-support-common-starter，而这个 workflow 刻意保持零项目依赖。
+        # 所以这里直接用 Panama FFM 绑 6 个 C 导出做一次真实的
+        # 压缩 -> 探头 -> 解码 往返，不引入任何项目类。
         if: matrix.smoke != false
         run: |
-          javac -d target/smoke utils-support-native-libjpeg-turbo/src/smoke/java/ChuaTurboJpegSmoke.java
+          mkdir -p target/smoke
+          cat > target/smoke/TurboJpegRoundTrip.java <<'JAVA'
+          import java.lang.foreign.Arena;
+          import java.lang.foreign.FunctionDescriptor;
+          import java.lang.foreign.Linker;
+          import java.lang.foreign.MemorySegment;
+          import java.lang.foreign.SymbolLookup;
+          import java.lang.foreign.ValueLayout;
+          import java.lang.invoke.MethodHandle;
+          import java.nio.file.Path;
+
+          public final class TurboJpegRoundTrip {
+            private static final int TJPF_RGB = 0;
+            private static final int TJSAMP_444 = 0;
+            private static final int W = 64;
+            private static final int H = 48;
+            private static final int QUALITY = 100;
+
+            private static void check(boolean ok, String what) {
+              if (!ok) {
+                throw new AssertionError("ASSERT FAIL: " + what);
+              }
+              System.out.println("ASSERT ok   " + what);
+            }
+
+            /**
+             * 读一个以 NUL 结尾的 C 字符串。
+             *
+             * <p>downcall 以 ValueLayout.ADDRESS 返回的是**零长** MemorySegment，
+             * 直接 getString(0) 会抛 IndexOutOfBoundsException: No null terminator found，
+             * 因为它拿不到扫描边界。必须先 reinterpret 出一个上界再读。
+             * 上界取 256 字节足够放版本号和错误描述。
+             */
+            private static String cstr(MemorySegment segment, Arena arena) {
+              return segment.reinterpret(256, arena, null).getString(0);
+            }
+
+            public static void main(String[] args) throws Throwable {
+              Path lib = Path.of(args[0]).toAbsolutePath();
+              Linker linker = Linker.nativeLinker();
+              // SymbolLookup 不是 AutoCloseable，它由传入的 Arena 负责生命周期，
+              // 所以只把 Arena 放进 try-with-resources。
+              try (Arena arena = Arena.ofShared()) {
+                SymbolLookup lookup = SymbolLookup.libraryLookup(lib, arena);
+
+                MethodHandle version = linker.downcallHandle(
+                        lookup.find("chua_tj_version").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle lastError = linker.downcallHandle(
+                        lookup.find("chua_tj_last_error").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle free = linker.downcallHandle(
+                        lookup.find("chua_tj_free").orElseThrow(),
+                        FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
+                MethodHandle compress = linker.downcallHandle(
+                        lookup.find("chua_tj_compress").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+                MethodHandle probe = linker.downcallHandle(
+                        lookup.find("chua_tj_probe").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                                ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+                MethodHandle decompress = linker.downcallHandle(
+                        lookup.find("chua_tj_decompress").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.ADDRESS,
+                                ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+                String v = cstr((MemorySegment) version.invokeExact(), arena);
+                check(v != null && v.startsWith("3."), "chua_tj_version = " + v);
+
+                // 确定性平滑渐变，用 4:4:4 无色度抽样 + 质量 100，让往返误差可预期地小。
+                byte[] pixels = new byte[W * H * 3];
+                for (int y = 0; y < H; y++) {
+                  for (int x = 0; x < W; x++) {
+                    int i = (y * W + x) * 3;
+                    pixels[i] = (byte) (x * 4);
+                    pixels[i + 1] = (byte) (y * 5);
+                    pixels[i + 2] = (byte) 128;
+                  }
+                }
+                MemorySegment src = arena.allocateFrom(ValueLayout.JAVA_BYTE, pixels);
+                MemorySegment jpegPtr = arena.allocate(ValueLayout.ADDRESS);
+                MemorySegment jpegSize = arena.allocate(ValueLayout.JAVA_LONG);
+                int rc = (int) compress.invokeExact(src, W, H, W * 3, TJPF_RGB,
+                        QUALITY, TJSAMP_444, 0, jpegPtr, jpegSize);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_tj_compress rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                long n = jpegSize.get(ValueLayout.JAVA_LONG, 0);
+                MemorySegment jpeg = jpegPtr.get(ValueLayout.ADDRESS, 0);
+                check(n > 0, "chua_tj_compress produced " + n + " bytes");
+
+                MemorySegment pw = arena.allocate(ValueLayout.JAVA_INT);
+                MemorySegment ph = arena.allocate(ValueLayout.JAVA_INT);
+                MemorySegment pss = arena.allocate(ValueLayout.JAVA_INT);
+                rc = (int) probe.invokeExact(jpeg, n, pw, ph, pss);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_tj_probe rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                check(pw.get(ValueLayout.JAVA_INT, 0) == W && ph.get(ValueLayout.JAVA_INT, 0) == H,
+                        "chua_tj_probe = " + pw.get(ValueLayout.JAVA_INT, 0) + "x"
+                                + ph.get(ValueLayout.JAVA_INT, 0));
+
+                MemorySegment dstPtr = arena.allocate(ValueLayout.ADDRESS);
+                MemorySegment dw = arena.allocate(ValueLayout.JAVA_INT);
+                MemorySegment dh = arena.allocate(ValueLayout.JAVA_INT);
+                MemorySegment dp = arena.allocate(ValueLayout.JAVA_INT);
+                rc = (int) decompress.invokeExact(jpeg, n, TJPF_RGB, 0, dstPtr, dw, dh, dp);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_tj_decompress rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                MemorySegment dst = dstPtr.get(ValueLayout.ADDRESS, 0);
+                int outW = dw.get(ValueLayout.JAVA_INT, 0);
+                int outH = dh.get(ValueLayout.JAVA_INT, 0);
+                int pitch = dp.get(ValueLayout.JAVA_INT, 0);
+                check(outW == W && outH == H && pitch >= W * 3,
+                        "chua_tj_decompress = " + outW + "x" + outH + " pitch=" + pitch);
+
+                // dst 同样是零长原生指针，按 pitch * height 给出上界后才能按字节索引。
+                MemorySegment out = dst.reinterpret((long) pitch * outH, arena, null);
+                int worst = 0;
+                for (int y = 0; y < outH; y++) {
+                  for (int x = 0; x < outW; x++) {
+                    int si = (y * W + x) * 3;
+                    int di = y * pitch + x * 3;
+                    for (int c = 0; c < 3; c++) {
+                      // 两边都必须先 & 0xFF。ValueLayout.JAVA_BYTE 取回的是 byte，
+                      // 直接参与 int 减法会符号扩展：真值 128 变成 -128、127 仍是 +127，
+                      // 于是 |−128 − 127| = 255，明明只差 1 却报出最大误差 255。
+                      // 这个坑在本地首次跑时真实出现过，掩码打印把它掩盖了。
+                      int got = out.get(ValueLayout.JAVA_BYTE, di + c) & 0xFF;
+                      int want = pixels[si + c] & 0xFF;
+                      int d = Math.abs(got - want);
+                      if (d > worst) {
+                        worst = d;
+                      }
+                    }
+                  }
+                }
+                check(worst <= 8, "round trip max channel delta = " + worst);
+
+                free.invokeExact(jpeg);
+                free.invokeExact(dst);
+                System.out.println("ROUND_TRIP_OK");
+              }
+            }
+          }
+          JAVA
+          javac -d target/smoke target/smoke/TurboJpegRoundTrip.java
           java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
-            -cp target/smoke ChuaTurboJpegSmoke "$(pwd)/$LIB_PATH"
+            -cp target/smoke TurboJpegRoundTrip "$(pwd)/$LIB_PATH"
 
       - name: Stage artifact for upload
         run: |
