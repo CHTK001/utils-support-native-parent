@@ -265,25 +265,40 @@ jobs:
         env:
           ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 关键点：这个步骤以前以一句 cat "$LOG" 结尾（恒返回 0），且 set +e 关掉了
+          # errexit，于是 push 失败时 job 照样报 success。实测 run 36524604806：
+          # 日志里明写 "error: failed to push some refs ... Updates were rejected"，
+          # 而该 job 的结论是 success —— 正是本轮反复出现的那类「假绿」。
+          #
+          # 这里保留 set +e 是为了让失败时也能把日志打出来（诊断优先），
+          # 但末尾显式 exit "$rc" 把真实退出码透传出去，失败会让本 job 变红。
+          # 不能简单删掉 set +e：GitHub 的 bash 默认带 -e -o pipefail，
+          # 那样管道一失败就提前中止，日志和退出码都取不到。
           set +e
-          set +o pipefail
           LOG="$RUNNER_TEMP/commit.log"
           BRANCH="build/sqlite-native-artifacts"
+          REPO_DIR="utils-support-native-sqlite/src/main/resources/native"
           {
-            mkdir -p utils-support-native-sqlite/src/main/resources/native
-            cp -R dl/. utils-support-native-sqlite/src/main/resources/native/
+            mkdir -p "$REPO_DIR"
+            cp -R dl/. "$REPO_DIR/"
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add utils-support-native-sqlite/src/main/resources/native
+            git add "$REPO_DIR"
             if git diff --cached --quiet; then
               echo "产物与仓库一致，无需提交"
             else
-              echo "产物有变化："
+              echo "产物有变化（入库产物与本次源码构建不一致）："
               git diff --cached --stat
               git commit -m "由 native-sqlite workflow 自动回填多平台动态库"
-              git push "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              # --force 与其余模块的 workflow 一致：该分支是 CI 独占的产物暂存分支，
+              # 不加 --force 会在分支已存在且分叉后永久推不上去（本次即如此）。
+              git push --force \
+                "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
                 "HEAD:refs/heads/${BRANCH}"
             fi
           } 2>&1 | tee "$LOG"
-          echo "----- 提交结果 -----"
+          rc=${PIPESTATUS[0]}
+          echo "----- 提交结果（退出码 $rc）-----"
           cat "$LOG"
+          exit "$rc"
+
