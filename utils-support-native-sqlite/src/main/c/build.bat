@@ -55,10 +55,15 @@ REM ==================== 2. 编译 DLL ====================
 
 echo [sqlite3_hook] 构建 %BUILD_TYPE% 版本 ...
 
+REM 加 /Brepro（可重现构建）。实测两次 CI 构建出的 DLL 只差 PE 头偏移
+REM [256,260) 的 COFF TimeDateStamp 与它在调试目录里的那一份副本，各 2 字节，
+REM 其余字节完全相同 —— 也就是代码相同、只差一个构建时刻的秒数。不加这个开关，
+REM 每次构建的产物都与入库产物不同，commit_back 会永远报「产物有变化」。
+REM /Brepro 让链接器改用确定性时间戳（由内容派生），VS 2019 16.4+ / VS 2022 支持。
 if /i "%BUILD_TYPE%"=="debug" (
-    set CFLAGS=/Od /Zi /MDd
+    set CFLAGS=/Od /Zi /MDd /Brepro
 ) else (
-    set CFLAGS=/O2 /MD
+    set CFLAGS=/O2 /MD /Brepro
 )
 
 REM 把真正展开的命令行打出来。之前 cl 报 D8003 时日志里看不到命令行，
