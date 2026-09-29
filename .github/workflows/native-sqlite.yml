@@ -1,0 +1,289 @@
+name: native-sqlite
+
+# 四平台交叉编译 + 导出符号断言 + 运行时 dlopen/dlsym 冒烟（自包含，无项目依赖）。
+#
+# 本模块此前完全没有 CI：只有入库的四平台预编译产物，没有任何 workflow 会重建
+# 它们，产物与源码是否一致无从验证。产物一旦腐化只能靠人眼发现。
+#
+# 本模块是 C 模块（src/main/c/），不是 Rust：Windows 走 build.bat + MSVC，
+# linux/darwin 走 build.sh + gcc/clang。源文件分工见 build.sh 头部注释。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把四平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-sqlite/**'
+      - '.github/workflows/native-sqlite.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-sqlite/**'
+
+concurrency:
+  group: sqlite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            lib: sqlite3_hook.dll
+            # `file` 对 PE 的描述串
+            file_expect: 'PE32\+.*x86-64'
+            # x86_64 dylib 无法被 arm64 runner 的 python dlopen，故不做运行时冒烟
+            smoke: true
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            lib: libsqlite3_hook.so
+            file_expect: 'ELF 64-bit.*x86-64'
+            smoke: true
+          - platform: darwin-x86_64
+            # macos-15 主机是 arm64，x86_64 dylib 由 build.sh 的 clang -arch x86_64
+            # 交叉编译产出；本机 python 是 arm64，装不上 x86_64 dylib，这一腿只校验
+            # 架构与导出
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: x86_64
+            lib: libsqlite3_hook.dylib
+            file_expect: 'Mach-O 64-bit.*x86_64'
+            smoke: false
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: aarch64
+            lib: libsqlite3_hook.dylib
+            # `file` 把 arm64 写成 arm64，而 build.sh 归一化后的目录名是 aarch64
+            file_expect: 'Mach-O 64-bit.*arm64'
+            smoke: true
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          if [ "${{ matrix.build_os }}" = "windows" ]; then
+            cl 2>&1 | head -2 || true
+          elif [ "${{ matrix.build_os }}" = "darwin" ]; then
+            clang --version | head -1
+            uname -m
+          else
+            gcc --version | head -1
+          fi
+          python3 --version
+
+      - name: Install build dependencies
+        # sqlite3_hook.c 在非 _WIN32 分支 include <liburing.h>，ubuntu-22.04 镜像
+        # 不自带 liburing-dev，不装会在编译阶段报缺头文件。
+        if: matrix.build_os == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq liburing-dev
+          dpkg -l liburing-dev | tail -1
+
+      - name: Build (MSVC via build.bat)
+        if: matrix.build_os == 'windows'
+        shell: cmd
+        run: |
+          call utils-support-native-sqlite\src\main\c\build.bat release
+
+      - name: Build (gcc / clang via build.sh)
+        if: matrix.build_os != 'windows'
+        run: |
+          chmod +x utils-support-native-sqlite/src/main/c/build.sh
+          ./utils-support-native-sqlite/src/main/c/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}" release
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-sqlite/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "ASSERT FAIL missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Check exports
+        # 不用 nm：Windows Git Bash 的 nm 不解析 PE/COFF（只往 stderr 写
+        # "no symbols"，退出码却是 0），所以 `nm -gU ... || nm -g ...` 的兜底是
+        # 死代码、exports.txt 恒为空。改成对二进制做「整 token 精确匹配」：
+        # tr 把所有非标识符字节（含 NUL、换行）替换成换行，每行恰好一个完整
+        # 标识符，再用 grep -qxF 要求整行相等。
+        # LC_ALL=C 对 tr 和 sort 都必须加：macOS 的 BSD tr 在 UTF-8 locale 下
+        # 遇到二进制里的非法多字节序列会报 "Illegal byte sequence" 并非 0 退出。
+        # Mach-O 的 C 符号带一个前导下划线（dyld 解析时剥掉），故匹配集合并入
+        # 「去掉一个前导下划线」的形式，同一份清单四平台通用。
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sym in hook_open hook_wait hook_exec hook_poll hook_close \
+                     hook_open_async hook_exec_async hook_close_async; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+
+      - name: Check architecture
+        # 直读容器头而不是信扩展名：库名与实际架构不符时，只有二进制头说了算。
+        run: |
+          file "$LIB_PATH"
+          file "$LIB_PATH" | grep -qE '${{ matrix.file_expect }}' \
+            || { echo "ASSERT FAIL architecture mismatch, expected /${{ matrix.file_expect }}/"; exit 1; }
+          echo "ASSERT ok   architecture"
+          if [ "${{ matrix.build_os }}" = "darwin" ]; then
+            lipo -info "$LIB_PATH"
+            lipo -archs "$LIB_PATH"
+          fi
+
+      - name: Runtime smoke (dlopen + dlsym + NULL-guard)
+        # 整 token 匹配只证明名字出现在文件里，不证明库能加载、动态链接器能解析
+        # 该名字、函数可调用。这一步补上这三件事。
+        # 只用 NULL 参数调用：8 个导出在 C 源码里都先做空指针检查再返回，
+        # 因此不需要任何数据库或 fixture，也不会改动任何状态。
+        if: matrix.smoke != false
+        run: |
+          python3 - "$LIB_PATH" <<'PY'
+          import ctypes
+          import sys
+
+          SQLITE_ERROR = 1
+          lib_path = sys.argv[1]
+          try:
+              lib = ctypes.CDLL(lib_path)
+          except OSError as exc:
+              print(f"ASSERT FAIL dlopen: {exc}")
+              sys.exit(1)
+          print(f"ASSERT ok   dlopen {lib_path}")
+
+          failures = 0
+          for name, expect, nargs in [
+              ("hook_open", None, 1),
+              ("hook_wait", -1, 4),
+              ("hook_poll", 0, 3),
+              ("hook_exec", SQLITE_ERROR, 2),
+              ("hook_close", None, 1),
+              ("hook_open_async", None, 3),
+              ("hook_exec_async", SQLITE_ERROR, 2),
+              ("hook_close_async", None, 1),
+          ]:
+              try:
+                  fn = getattr(lib, name)
+              except AttributeError:
+                  print(f"ASSERT FAIL dlsym missing: {name}")
+                  failures += 1
+                  continue
+              if expect is None:
+                  print(f"ASSERT ok   dlsym {name}")
+                  continue
+              try:
+                  got = fn(*([None] * nargs))
+              except Exception as exc:
+                  print(f"ASSERT FAIL call {name}: {exc!r}")
+                  failures += 1
+                  continue
+              if got != expect:
+                  print(f"ASSERT FAIL {name}(NULL...) = {got}, expected {expect}")
+                  failures += 1
+              else:
+                  print(f"ASSERT ok   {name}(NULL...) = {got}")
+
+          if failures:
+              print(f"SQLITE_SMOKE_FAILED failures={failures}")
+              sys.exit(1)
+          print("SQLITE_SMOKE_OK")
+          PY
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-sqlite
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    # always() 保证部分平台失败时成功平台的产物仍能回填。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-sqlite'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/sqlite-native-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/sqlite-native-artifacts"
+          {
+            mkdir -p utils-support-native-sqlite/src/main/resources/native
+            cp -R dl/. utils-support-native-sqlite/src/main/resources/native/
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add utils-support-native-sqlite/src/main/resources/native
+            if git diff --cached --quiet; then
+              echo "产物与仓库一致，无需提交"
+            else
+              echo "产物有变化："
+              git diff --cached --stat
+              git commit -m "由 native-sqlite workflow 自动回填多平台动态库"
+              git push "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+                "HEAD:refs/heads/${BRANCH}"
+            fi
+          } 2>&1 | tee "$LOG"
+          echo "----- 提交结果 -----"
+          cat "$LOG"
