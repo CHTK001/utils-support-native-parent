@@ -147,7 +147,6 @@ build_rust_module "filestorage"  "file_storage"
 build_rust_module "smb"          "rust_smb_server"
 build_rust_module "ffmpeg"       "ffmpeg_rust"
 build_rust_module "metrics"      "metrics_native"
-build_rust_module "wechat"       "wechat_wcdb"
 
 # --- C ???? ---
 build_c_module "sqlite" "sqlite3_hook"
