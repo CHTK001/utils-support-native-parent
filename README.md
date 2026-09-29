@@ -19,7 +19,6 @@
 | `utils-support-native-nmap` | Nmap 集成 native 库（JNI） | 1.8 | `utils-support-nmap-starter` |
 | `utils-support-native-smb` | SMB2/3 服务端 Rust native 库（smb-server crate，FFM） | **25** | `utils-support-smb-starter` |
 | `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | 1.8 | `utils-support-sqlite-starter`、`spring-api-support-system-starter` |
-| `utils-support-native-uia` | Windows UI 自动化原语（FFM） | **25** | `utils-support-native-wechat` |
 | `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI） | 1.8 | `utils-support-example-starter` |
 | `utils-support-native-video-processor` | Video HLS 转码 Rust native 库（JNI） | 1.8 | `utils-support-video-processor-starter` |
 | `utils-support-native-wechat` | 微信 4.x WCDB 原生读取（JNI + FFM） | **25** | 无 |

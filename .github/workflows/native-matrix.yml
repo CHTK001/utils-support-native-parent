@@ -1,7 +1,7 @@
 name: native-matrix
 
 # 其余 native 模块的四平台交叉编译。与既有的一模块一 workflow
-# （native-libjpeg-turbo / native-uia / native-wechat / native-filesearch /
+# （native-libjpeg-turbo / native-wechat / native-filesearch /
 #   native-nmap / native-datarecovery）互补，覆盖尚未有 CI 的模块。
 #
 # 产物回填到分支 build/native-matrix-artifacts，由维护者合并到 main。

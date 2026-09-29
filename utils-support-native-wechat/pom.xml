@@ -22,12 +22,6 @@
             <artifactId>utils-support-common-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- 微信 3.9.x 的会话轮询与回信基于通用 UIA 原语 -->
-        <dependency>
-            <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-uia</artifactId>
-            <version>${project.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
