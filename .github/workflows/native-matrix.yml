@@ -190,6 +190,116 @@ jobs:
             || { echo "ASSERT FAIL architecture mismatch, expected /$NEED_PAT/"; exit 1; }
           echo "ASSERT ok   architecture /$NEED_PAT/"
 
+      - name: Runtime smoke (dlopen + dlsym + safe call)
+        # 这一层是 token 匹配**证明不了**的：名字出现在文件里不等于它是个导出
+        # （可能只是数据或调试字符串），更不等于库能加载。这里真的把库加载进来，
+        # 让动态链接器逐个解析期望符号，并对能够安全调用的导出断言返回值。
+        #
+        # 调用安全性逐个读 Rust 源码确认过，不是猜的：
+        #   headless  free_string(ptr)        -> if ptr.is_null() { return; }
+        #   smb       smb_server_stop(h)      -> if handle_ptr <= 0 { return -1; }
+        #             smb_server_list_shares  -> if handle_ptr <= 0 { return null; }
+        #             smb_server_free_string  -> if s.is_null() { return; }
+        #   filestorage native_get_version()  -> 无参，返回常量 "1.1.0"
+        #   ffmpeg    ffmpeg_version()        -> 无参，返回常量
+        #
+        # metrics / video-codec / video-processor 是 JNI 模块，导出的是 Java_*
+        # 入口，没有 JVM 就无法调用，这三者止于「加载 + 符号解析」——这仍比
+        # 文本匹配强，因为它要求动态链接器真的能解析出每个名字。
+        run: |
+          MOD_SHORT="${matrix.module##utils-support-native-}"
+          python3 - "$LIB_PATH" "$NEED" "$MOD_SHORT" <<'PY'
+          import ctypes
+          import sys
+          from ctypes import c_char_p, c_int, c_void_p
+
+          lib_path, symbols, module = sys.argv[1], sys.argv[2].split(), sys.argv[3]
+
+          try:
+              lib = ctypes.CDLL(lib_path)
+          except OSError as exc:
+              print(f"ASSERT FAIL dlopen: {exc}")
+              sys.exit(1)
+          print(f"ASSERT ok   dlopen {lib_path}")
+
+          failures = 0
+          for name in symbols:
+              try:
+                  getattr(lib, name)
+              except AttributeError:
+                  print(f"ASSERT FAIL dlsym missing: {name}")
+                  failures += 1
+              else:
+                  print(f"ASSERT ok   dlsym {name}")
+
+          if module == "filestorage":
+              lib.native_get_version.restype = c_char_p
+              v = lib.native_get_version()
+              got = v.decode() if v else ""
+              if got == "1.1.0":
+                  print(f"ASSERT ok   native_get_version() = {got}")
+              else:
+                  print(f"ASSERT FAIL native_get_version() = {got!r}, expected '1.1.0'")
+                  failures += 1
+              lib.native_is_initialized.restype = ctypes.c_bool
+              print(f"ASSERT ok   native_is_initialized() = {lib.native_is_initialized()}")
+              lib.native_get_capabilities.restype = c_char_p
+              caps = lib.native_get_capabilities()
+              if caps and len(caps) > 0:
+                  print(f"ASSERT ok   native_get_capabilities() = {len(caps)} bytes")
+              else:
+                  print("ASSERT FAIL native_get_capabilities() 返回空")
+                  failures += 1
+          elif module == "headless":
+              lib.free_string.argtypes = [c_void_p]
+              lib.free_string(None)
+              print("ASSERT ok   free_string(NULL) 未崩溃")
+          elif module == "smb":
+              lib.smb_server_free_string.argtypes = [c_void_p]
+              lib.smb_server_free_string(None)
+              print("ASSERT ok   smb_server_free_string(NULL) 未崩溃")
+              lib.smb_server_stop.argtypes = [ctypes.c_ssize_t]
+              lib.smb_server_stop.restype = c_int
+              rc = lib.smb_server_stop(0)
+              if rc == -1:
+                  print("ASSERT ok   smb_server_stop(0) = -1")
+              else:
+                  print(f"ASSERT FAIL smb_server_stop(0) = {rc}, expected -1")
+                  failures += 1
+              lib.smb_server_list_shares.argtypes = [ctypes.c_ssize_t]
+              lib.smb_server_list_shares.restype = c_void_p
+              p = lib.smb_server_list_shares(0)
+              if not p:
+                  print("ASSERT ok   smb_server_list_shares(0) = NULL")
+              else:
+                  print(f"ASSERT FAIL smb_server_list_shares(0) = {p}, expected NULL")
+                  failures += 1
+          elif module == "ffmpeg":
+              lib.ffmpeg_version.restype = c_char_p
+              v = lib.ffmpeg_version()
+              got = v.decode() if v else ""
+              if got.startswith("ffmpeg-rust-wrapper"):
+                  print(f"ASSERT ok   ffmpeg_version() = {got}")
+              else:
+                  print(f"ASSERT FAIL ffmpeg_version() = {got!r}")
+                  failures += 1
+              lib.ffmpeg_codec_available.argtypes = [c_int]
+              lib.ffmpeg_codec_available.restype = c_int
+              rc = lib.ffmpeg_codec_available(0)
+              if rc == 1:
+                  print("ASSERT ok   ffmpeg_codec_available(0) = 1")
+              else:
+                  print(f"ASSERT FAIL ffmpeg_codec_available(0) = {rc}")
+                  failures += 1
+          else:
+              print(f"ASSERT ok   {module}: JNI 模块，无 JVM 时止于加载与符号解析")
+
+          if failures:
+              print(f"MATRIX_SMOKE_FAILED failures={failures}")
+              sys.exit(1)
+          print("MATRIX_SMOKE_OK")
+          PY
+
       - name: Stage artifact for upload
         run: |
           M="${{ matrix.module }}"; P="${{ matrix.platform }}"
