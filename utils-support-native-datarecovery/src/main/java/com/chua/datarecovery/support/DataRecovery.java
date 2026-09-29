@@ -1,5 +1,8 @@
 package com.chua.datarecovery.support;
 
+import com.chua.common.support.utils.NativeUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -10,7 +13,7 @@ import java.util.concurrent.CompletableFuture;
 /**
  * 数据恢复的设备扫描与文件恢复入口，通过 JNI 调用 {@code data_recovery_ffi}。
  *
- * <p>静态块用 {@link com.chua.common.support.utils.NativeUtils#loadFromClasspath(String)}
+ * <p>静态块用 {@link NativeUtils#loadFromClasspath(String)}
  * 加载原生库；{@code nativeScan} / {@code nativeScanAndRecover} / {@code nativeRecover}
  * 为私有原生方法。</p>
  *
@@ -45,7 +48,7 @@ import java.util.concurrent.CompletableFuture;
 public class DataRecovery {
 
     static {
-        com.chua.common.support.utils.NativeUtils.loadFromClasspath("data_recovery_ffi");
+        NativeUtils.loadFromClasspath("data_recovery_ffi");
     }
 
     /**
@@ -567,8 +570,8 @@ public class DataRecovery {
      */
     private static <T> T parse(String json, Class<T> clazz) {
         try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            mapper.setPropertyNamingStrategy(com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE);
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
             return mapper.readValue(json, clazz);
         } catch (Exception e) {
             throw new RecoveryException("Parse JSON failed: " + json, e);
