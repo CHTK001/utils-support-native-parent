@@ -195,6 +195,10 @@ jobs:
           echo "ASSERT ok   architecture /$NEED_PAT/"
 
       - name: Runtime smoke (dlopen + dlsym + safe call)
+        # darwin-x86_64 一腿跳过：该腿在 arm64 runner 上交叉编译出 x86_64 dylib，
+        # 而本机 python 是 arm64，无法 dlopen 异架构库。与其它 workflow 的
+        # smoke=false 处理一致；该腿仍有导出与架构断言。
+        if: matrix.platform != 'darwin-x86_64'
         # 这一层是 token 匹配**证明不了**的：名字出现在文件里不等于它是个导出
         # （可能只是数据或调试字符串），更不等于库能加载。这里真的把库加载进来，
         # 让动态链接器逐个解析期望符号，并对能够安全调用的导出断言返回值。
@@ -218,10 +222,26 @@ jobs:
           MOD_FULL="${{ matrix.module }}"
           MOD_SHORT="${MOD_FULL##utils-support-native-}"
           echo "MOD_SHORT=$MOD_SHORT"
-          python3 - "$LIB_PATH" "$NEED" "$MOD_SHORT" <<'PY'
+          # -X utf8 必须加：CI 的 Windows Python 默认 stdout 编码是 cp1252（英文
+          # locale），接下来要打印的中文断言文案会让 print 抛 UnicodeEncodeError，
+          # 于是 dlopen/dlsym 全都过了、却崩在打印上。实测 5 个模块挂、2 个过，
+          # 分界正是「成功路径是否打印中文」。本机测不出来是因为本机是中文 locale
+          # （cp936 能编中文）—— 典型的「本地过、CI 不过」。
+          python3 -X utf8 - "$LIB_PATH" "$NEED" "$MOD_SHORT" <<'PY'
           import ctypes
           import sys
           from ctypes import c_char_p, c_int, c_void_p
+
+          # 强制 stdout 用 UTF-8。CI 的 Windows Python 默认按 locale 编码输出
+          # （英文 locale -> cp1252），编不出断言文案里的中文，print 会抛
+          # UnicodeEncodeError，表现为「dlopen/dlsym 全过、却崩在打印上」。
+          # 命令行已加 -X utf8；这里再显式 reconfigure 一次，因为
+          # PYTHONIOENCODING 会覆盖 UTF-8 模式，而 reconfigure 覆盖一切。
+          try:
+              sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+              sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+          except Exception:
+              pass
 
           lib_path, symbols, module = sys.argv[1], sys.argv[2].split(), sys.argv[3]
 
