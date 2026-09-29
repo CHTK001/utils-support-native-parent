@@ -82,26 +82,67 @@ jobs:
 
       - name: Check exports and architecture
         run: |
-          # nm 只用于诊断：Windows Git Bash 的 nm 不解析 PE/COFF（读出空表），
-          # 剥符号的 Linux 构建则报 "no symbols"。断言改用字节串搜索，
-          # 对 PE / ELF / Mach-O 一律有效。
-          { nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || echo "(nm unavailable)"; } \
-            > "$RUNNER_TEMP/exports.txt" || true
+          # 不用 nm 做断言。Windows Git Bash 的 nm 不解析 PE/COFF（读出空表），
+          # 剥符号的 Linux 构建则报 "no symbols"，而 `nm -gU ... || nm -g ...`
+          # 的兜底是死代码——nm -gU 退出码是 0。
+          #
+          # 原来那版断言用 `grep -aqF` 字节串搜索，**四条腿全是假绿**：
+          # 期望清单写的是 19 个裸方法名（scanTcpPorts / getVersion ...），
+          # 而本模块是 JNI 模块，真实导出是
+          # Java_com_chua_nmap_support_bridge_RustNmapBridge_<方法名>，
+          # 裸名恰好是它的尾部子串，子串搜索一律命中。换句话说这 19 条期望
+          # 从来没有验证过任何东西：把整个方法名改掉、甚至只留一个含该子串的
+          # 无辜符号，断言照样通过。
+          #
+          # 改成整 token 精确匹配：tr 把所有非标识符字节（含 NUL、换行）替换成换行，
+          # 每行恰好一个完整标识符，再用 grep -qxF 要求整行相等。同一批方法名里
+          # `pingHost` 恰有同名裸 token（多半出现在某个诊断字符串里），
+          # 整 token 匹配反而能暴露这种「命中但不是导出」的情况。
+          # LC_ALL=C 对 tr 和 sort 都必须加：macOS 的 BSD tr 在 UTF-8 locale 下
+          # 遇到二进制里的非法多字节序列会报 "Illegal byte sequence" 并非 0 退出。
+          # Mach-O 的 C 符号带一个前导下划线（dyld 解析时剥掉），故匹配集合
+          # 并入「去掉一个前导下划线」的形式，同一份清单四平台通用。
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
           {
-            echo "### ${{ matrix.platform }} 导出符号 (nm，仅诊断)"
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
             echo '```'
-            head -40 "$RUNNER_TEMP/exports.txt"
+            head -40 "$RUNNER_TEMP/symbols.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          # 清单与源码交叉核对过：RustNmapBridge.java 里 18 个 public static native、
+          # lib.rs 里 18 个 #[no_mangle]、这里 18 条断言，三者一一对应。
           # 其中 detectService / detectOs / resolveHostname / isValidSubnet /
-          # getVersion 五个曾被源码损坏吞掉 #[no_mangle] 而不再导出，此处作为回归守卫
-          for sym in scanTcpPorts scanTcpPortRange scanUdpPorts scanSingleTcpPort \
-                     pingHost scanSubnet scanIpRange detectService getBanner detectOs \
-                     getTtl resolveHostname reverseDns isValidIp isValidSubnet \
-                     getLocalIps getLocalMac getVersion; do
-            grep -aqF "$sym" "$LIB_PATH" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
-            echo "ASSERT ok   export $sym"
+          # getVersion 五个曾被源码损坏吞掉 #[no_mangle] 而不再导出，此处作为回归守卫。
+          NEED="Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpPorts \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_scanTcpPortRange \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_scanUdpPorts \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSingleTcpPort \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_pingHost \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_scanSubnet \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_scanIpRange \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_detectService \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_getBanner \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_detectOs \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_getTtl \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_resolveHostname \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_reverseDns \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidIp \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_isValidSubnet \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocalIps \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_getLocalMac \
+                Java_com_chua_nmap_support_bridge_RustNmapBridge_getVersion"
+          for sym in $NEED; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
           done
 
           if [ "${{ matrix.build_os }}" = "darwin" ] && [ "${{ matrix.smoke }}" = "false" ]; then

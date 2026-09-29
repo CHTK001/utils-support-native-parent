@@ -93,42 +93,63 @@ jobs:
           ls -la "$path"
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
-      - name: Export list (for diagnostics)
-        run: |
-          {
-            echo "### ${{ matrix.platform }} 导出符号"
-            echo '```'
-            nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Check exports
         # 四条腿都必须断言。早期把断言挂在 `matrix.smoke == false` 上，
         # 而该条件只有 darwin-x86_64 一腿为真，导致 windows / linux /
         # darwin-aarch64 从不校验导出——linux-x86_64 的 libfile_search.so
         # 因此长期带着 7 个已从源码删除的坏 JNI 导出而无人发现。
         #
-        # 断言用字节串搜索而非 nm：Windows Git Bash 的 nm 不解析 PE/COFF
-        # （读出空表），本模块的 Linux release 构建又剥掉了符号表
-        # （nm 报 "no symbols"）。字节串搜索对 PE / ELF / Mach-O 一律有效。
+        # 不用 nm 做断言：Windows Git Bash 的 nm 不解析 PE/COFF（读出空表），
+        # 本模块的 Linux release 构建又剥掉了符号表（nm 报 "no symbols"），
+        # 而 `nm -gU ... || nm -g ...` 的兜底是死代码——nm -gU 退出码是 0。
+        #
+        # 原来那版断言用 `grep -aqF` 字节串搜索，对 PE / ELF / Mach-O 确实都"有效"，
+        # 但它是**子串**匹配：期望名若是别的标识符的一部分就会误判为存在。
+        # 改成整 token 精确匹配：tr 把所有非标识符字节（含 NUL、换行）替换成换行，
+        # 每行恰好一个完整标识符，再用 grep -qxF 要求整行相等。
+        # LC_ALL=C 对 tr 和 sort 都必须加：macOS 的 BSD tr 在 UTF-8 locale 下
+        # 遇到二进制里的非法多字节序列会报 "Illegal byte sequence" 并非 0 退出。
+        # Mach-O 的 C 符号带一个前导下划线（dyld 解析时剥掉），故匹配集合
+        # 并入「去掉一个前导下划线」的形式，同一份清单四平台通用。
         run: |
-          { nm -gU "$LIB_PATH" 2>/dev/null || nm -g "$LIB_PATH" 2>/dev/null || echo "(nm unavailable)"; } \
-            > "$RUNNER_TEMP/exports.txt" || true
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
           for sym in fast_get_version fast_search_cancel fast_search_by_name \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawSearchByName \
                      Java_com_chua_filesearch_support_bridge_RustFileSearchBridge__rawGetTree; do
-            grep -aqF "$sym" "$LIB_PATH" || { echo "ASSERT FAIL missing export: $sym"; exit 1; }
-            echo "ASSERT ok   export $sym"
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
           done
-          # 已移除的那批坏 JNI 符号不得再出现（getVersion 曾令 JVM 崩溃）
+
+          # 已移除的那批坏 JNI 符号不得再出现（getVersion 曾令 JVM 崩溃）。
+          # 这里必须同时查「完整 JNI 名」和「裸名」两种形式：换成整 token 匹配后，
+          # 一个残留符号的 token 是 Java_com_chua_..._RustFileSearchBridge_getVersion，
+          # 与裸名 RustFileSearchBridge_getVersion 是**两个不同的 token**。
+          # 只查裸名的话这条守卫会变成永远不可能触发的空断言，等于把回归防护拆了。
           for gone in RustFileSearchBridge_getVersion RustFileSearchBridge_cancel \
                       RustFileSearchBridge_searchByName RustFileSearchBridge_getTree \
                       RustFileSearchBridge_searchBySize RustFileSearchBridge_searchByPath; do
-            if grep -aqF "$gone" "$LIB_PATH"; then
-              echo "ASSERT FAIL 已移除的 JNI 符号仍存在: $gone"
-              exit 1
-            fi
-            echo "ASSERT ok   removed $gone"
+            for cand in "$gone" "Java_com_chua_filesearch_support_bridge_$gone"; do
+              if grep -qxF -- "$cand" "$RUNNER_TEMP/symbols_match.txt"; then
+                echo "ASSERT FAIL 已移除的 JNI 符号仍存在: $cand"
+                exit 1
+              fi
+              echo "ASSERT ok   removed $cand"
+            done
           done
 
       - name: Check architecture (macOS Intel cross leg)
