@@ -172,6 +172,24 @@ jobs:
             echo "ASSERT ok   mach-o x86_64"
           fi
 
+      - name: Check architecture
+        # 原先只有 darwin-x86_64 一腿通过 lipo 校验架构，windows / linux /
+        # darwin-aarch64 三腿**完全没有架构断言** —— 构建脚本把架构参数接错、
+        # 或产物被写成了别的架构，都不会被 CI 发现。这里补一条四平台通用断言，
+        # 直读容器头（`file` 的判定来自二进制头而非扩展名）。
+        run: |
+          file "$LIB_PATH"
+          case "${{ matrix.platform }}" in
+            windows-x86_64) NEED_PAT='PE32\+.*x86-64' ;;
+            linux-x86_64)   NEED_PAT='ELF 64-bit.*x86-64' ;;
+            darwin-x86_64)  NEED_PAT='Mach-O 64-bit.*x86_64' ;;
+            darwin-aarch64) NEED_PAT='Mach-O 64-bit.*arm64' ;;
+            *) echo "ASSERT FAIL 未定义平台 ${{ matrix.platform }} 的期望架构"; exit 1 ;;
+          esac
+          file "$LIB_PATH" | grep -qE "$NEED_PAT" \
+            || { echo "ASSERT FAIL architecture mismatch, expected /$NEED_PAT/"; exit 1; }
+          echo "ASSERT ok   architecture /$NEED_PAT/"
+
       - name: Stage artifact for upload
         run: |
           M="${{ matrix.module }}"; P="${{ matrix.platform }}"
