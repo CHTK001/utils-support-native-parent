@@ -72,3 +72,51 @@ java --add-modules jdk.compiler -cp tools/fqnaudit/out FqnAudit <源码根目录
 - 不做跨文件解析，因此不判断某个 `import` 是否真的存在 —— 工具报的是
   「这处引用写成了全限定形式」，这与「能否改用 import + 短名」等价，因为
   语法树里能写成点分链的包前缀必然是可 import 的。
+
+---
+
+# FqnFix —— 自动修复器
+
+`FqnFix` 与 `FqnAudit` 共用同一套 AST 判定，在**同一批精确字符区间**上做替换。
+
+```bash
+javac -encoding UTF-8 -d tools/fqnaudit/out tools/fqnaudit/FqnAudit.java tools/fqnaudit/FqnFix.java
+java --add-modules jdk.compiler -cp tools/fqnaudit/out FqnFix <源码根>          # 干跑，只报告
+java --add-modules jdk.compiler -cp tools/fqnaudit/out FqnFix <源码根> --apply  # 应用
+```
+
+**为什么必须走 AST 区间而不是文本替换**：类名可能写在字符串里当查表键
+（如 `reg("yolov8n", "com.chua...YoloV8nTranslator", ...)`），那是 AGENTS.md 豁免的
+文本内容。文本替换会改坏它，而**改坏的字符串仍然编译通过**，只在运行期找不到类。
+
+## 处理规则
+
+| 情形 | 动作 |
+|---|---|
+| 同包引用 | 只去限定，不加 import |
+| 跨包引用 | 替换为短名 + 补 import |
+| 已 import 同类型 | 不重复加 |
+| 同短名指向不同包（含文件内新引入的 import 之间） | 判为冲突，**整文件跳过**，绝不猜 |
+
+## 使用记录：它在开发中自己犯过的错（都靠编译/干跑挡住）
+
+1. 只比对「已有 import 的短名」存在性 → 把 172 处**已 import 的类型**误报为冲突
+2. 判定「最长已知包前缀之后必须紧跟大写段」→ 当已知前缀短于真实包名时**漏报**，
+   1045 处被漏成 115 处。改为「在链中找第一个大写开头的段作为类型名」
+3. 把「包名」当成 import 目标 → 生成 `import com.a.b;` 这种**非法语句**，
+   `clean compile` 立刻失败（已回滚修正）
+4. 未排除已存在的 import → 产生 **34 条重复 import**（26 文件）
+
+## 使用后的强制验证
+
+1. **`clean compile`** —— 唯一的安全网。上述第 3 类错误只有编译能发现
+2. **字符串字面量计数比对** —— 改坏的字符串**编译不会失败**，必须单独比对
+   `"com.chua...Xxx"` 这类字面量的条数在 HEAD 与工作区是否一致
+3. **`FqnAudit` 复扫** —— 应为 `FQN_HITS_TOTAL = 0`
+4. **编码体检** —— 批量改写后必查 `BOM=0` / strict UTF-8 / `U+FFFD=0`，
+   并**比对行尾是否被静默翻转**（翻转会把百行 diff 变成整文件 diff）
+
+## 实战规模
+
+首次应用：`deeplearning-onnx-starter`，**107 文件 / 1045 处**，
+`clean compile` 280 源文件 BUILD SUCCESS，字符串字面量 225 处未动。
