@@ -13,13 +13,23 @@
     <description>Data recovery Rust native 库</description>
     <dependencies>
         <!-- DataRecovery 的静态块用 NativeUtils.loadFromClasspath 加载动态库。
-             注意：它是内联全限定名调用的（没有 import），所以「扫 import 判断依赖
+             注意：它原先是内联全限定名调用的（没有 import），所以「扫 import 判断依赖
              是否在用」这类检测会误判成死依赖。删掉本依赖后 clean compile 直接报
-             「找不到 com.chua.common.support.utils」。 -->
+             「找不到 com.chua.common.support.utils」。现已改为 import + 短名。 -->
         <dependency>
             <groupId>com.chua</groupId>
             <artifactId>utils-support-common-starter</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- 待决：DataRecovery 的 parse() 直接用了 jackson-databind
+             （ObjectMapper / PropertyNamingStrategies），但本模块未声明它，
+             一直靠上面 common-starter 的传递依赖带进来
+             （dependency:tree 解析为 com.fasterxml.jackson.core:jackson-databind:2.21.5，
+               由上游 dependencyManagement 统一管版本，common-starter 自己也没写 <version>）。
+             本仓库根 pom 没有 dependencyManagement，也没有直接声明 jackson 的先例，
+             在此处钉 2.21.5 会制造第二处版本真相源、上游一升级就与传递版本漂移，
+             故暂不声明。要修应由上游补 dependencyManagement，或在本仓建一份
+             与 native-parent 同级的版本管理段，两条路都属跨仓决策。 -->
+
     </dependencies>
 </project>
