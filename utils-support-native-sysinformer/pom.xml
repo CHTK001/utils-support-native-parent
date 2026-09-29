@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>utils-support-native-sysinformer</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native SysInformer</name>
+    <description>
+        System Informer 能力的跨平台可移植子集：系统与进程内省、按需深度查询、事件驱动通知。
+        四平台（windows-x86_64 / linux-x86_64 / darwin-x86_64 / darwin-aarch64）原生动态库 + Java FFM 绑定。
+    </description>
+
+    <properties>
+        <lombok.version>1.18.46</lombok.version>
+        <!--
+          本模块的公开 API 返回 JSON，绑定类需要解析它，因此是**直接使用** jackson，
+          必须显式声明。但 native-parent 的根 pom 没有 dependencyManagement，
+          无法像 utils/spring 侧那样省略 version，只能在此钉住。
+          钉版本会引入第二处版本真相源：上游升级时这里不会自动跟随。
+          平台侧（spring-support 等）若有自己的 BOM，消费方构建时以消费方为准，
+          故对本仓外的影响有限；但本仓内应尽快在 native-parent 建 dependencyManagement
+          统一，这是已知待办（见 FINDINGS-20260929.md 第 4 项）。
+          版本取平台当前解析值 2.21.5，与 utils-support-common-starter 传递来的保持一致。
+        -->
+        <jackson.version>2.21.5</jackson.version>
+    </properties>
+
+    <dependencies>
+        <!-- 绑定类用 NativeLoader / NativeUtils 定位并抽取动态库 -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- 返回值是 JSON，供调用方解析；本项目统一用 Jackson 解析 JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <!-- 绑定类使用 java.lang.foreign（JDK 22+），故不能沿用父 POM 默认的 target 1.8 -->
+                    <release>25</release>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <arg>-proc:full</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
