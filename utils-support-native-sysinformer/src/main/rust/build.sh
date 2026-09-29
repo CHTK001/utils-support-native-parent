@@ -67,10 +67,24 @@ if [ ! -f "$LIB_FILE" ]; then
     exit 1
 fi
 
-# 源在 src/main/rust，产物目录在 src/main/resources/native
-DEST_ROOT="$SCRIPT_DIR/../../resources/native"
-if [ ! -d "$DEST_ROOT" ]; then
-    echo "ERROR: 产物根目录不存在: $DEST_ROOT" >&2
+# 源在 src/main/rust，产物目录在 src/main/resources/native。
+#
+# 注意相对层级：从 src/main/rust 上跳**一级**才到 src/main，所以是 ../resources。
+# 曾写成 ../../resources，解析后落在 src/resources/native —— 一个没人读的目录。
+# 当时没发现，是因为守卫只比对了字符串形状（../.. 原样出现在期望串里，自然相等），
+# 比中了错的位置。现在改为**先解析成绝对路径再校验后缀**，写错层级必然被拦。
+MODULE_MAIN="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEST_ROOT="$MODULE_MAIN/resources/native"
+case "$DEST_ROOT" in
+    */src/main/resources/native) : ;;
+    *)
+        echo "ERROR: 产物路径异常，期望以 src/main/resources/native 结尾，实际为: $DEST_ROOT" >&2
+        echo "       （多半是 build.sh 里的相对层级写错，请核对 src/main/rust 到 src/main 的跳数）" >&2
+        exit 1
+        ;;
+esac
+if ! mkdir -p "$DEST_ROOT"; then
+    echo "ERROR: 无法创建产物根目录: $DEST_ROOT" >&2
     exit 1
 fi
 DEST_DIR="$DEST_ROOT/$PLATFORM_DIR"
