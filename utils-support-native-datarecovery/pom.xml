@@ -12,7 +12,10 @@
     <packaging>jar</packaging>
     <description>Data recovery Rust native 库</description>
     <dependencies>
-        <!-- JNI 绑定类 DataRecovery 迁入本模块，需要 NativeUtils -->
+        <!-- DataRecovery 的静态块用 NativeUtils.loadFromClasspath 加载动态库。
+             注意：它是内联全限定名调用的（没有 import），所以「扫 import 判断依赖
+             是否在用」这类检测会误判成死依赖。删掉本依赖后 clean compile 直接报
+             「找不到 com.chua.common.support.utils」。 -->
         <dependency>
             <groupId>com.chua</groupId>
             <artifactId>utils-support-common-starter</artifactId>
