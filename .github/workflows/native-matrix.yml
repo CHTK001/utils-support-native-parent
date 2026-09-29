@@ -161,6 +161,10 @@ jobs:
             *ffmpeg)          NEED="ffmpeg_version ffmpeg_codec_available ffmpeg_free_string" ;;
           esac
           test -n "$NEED" || { echo "ASSERT FAIL no expectation defined for module ${{ matrix.module }}"; exit 1; }
+          # 导出给后续步骤。NEED 原先只是本步骤的 shell 局部变量，跨步骤不存在；
+          # 后面的运行时冒烟直接引用 $NEED 会拿到空值，dlsym 循环静默空转——
+          # 那会让冒烟退化成「只 dlopen 不解析符号」。
+          echo "NEED=$NEED" >> "$GITHUB_ENV"
           for s in $NEED; do
             grep -qxF -- "$s" "$RUNNER_TEMP/symbols_match.txt" \
               || { echo "ASSERT FAIL missing export: $s"; exit 1; }
@@ -207,13 +211,27 @@ jobs:
         # 入口，没有 JVM 就无法调用，这三者止于「加载 + 符号解析」——这仍比
         # 文本匹配强，因为它要求动态链接器真的能解析出每个名字。
         run: |
-          MOD_SHORT="${matrix.module##utils-support-native-}"
+          # 用 GitHub 的表达式取模块名，再由 bash 剥前缀。
+          # 不能写 ${matrix.module##...}：那是 bash 参数展开，而 matrix.module 不是
+          # shell 变量，bash 会报 "bad substitution" 并让整步 exit 1。
+          # （此前正是这个写法把 28 条腿全弄红了。）
+          MOD_FULL="${{ matrix.module }}"
+          MOD_SHORT="${MOD_FULL##utils-support-native-}"
+          echo "MOD_SHORT=$MOD_SHORT"
           python3 - "$LIB_PATH" "$NEED" "$MOD_SHORT" <<'PY'
           import ctypes
           import sys
           from ctypes import c_char_p, c_int, c_void_p
 
           lib_path, symbols, module = sys.argv[1], sys.argv[2].split(), sys.argv[3]
+
+          # 空清单必须响亮失败。此前 NEED 是上一步的 shell 局部变量，跨步骤拿到空值，
+          # 于是循环空转、只 dlopen 不解析符号，却照样打印 MATRIX_SMOKE_OK ——
+          # 一条看着绿、实际什么都没验的用例。这里把它变成硬失败。
+          if not symbols:
+              print("ASSERT FAIL 期望符号清单为空，冒烟会退化成「只 dlopen」")
+              print("MATRIX_SMOKE_FAILED failures=1")
+              sys.exit(1)
 
           try:
               lib = ctypes.CDLL(lib_path)
