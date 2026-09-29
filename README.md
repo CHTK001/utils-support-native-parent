@@ -21,7 +21,6 @@
 | `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | 1.8 | `utils-support-sqlite-starter`、`spring-api-support-system-starter` |
 | `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI） | 1.8 | `utils-support-example-starter` |
 | `utils-support-native-video-processor` | Video HLS 转码 Rust native 库（JNI） | 1.8 | `utils-support-video-processor-starter` |
-| `utils-support-native-wechat` | 微信 4.x WCDB 原生读取（JNI + FFM） | **25** | 无 |
 
 「无」表示当前没有任何 pom 声明依赖它（据全仓 pom 扫描）；这些模块仍可被应用直接引用，
 不代表已废弃。
