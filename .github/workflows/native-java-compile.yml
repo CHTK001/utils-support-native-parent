@@ -1,0 +1,113 @@
+name: native-java-compile
+
+# 验证 utils-support-native-parent 各模块 **Java 侧** 能否编译。
+#
+# 为什么需要这个 workflow：既有的 6 个 native workflow 只构建 C/Rust、校验导出与架构、
+# 跑原生侧冒烟，**没有一个会编译 Java**。而 2026-09-29 刚把 sqlite 的 FFM 绑定
+# （SqliteHookBridge）下沉进 native 模块，绑定类若写错（方法名、签名、import），
+# 在 push 后不会有任何自动化发现——必须等人本地 mvn compile 才暴露。
+#
+# 为什么需要凭据：本仓 pom 声明的依赖仓库是 packages.aliyun.com 上的私有库
+# （server id: 2676178-release-jmLEdB / 2676178-snapshot-FwAJpk），
+# 匿名访问返回 HTTP 401，已实测：
+#   curl -o /dev/null -w '%{http_code}' \
+#     https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-release-jmledb/com/chua/utils-support-common-starter/4.0.0.42/utils-support-common-starter-4.0.0.42.pom
+#   -> 401
+# 因此没有凭据时 mvn 无法解析 utils-support-common-starter，本 job 必然失败。
+#
+# 处理方式：凭据缺失时 **不跑编译，并明确声明「Java 侧未验证」**（warning + summary），
+# 不伪装成通过、也不把 CI 弄红。凭据一旦配好，本 job 自动开始真正编译。
+#
+# 需要配置的两个 secret（Repository secrets）：
+#   MAVEN_ALIYUN_USER      阿里云私有仓库用户名
+#   MAVEN_ALIYUN_PASSWORD  对应的密码 / 访问令牌
+# 两个 server id 共用同一组凭据（同一仓库的两个视图）。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'utils-support-native-parent/**'
+      - '.github/workflows/native-java-compile.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-parent/**'
+
+concurrency:
+  group: java-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: mvn clean compile（Java 侧）
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: 检查是否已配置私有仓库凭据
+        id: creds
+        env:
+          ALIYUN_USER: ${{ secrets.MAVEN_ALIYUN_USER }}
+        run: |
+          if [ -n "$ALIYUN_USER" ]; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"
+            echo "已检测到 MAVEN_ALIYUN_USER，将执行真实编译。"
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Java 侧未验证::未配置 MAVEN_ALIYUN_USER / MAVEN_ALIYUN_PASSWORD，依赖仓库 packages.aliyun.com 匿名访问为 HTTP 401，无法解析 utils-support-common-starter，本 job 跳过真实编译。Java 侧当前只有本地验证，CI 不覆盖。"
+          fi
+
+      - name: 生成 settings.xml
+        if: steps.creds.outputs.have == 'yes'
+        env:
+          ALIYUN_USER: ${{ secrets.MAVEN_ALIYUN_USER }}
+          ALIYUN_PASS: ${{ secrets.MAVEN_ALIYUN_PASSWORD }}
+        run: |
+          mkdir -p "$HOME/.m2"
+          cat > "$HOME/.m2/settings.xml" <<'XML'
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+            <servers>
+              <server>
+                <id>2676178-release-jmLEdB</id>
+                <username>${env.ALIYUN_USER}</username>
+                <password>${env.ALIYUN_PASS}</password>
+              </server>
+              <server>
+                <id>2676178-snapshot-FwAJpk</id>
+                <username>${env.ALIYUN_USER}</username>
+                <password>${env.ALIYUN_PASS}</password>
+              </server>
+            </servers>
+          </settings>
+          XML
+          # 不打印文件内容（含密码占位引用），只确认结构
+          echo "settings.xml 已生成，servers 数 = $(grep -c '<server>' "$HOME/.m2/settings.xml")"
+
+      - name: Java 侧编译（native-parent 全反应堆）
+        if: steps.creds.outputs.have == 'yes'
+        run: |
+          # 用 clean 而非增量：本仓有「增量编译在一次失败后仍保留旧 target/classes，
+          # 下次 mvn compile 打印 Nothing to compile 却 BUILD SUCCESS」的历史坑。
+          mvn -B -ntp -DskipTests clean compile
+
+      - name: 结果写入摘要
+        if: always()
+        run: |
+          {
+            echo "### Java 侧编译"
+            if [ "${{ steps.creds.outputs.have }}" = "yes" ]; then
+              echo "已执行 \`mvn -B -DskipTests clean compile\`（全反应堆）。"
+            else
+              echo "**未执行。** 缺少 \`MAVEN_ALIYUN_USER\` / \`MAVEN_ALIYUN_PASSWORD\`，"
+              echo "依赖仓库 \`packages.aliyun.com\` 匿名访问为 HTTP 401。"
+              echo ""
+              echo "在 Repository secrets 里补上这两个 secret 后，本 job 会自动开始编译。"
+              echo "在那之前，**native 模块的 Java 侧只有本地验证，CI 不覆盖**——"
+              echo "绑定类写错不会在 push 后被任何自动化发现。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
