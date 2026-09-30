@@ -360,6 +360,18 @@ jobs:
           print("SYSINFORMER_SMOKE_OK")
           PY
 
+      - uses: actions/setup-java@v4
+        if: matrix.smoke != false
+        # 必须显式钉 JDK：Java 8 绑定模块的 pom 带 `-proc:full`（JDK 23+ 起
+        # 注解处理不再默认开启，构建 JDK 为 25 时必须显式打开），而 `-proc:full`
+        # 这个标志 JDK 21 以前不存在。不钉版本就会用 runner 的默认 JDK——
+        # windows-2022 的默认版本较旧，实测直接报
+        # `Fatal error compiling: invalid flag: -proc:full`。
+        # 之前漏了这一步，导致 JNA 冒烟在 windows 上连编译都没进去。
+        with:
+          distribution: temurin
+          java-version: '25'
+
       - name: Runtime smoke (JNA bridge, Java 8 module)
         # 上一条验的是 Java 25 侧的 Panama FFM 绑定。Java 8 侧有**另一套**绑定
         # （JNA + 自己的动态库抽取逻辑），在 CI 上从未运行过，必须单独跑。
