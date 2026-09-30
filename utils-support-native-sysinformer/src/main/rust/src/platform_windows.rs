@@ -658,9 +658,9 @@ pub fn call(op: &str, args: &str) -> String {
             serde_json::to_string(&Envelope::ok(common::process_tree())).unwrap_or_default()
         }
         "process.detail" => wrap(need_pid().and_then(|pid| {
-            let mut found = common::sysinfo_processes()
-                .into_iter()
-                .find(|p| p.pid == pid)
+            // 单进程刷新，不枚举全量进程：此前复用 sysinfo_processes() 会刷新
+            // 全部进程再筛出目标，生产验收实测 p50 204ms。
+            let mut found = common::sysinfo_process_one(pid)
                 .ok_or_else(|| format!("进程 {pid} 不存在"))?;
             enrich_detail(&mut found);
             serde_json::to_value(found).map_err(|e| e.to_string())
@@ -1186,15 +1186,44 @@ fn events_start(mask: u32) -> Result<(), String> {
 
     let (mut props, _) = make_properties(SESSION_NAME, EVENT_TRACE_REAL_TIME_MODE);
     let mut session = CONTROLTRACE_HANDLE { Value: 0 };
-    let rc = unsafe {
+
+    // ETW 会话的销毁是**异步**的：events.stop 之后立刻 start，StartTraceW 常返回
+    // ERROR_ALREADY_EXISTS（上一轮会话尚未完全拆除）。生产验收实测"启停 20 轮"
+    // 只成功 2 次，绝大部分败在这里。
+    // 这不是错误用法，而是内核的固有行为，故做有限重试而不是直接失败。
+    let mut rc = unsafe {
         StartTraceW(
             &mut session,
             PCWSTR(name_wide.as_ptr()),
             props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
         )
     };
+    let mut attempt = 0;
+    while rc == ERROR_ALREADY_EXISTS && attempt < 10 {
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        // 重试前再尝试停一次，加速上一轮会话的拆除
+        unsafe {
+            let _ = ControlTraceW(
+                CONTROLTRACE_HANDLE { Value: 0 },
+                PCWSTR(name_wide.as_ptr()),
+                props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+                EVENT_TRACE_CONTROL_STOP,
+            );
+        }
+        session = CONTROLTRACE_HANDLE { Value: 0 };
+        rc = unsafe {
+            StartTraceW(
+                &mut session,
+                PCWSTR(name_wide.as_ptr()),
+                props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+            )
+        };
+    }
     if rc == ERROR_ALREADY_EXISTS {
-        return Err("已存在同名 ETW 会话，请稍后重试或先 events.stop".to_string());
+        return Err(format!(
+            "已存在同名 ETW 会话，重试 {attempt} 次仍未释放；请稍后重试"
+        ));
     }
     if rc.0 != 0 {
         return Err(format!("StartTraceW 失败: {}（ETW 实时会话需要管理员权限）", rc.0));
