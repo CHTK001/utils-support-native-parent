@@ -2386,11 +2386,16 @@ fn events_start(mask: u32) -> Result<(), String> {
         ));
     }
 
-    // 绑定 CN_IDX_PROC（idx=1,val=1 -> 多播组位 1）
+    // 绑定 CN_IDX_PROC 多播组。
+    //
+    // 组位是 `1 << (CN_IDX_PROC - 1)` = `1 << 0` = 1。曾写成 `1 << 1` = 2，
+    // 于是订阅到了**别的**组，能"成功"却永远收不到事件 —— CI 上表现为
+    // `events.start ok` 但 `未收到 ProcessStart，实际类型: {}`。
+    // 这类错误编译与本地类型检查都发现不了，只有真跑才暴露。
     let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
     addr.nl_family = libc::AF_NETLINK as u16;
     addr.nl_pid = 0;
-    addr.nl_groups = 1 << 1;
+    addr.nl_groups = 1 << (CN_IDX_PROC - 1);
     let rc = unsafe {
         libc::bind(
             fd,
@@ -2438,9 +2443,20 @@ fn events_start(mask: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// `CN_IDX_PROC`：proc connector 的索引。
+const CN_IDX_PROC: u32 = 1;
+
+/// `CN_VAL_PROC`：proc connector 的值。
+const CN_VAL_PROC: u32 = 1;
+
+/// `NLMSG_DONE`。proc connector 的订阅报文必须用这个 type；
+/// 曾写成 0（`NLMSG_NOOP`），内核直接丢弃，表现为"订阅成功但收不到任何事件"。
+const NLMSG_DONE: u16 = 3;
+
 /// 发送 proc connector 的多播操作报文。
 ///
 /// 报文布局：nlmsghdr(16) + cn_msg(20) + 操作码 u32(4)。
+/// `nlmsg_type` 必须是 `NLMSG_DONE`，`nlmsg_pid` 填自身 PID（内核据此回送）。
 ///
 /// # 参数
 /// * `fd` - netlink socket
@@ -2451,9 +2467,14 @@ fn events_start(mask: u32) -> Result<(), String> {
 fn send_mcast_op(fd: i32, op: u32) -> bool {
     let mut msg = vec![0u8; 16 + 20 + 4];
     msg[0..4].copy_from_slice(&((16 + 20 + 4) as u32).to_ne_bytes());
+    msg[4..6].copy_from_slice(&NLMSG_DONE.to_ne_bytes());
+    // flags(2) 保持 0
     msg[8..12].copy_from_slice(&1u32.to_ne_bytes()); // seq
-    msg[16..20].copy_from_slice(&1u32.to_ne_bytes()); // CN_IDX_PROC
-    msg[20..24].copy_from_slice(&1u32.to_ne_bytes()); // CN_VAL_PROC
+    msg[12..16].copy_from_slice(&(std::process::id()).to_ne_bytes()); // nlmsg_pid
+    msg[16..20].copy_from_slice(&CN_IDX_PROC.to_ne_bytes());
+    msg[20..24].copy_from_slice(&CN_VAL_PROC.to_ne_bytes());
+    // cn_msg.len(2) 位于偏移 32..34，值为操作码长度
+    msg[32..34].copy_from_slice(&4u16.to_ne_bytes());
     msg[36..40].copy_from_slice(&op.to_ne_bytes());
     let mut dst: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
     dst.nl_family = libc::AF_NETLINK as u16;
