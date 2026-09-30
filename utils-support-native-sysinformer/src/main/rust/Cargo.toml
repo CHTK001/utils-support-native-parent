@@ -43,4 +43,13 @@ windows = { version = "0.58", features = [
     "Win32_UI_Shell",
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
+    "Win32_System_Diagnostics_Etw",
+    "Win32_System_SystemServices",
+    # EVENT_TRACE_LOGFILEW 与 OpenTraceW 在 windows crate 里由该 feature 门控
+    # （ETW 消费侧要它，只加 Win32_System_Diagnostics_Etw 不够）。
+    "Win32_System_Time",
 ]}
+# WMI 查询（memory.modules / sensor.list）。手写 COM vtable 调用在 Rust 里极易出错，
+# 用成熟 crate 包装；它只在 Windows 目标下编译。
+wmi = "0.18"
+
