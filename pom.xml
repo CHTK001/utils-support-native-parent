@@ -28,6 +28,7 @@
     <module>utils-support-native-cuda</module>
         <module>utils-support-native-nmap</module>
         <module>utils-support-native-sysinformer</module>
+        <module>utils-support-native-sysinformer-java8</module>
         <module>utils-support-native-needle</module>
         <module>utils-support-native-libjpeg-turbo</module>
 </modules>
