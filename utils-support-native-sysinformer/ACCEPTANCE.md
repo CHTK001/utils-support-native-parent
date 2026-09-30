@@ -16,10 +16,12 @@
 
 | 平台 | 产物 | 验证方式 |
 |---|---|---|
-| windows-x86_64 | `sysinformer.dll` | 本机 Windows 真跑（ctypes + Java 25 FFM 冒烟）|
-| linux-x86_64 | `libsysinformer.so` | **真实 Kali 机器**（Kernel 6.19 / x86_64），普通用户 + root 各一遍 |
+| windows-x86_64 | `sysinformer.dll` | 本机 Windows 真跑（ctypes 全项 + Java 25 FFM 冒烟 + 生产级验收 30/30）|
+| linux-x86_64 | `libsysinformer.so` | **真实 Kali 机器**（Kernel 6.19 / x86_64），普通用户 + root 各一遍（生产级验收各 30/30）|
 | darwin-aarch64 | `libsysinformer.dylib` | CI（macos-15，arm64 原生）真 dlopen + 冒烟 |
-| darwin-x86_64 | `libsysinformer.dylib` | ⚠️ **仅导出 + 架构断言**，无运行时冒烟（见未验项）|
+| darwin-x86_64 | `libsysinformer.dylib` | CI（**macos-15-intel**，Intel x86_64 原生）真 dlopen + 冒烟 |
+
+**四平台全部有运行时验证。**
 
 **重要**：所有验证都针对**仓库里入库的那份产物**，而不是本地重建的副本。
 上传到 Kali 前做 md5 比对；Linux 入库产物的 md5 与在 Kali 上验证通过的那份一致。
@@ -150,8 +152,8 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 
 | # | 未验项 | 原因 | 影响 |
 |---|---|---|---|
-| 1 | **macOS x86_64 无运行时冒烟** | macos-15 runner 只有 arm64，无法 dlopen x86_64 dylib | 该腿只有导出与架构断言；要真验需一台 Intel Mac |
-| 2 | **Java 25 FFM 绑定不进 CI** | `SysInformerNative` 依赖 `utils-support-common-starter`，该构件位于 packages.aliyun.com **私有**仓库（匿名 401）| 配置 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD` 后纳入 `native-java-compile.yml`；目前只有本地验证 |
+| 1 | ~~macOS x86_64 无运行时冒烟~~ **已关闭** | 改用 `macos-15-intel`（原生 Intel x86_64，Actions 最后一个 x86_64 镜像，支持到 2027-08）| run 36708484394 该腿 `Runtime smoke` 真实执行：dlopen x86_64 dylib 成功、`process.list 返回 502 个进程`、`SYSINFORMER_SMOKE_OK` |
+| 2 | **Java 25 FFM 绑定不进 CI** | `SysInformerNative` 依赖 `utils-support-common-starter`，该构件位于 packages.aliyun.com **私有**仓库（匿名 401）。这是**全仓性**限制（任何 native 模块的 Java 编译都受此限）| 配置 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD` 后纳入 `native-java-compile.yml`；目前只有本地验证。**注**：Java 8 侧（`-java8` 模块）刻意不依赖 common-starter，**它已在 CI 里真跑** |
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
@@ -180,8 +182,10 @@ java --enable-native-access=ALL-UNNAMED -cp "target/smoke;target/classes;<cp>" F
 
 ## 八、结论
 
-- **"能用"口径：通过。** 四平台产物入库、架构与导出均已核验；三平台有运行时验证
-  （Windows 本机、Linux 真实机器、macOS arm64 CI）；Java 8 与 Java 25 双基线都能跑通。
-- **"生产级"口径：Windows 与 Linux 达标（各 30/30），但整体不完整** ——
-  未验项 1 与 2 需要额外资源（Intel Mac / 私有仓库凭据），未验项 3 是硬限制。
-  **在这三项未落实或未明确豁免之前，不应宣告"生产级已验收"。**
+- **"能用"口径：通过。** 四平台产物入库、架构与导出均已核验；**四平台全部有运行时验证**
+  （Windows 本机、Linux 真实机器、macOS arm64 与 **Intel x86_64** 均 CI 真跑）；
+  Java 8 与 Java 25 双基线都能跑通。
+- **"生产级"口径：Windows 与 Linux 各 30/30 达标；四平台运行时已全覆盖。**
+  仍未落实的只有未验项 #2（**Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制**）；
+  #3 为硬限制且已豁免；#4 / #5 属独立立项。
+  **在 #2 落实或明确豁免之前，不宣告"生产级已全部验收"。**
