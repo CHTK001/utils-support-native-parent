@@ -360,6 +360,28 @@ jobs:
           print("SYSINFORMER_SMOKE_OK")
           PY
 
+      - name: Runtime smoke (JNA bridge, Java 8 module)
+        # 上一条验的是 Java 25 侧的 Panama FFM 绑定。Java 8 侧有**另一套**绑定
+        # （JNA + 自己的动态库抽取逻辑），在 CI 上从未运行过，必须单独跑。
+        if: matrix.smoke != false
+        run: |
+          set -e
+          mvn -q -B -f utils-support-native-sysinformer-java8/pom.xml -DskipTests package
+          mvn -q -B -f utils-support-native-sysinformer-java8/pom.xml \
+            dependency:build-classpath "-Dmdep.outputFile=target/cp.txt"
+          # 分隔符必须问 JVM 自己要：dependency:build-classpath 输出的是平台分隔符
+          # （Windows 是 ';'，Linux/macOS 是 ':'），写死 ':' 会让 Windows 上
+          # 整个 target/classes 段被并进第一个 jar 路径，编译报 "package does not exist"。
+          SEP=$(java -XshowSettings:properties -version 2>&1 |
+            sed -n 's/^[[:space:]]*path\.separator = //p')
+          CP="utils-support-native-sysinformer-java8/target/classes${SEP}$(cat utils-support-native-sysinformer-java8/target/cp.txt)"
+          javac -encoding UTF-8 -nowarn -cp "$CP" -d target/smoke-jna \
+            utils-support-native-sysinformer-java8/src/smoke/java/SysInformerJnaSmoke.java
+          # 用本腿刚编出的库覆盖 classpath 抽取，确保测的是当前源码的产物
+          java -Dstdout.encoding=UTF-8 \
+            "-Dchua.sysinformer.native.path=$(pwd)/$LIB_PATH" \
+            -cp "target/smoke-jna${SEP}$CP" SysInformerJnaSmoke
+
       - name: Stage artifact for upload
         run: |
           rm -rf stage

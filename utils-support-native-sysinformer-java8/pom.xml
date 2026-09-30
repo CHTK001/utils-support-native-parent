@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+    </parent>
+    <artifactId>utils-support-native-sysinformer-java8</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native SysInformer Java8</name>
+    <description>
+        sysinformer 原生库的 Java 8 JNA 绑定（面向 JDK 8 运行环境，独立于 Java 25 FFM 主模块）。
+        不依赖 utils-support-common-starter 的 NativeLoader——该 starter 按 release 25 编译，
+        引入后 JDK 8 会在类加载阶段抛 UnsupportedClassVersionError。故自行按平台抽取动态库。
+    </description>
+
+    <properties>
+        <!-- 与 filesearch-java8 保持一致的三件套版本 -->
+        <jna.version>5.14.0</jna.version>
+        <slf4j.version>1.7.36</slf4j.version>
+        <lombok.version>1.18.46</lombok.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <!--
+          复用 utils-support-native-sysinformer 已提交的四平台产物，避免二进制重复入库；
+          打出的 jar 自带 native/ 资源，可脱离 release 25 的主模块在 JDK 8 上独立使用。
+
+          注意路径层级：两者同级，且主模块的产物在 src/main/resources/native，故是
+          ../utils-support-native-sysinformer/src/main/resources/native。
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../utils-support-native-sysinformer/src/main/resources/native</directory>
+                <targetPath>native</targetPath>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <!-- Java 8 绑定：禁止 record / FFM / switch 表达式等 9+ 语法，产物为 52.0 字节码 -->
+                    <release>8</release>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <!-- 构建 JDK 为 25，需显式启用注解处理 -->
+                        <arg>-proc:full</arg>
+                        <!-- 抑制"源/目标值 8 已过时"的 options 告警 -->
+                        <arg>-Xlint:-options</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
