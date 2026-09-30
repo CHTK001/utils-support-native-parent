@@ -459,6 +459,31 @@ fn process_detail_of(p: &sysinfo::Process, pid: i32) -> crate::model::ProcessDet
     }
 }
 
+/// 带过滤的进程列表：只保留满足 `keep` 的条目。
+///
+/// 抽这个函数是为了让「按平台判据过滤线程」这件事不改变字段填充逻辑
+/// —— 两条路径共用 [`process_detail_of`]，避免漂移。
+///
+/// # 参数
+/// * `keep` - 判定函数，返回 false 的条目会被丢弃
+///
+/// # 返回值
+/// 过滤后的列表，按 CPU 使用率降序
+pub fn sysinfo_processes_filtered<F>(keep: F) -> Vec<crate::model::ProcessDetail>
+where
+    F: Fn(&sysinfo::Process) -> bool,
+{
+    let sys = refreshed();
+    let mut out: Vec<crate::model::ProcessDetail> = sys
+        .processes()
+        .iter()
+        .filter(|(_, p)| keep(p))
+        .map(|(pid, p)| process_detail_of(p, pid_i32(pid)))
+        .collect();
+    out.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
 /// B 段跨平台基线：sysinfo 能一致拿到的进程字段。
 ///
 /// 这是三平台的共同起点，平台实现只在此基础上补自己特有的字段

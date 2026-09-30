@@ -2670,32 +2670,37 @@ fn smbios_string(raw: &[u8], strbase: usize, idx: usize) -> Option<String> {
     None
 }
 
-/// Linux 侧的进程列表：过滤掉 sysinfo 混进来的**线程**。
+/// Linux 侧的进程列表：过滤掉 sysinfo 混进来的**用户线程**。
 ///
 /// # 为什么要过滤
 /// `sysinfo` 0.33 的 Linux 后端会递归进 `/proc/<pid>/task/`，把每个 task（线程）
-/// 也 push 进同一个进程列表（源码 `unix/linux/process.rs` 的 `get_all_pid_entries`，
-/// 它自己还留了 `// FIXME: ... it can be listed in /proc/[PID]/task subfolder and
-/// directly in /proc at the same time`）。
+/// 也 push 进同一个进程列表（源码 `unix/linux/process.rs` 的 `get_all_pid_entries`）。
 ///
 /// 后果有两个，Kali 真机实测：
 ///   * 语义不一致 —— Windows 的 `process.list` 返回 321 个**进程**，
-///     而 Linux 返回 1338（进程 + 线程），调用方拿到的根本不是同一种东西。
-///   * 性能浪费 —— 多枚举 6.5 倍条目，`process.list` 因此从应有的几十毫秒
-///     变成 228~379ms。
+///     而 Linux 返回 1300+（进程 + 线程），调用方拿到的不是同一种东西。
+///   * 性能浪费 —— 多枚举 6 倍条目。
 ///
-/// # 判据
-/// **线程只有 `/proc/<pid>/task/<tid>`，没有顶层 `/proc/<tid>`；进程两种都有。**
-/// `ps -e` 与 procps 的判定与此一致（实测 `/proc` 顶层 207 个、`ps -e` 201 个）。
-/// 内核线程（如 kworker）**有**顶层目录，因此不会被误过滤。
+/// # 判据（用 sysinfo 自己的字段，不额外读文件）
+/// sysinfo 在 `_get_process_data` 里这样赋值：
+/// ```text
+///   if PF_KTHREAD        -> Some(ThreadKind::Kernel)     // 内核线程，是进程，保留
+///   else if parent_pid   -> Some(ThreadKind::Userland)   // 从 task/ 子目录进来 -> 线程，排除
+/// ```
+/// 顶层 `/proc` 条目传入的 `parent_pid` 是 `None`，**只有从 `task/` 子目录递归
+/// 进来的才会被标成 `Userland`**。所以 `thread_kind() == Some(Userland)`
+/// 正是「这是一条用户线程」的判据，与 `Tgid != Pid` 等价。
+///
+/// **不要用「顶层 `/proc/<pid>` 是否存在」来判断**：实测 Kali 上 `/proc/<tid>` 对
+/// 线程也可能存在（`/proc/1041` 存在但 `Tgid=686 Pid=1041`），该判据既不正确、
+/// 又为每个条目多加一次 `stat`（让 `process.list` 从 228ms 涨到 683ms）。
 ///
 /// # 返回值
 /// 只含进程的列表
 fn linux_processes() -> Vec<ProcessDetail> {
-    common::sysinfo_processes()
-        .into_iter()
-        .filter(|p| Path::new(&format!("/proc/{}", p.pid)).is_dir())
-        .collect()
+    common::sysinfo_processes_filtered(|p| {
+        !matches!(p.thread_kind(), Some(sysinfo::ThreadKind::Userland))
+    })
 }
 
 /// Linux 侧的进程树：基于 [`linux_processes`] 构建，避免把线程挂进树。
