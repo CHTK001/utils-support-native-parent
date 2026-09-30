@@ -15,8 +15,9 @@
 
 use crate::common;
 use crate::model::{
-    unsupported, ActionKind, ActionResult, CredentialInfo, Envelope, HandleInfo, ModuleInfo,
-    PrivilegeInfo, ProcessDetail, ThreadInfo,
+    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, EnvVar, Envelope, GpuInfo,
+    HandleInfo, KernelModuleInfo, MappingInfo, ModuleInfo, PrivilegeInfo, ProcessDetail,
+    ServiceInfo, SocketInfo, ThreadInfo,
 };
 use crate::PLATFORM;
 
@@ -691,47 +692,49 @@ pub fn call(op: &str, args: &str) -> String {
                 .and_then(|r| serde_json::to_value(r).map_err(|e| e.to_string())))
         }
 
-        // ---------- 明确不支持（原因写清，不用空集合冒充）----------
-        "process.env" => unsupported_json(
-            "process.env",
-            "读取目标进程环境变量需要 PROCESS_VM_READ 权限并解析其 PEB，本实现未做",
+        // ---------- 本批补齐的 op ----------
+        "process.env" => wrap(need_pid().and_then(|pid| {
+            env_of(pid).and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+        })),
+        "process.mappings" => wrap(need_pid().and_then(|pid| {
+            mappings_of(pid).and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string()))
+        })),
+        "socket.list" => {
+            let pid = arg_i64(args, "pid").map(|p| p as i32).filter(|p| *p > 0);
+            wrap(sockets_of(pid).and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
+        }
+        "disk.io" => {
+            wrap(disk_io_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
+        }
+        "kernel.modules" => wrap(
+            kernel_modules_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())),
         ),
-        "process.mappings" => unsupported_json(
-            "process.mappings",
-            "内存映射遍历需 VirtualQueryEx 逐区读取，本实现未做",
-        ),
+        "service.list" => {
+            wrap(services_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
+        }
+        "gpu.list" => {
+            wrap(gpus_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
+        }
+
+        // ---------- 仍不支持（原因写清，不用空集合冒充）----------
         "process.stack" => unsupported_json(
             "process.stack",
-            "用户态栈回溯需 dbghelp StackWalk64；内核态栈需 ETW + 管理员权限。本实现均未做",
+            "用户态栈回溯需 dbghelp StackWalk64（按其 API 需先 SymInitialize + 逐帧读取栈内存）；\
+             内核态栈需 ETW + 管理员权限。本实现均未做",
         ),
-        "socket.list" => unsupported_json(
-            "socket.list",
-            "需 GetExtendedTcpTable/GetExtendedUdpTable（iphlpapi），本实现未做",
+        "sensor.list" => unsupported_json(
+            "sensor.list",
+            "温度/风扇/电压需 WMI（MSAcpi_ThermalZoneTemperature 等）或 LibreHardwareMonitor 级方案，\
+             前者在多数机器上返回不支持、后者依赖第三方驱动；本实现未做",
         ),
-        "service.list" => unsupported_json(
-            "service.list",
-            "需 SCM EnumServicesStatusExW + QueryServiceConfigW，本实现未做",
-        ),
-        "kernel.modules" => unsupported_json(
-            "kernel.modules",
-            "NtQuerySystemInformation(SystemModuleInformation) 本实现未做",
-        ),
-        "disk.io" => unsupported_json(
-            "disk.io",
-            "每磁盘 IO 需 DeviceIoControl(IOCTL_DISK_PERFORMANCE) 或性能计数器，本实现未做",
-        ),
-        "gpu.list" => unsupported_json(
-            "gpu.list",
-            "需 D3DKMTQueryStatistics（用户态可得，无需驱动），本实现未做",
-        ),
-        "sensor.list" => unsupported_json("sensor.list", "需 WMI 查询，本实现未做"),
         "memory.modules" => unsupported_json(
             "memory.modules",
-            "需 WMI Win32_PhysicalMemory 查询，本实现未做",
+            "物理内存条信息需 WMI Win32_PhysicalMemory 查询（COM 通道），本实现未做",
         ),
         "events.start" | "events.poll" | "events.stop" => unsupported_json(
             op,
-            "事件驱动需 ETW（Microsoft-Windows-Kernel-Process 或 NT Kernel Logger）+ 管理员权限，本实现未做",
+            "事件驱动需 ETW 实时消费（StartTrace + EnableTraceEx2 + ProcessTrace + 回调线程），\
+             需管理员权限；且本机无法运行验证，为避免写入不可验证的代码，本实现未做",
         ),
 
         other => serde_json::to_string(&Envelope::<()>::err(unsupported(other, PLATFORM)))
@@ -750,3 +753,997 @@ pub fn call(op: &str, args: &str) -> String {
 fn unsupported_json(op: &str, why: &str) -> String {
     serde_json::to_string(&Envelope::<()>::err(format!("{op}: {why}"))).unwrap_or_default()
 }
+
+// ============================================================================
+// 以下为 2026-09-30 补齐的 Windows 缺失 op
+// ============================================================================
+
+/// `NtQueryInformationProcess` 的信息类：`ProcessBasicInformation`。
+const PROCESS_BASIC_INFORMATION_CLASS: u32 = 0;
+
+/// 系统模块信息类号（`SystemModuleInformation`）。
+const SYSTEM_MODULE_INFORMATION: u32 = 11;
+
+/// x64 上 `PEB.ProcessParameters` 的偏移。
+const PEB_PROCESS_PARAMETERS_OFFSET: usize = 0x20;
+
+/// x64 上 `RTL_USER_PROCESS_PARAMETERS.Environment` 的偏移。
+const RPP_ENVIRONMENT_OFFSET: usize = 0x80;
+
+/// x64 上 `RTL_USER_PROCESS_PARAMETERS.EnvironmentSize` 的偏移。
+const RPP_ENVIRONMENT_SIZE_OFFSET: usize = 0x3F0;
+
+/// `PROCESS_BASIC_INFORMATION`（x64 布局；只用到 `PebBaseAddress`）。
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+struct ProcessBasicInformation {
+    /// 退出状态。
+    exit_status: i32,
+    /// PEB 地址（x64 下前置 4 字节填充后紧跟指针）。
+    peb_base_address: usize,
+    /// 亲和性掩码。
+    affinity_mask: usize,
+    /// 基优先级。
+    base_priority: i32,
+    /// 唯一进程 ID。
+    unique_process_id: usize,
+    /// 父进程 ID。
+    inherited_from_unique_process_id: usize,
+}
+
+#[link(name = "ntdll")]
+extern "system" {
+    fn NtQueryInformationProcess(
+        process_handle: HANDLE,
+        process_information_class: u32,
+        process_information: *mut c_void,
+        process_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn ReadProcessMemory(
+        hprocess: HANDLE,
+        lpbaseaddress: *const c_void,
+        lpbuffer: *mut c_void,
+        nsize: usize,
+        lpnumberofbytesread: *mut usize,
+    ) -> i32;
+    fn VirtualQueryEx(
+        hprocess: HANDLE,
+        lpaddress: *const c_void,
+        lpbuffer: *mut MemoryBasicInformation,
+        dwlength: usize,
+    ) -> usize;
+    fn GetMappedFileNameW(
+        hprocess: HANDLE,
+        lpv: *const c_void,
+        lpfilename: *mut u16,
+        nsize: u32,
+    ) -> u32;
+    fn OpenSCManagerW(
+        lpmachinename: *const u16,
+        lpdatabasename: *const u16,
+        dwdesiredaccess: u32,
+    ) -> isize;
+    fn EnumServicesStatusExW(
+        hscmanager: isize,
+        infolevel: i32,
+        dwservicetype: u32,
+        dwservicestate: u32,
+        lpbuffer: *mut u8,
+        cbbufsize: u32,
+        bytesneeded: *mut u32,
+        servicesreturned: *mut u32,
+        lpresumehandle: *mut u32,
+        lpszgroupname: *const u16,
+    ) -> i32;
+    fn CloseServiceHandle(hscobject: isize) -> i32;
+    fn DeviceIoControl(
+        hdevice: HANDLE,
+        dwiocontrolcode: u32,
+        lpinbuffer: *mut c_void,
+        ninbuffersize: u32,
+        lpoutbuffer: *mut c_void,
+        noutbuffersize: u32,
+        lpbytesreturned: *mut u32,
+        lpoverlapped: *mut c_void,
+    ) -> i32;
+    fn CreateFileW(
+        lpfilename: *const u16,
+        dwdesiredaccess: u32,
+        dwsharemode: u32,
+        lpsecurityattributes: *mut c_void,
+        dwcreationdisposition: u32,
+        dwflagsandattributes: u32,
+        htemplatefile: HANDLE,
+    ) -> HANDLE;
+    fn EnumDisplayDevicesW(
+        lpdevicename: *const u16,
+        dwdevnum: u32,
+        lpdisplaydevice: *mut DisplayDeviceW,
+        dwflags: u32,
+    ) -> i32;
+}
+
+/// `MEMORY_BASIC_INFORMATION`（x64）。
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+struct MemoryBasicInformation {
+    /// 基址。
+    base_address: *mut c_void,
+    /// 分配基址。
+    allocation_base: *mut c_void,
+    /// 分配保护。
+    allocation_protect: u32,
+    /// 区域大小。
+    region_size: usize,
+    /// 状态（MEM_COMMIT / MEM_FREE / MEM_RESERVE）。
+    state: u32,
+    /// 保护。
+    protect: u32,
+    /// 类型（MEM_IMAGE / MEM_MAPPED / MEM_PRIVATE）。
+    mem_type: u32,
+}
+
+/// `DISPLAY_DEVICEW`。
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DisplayDeviceW {
+    /// 结构大小。
+    cb: u32,
+    /// 设备名。
+    device_name: [u16; 32],
+    /// 设备描述。
+    device_string: [u16; 128],
+    /// 状态标志。
+    state_flags: u32,
+    /// 设备 ID。
+    device_id: [u16; 128],
+    /// 设备键。
+    device_key: [u16; 128],
+}
+
+impl Default for DisplayDeviceW {
+    /// 全零初始化。
+    ///
+    /// # 返回值
+    /// 默认实例
+    fn default() -> Self {
+        Self {
+            cb: std::mem::size_of::<DisplayDeviceW>() as u32,
+            device_name: [0; 32],
+            device_string: [0; 128],
+            state_flags: 0,
+            device_id: [0; 128],
+            device_key: [0; 128],
+        }
+    }
+}
+
+/// `DISK_PERFORMANCE`（x64 布局）。
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+struct DiskPerformance {
+    /// 累计读字节。
+    bytes_read: i64,
+    /// 累计写字节。
+    bytes_written: i64,
+    /// 读耗时（100ns）。
+    read_time: i64,
+    /// 写耗时（100ns）。
+    write_time: i64,
+    /// 空闲时间。
+    idle_time: i64,
+    /// 读次数。
+    read_count: u32,
+    /// 写次数。
+    write_count: u32,
+    /// 当前队列深度。
+    queue_depth: u32,
+    /// 拆分次数。
+    split_count: u32,
+    /// 查询时刻。
+    query_time: i64,
+    /// 存储设备号。
+    storage_device_number: u32,
+    /// 存储管理器名。
+    storage_manager_name: [u16; 8],
+}
+
+/// 转成 UTF-16 并以 NUL 结尾的缓冲，供 Win32 W 系列 API 使用。
+fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// C2 环境变量：读取目标进程 PEB 里的环境块。
+///
+/// 仅支持 x64 目标。WOW64（32 位）目标的结构偏移不同，本实现不猜，直接返回明确原因。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID
+///
+/// # 返回值
+/// 环境变量列表
+fn env_of(pid: i32) -> Result<Vec<EnvVar>, String> {
+    use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
+    use windows::Win32::System::Threading::PROCESS_VM_READ;
+
+    let h = open_process(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ).map_err(|e| {
+        format!("{e}；读取目标进程环境变量需要 PROCESS_VM_READ，通常要管理员权限")
+    })?;
+
+    let result = (|| -> Result<Vec<EnvVar>, String> {
+        unsafe {
+            // WOW64 目标的 PEB 偏移与 x64 不同，不猜
+            let mut is_wow = windows::Win32::Foundation::BOOL(0);
+            if IsWow64Process(h, &mut is_wow).is_ok() && is_wow.as_bool() {
+                return Err("目标进程是 32 位（WOW64），其 PEB 布局与 x64 不同，本实现不支持".to_string());
+            }
+
+            let mut pbi = ProcessBasicInformation::default();
+            let mut ret = 0u32;
+            let rc = NtQueryInformationProcess(
+                h,
+                PROCESS_BASIC_INFORMATION_CLASS,
+                &mut pbi as *mut _ as *mut c_void,
+                std::mem::size_of::<ProcessBasicInformation>() as u32,
+                &mut ret,
+            );
+            if rc != STATUS_SUCCESS || pbi.peb_base_address == 0 {
+                return Err(format!("NtQueryInformationProcess(ProcessBasicInformation) 失败: 0x{:08x}", rc as u32));
+            }
+
+            let mut read = 0usize;
+            let mut params_addr = 0usize;
+            if ReadProcessMemory(
+                h,
+                (pbi.peb_base_address + PEB_PROCESS_PARAMETERS_OFFSET) as *const c_void,
+                &mut params_addr as *mut _ as *mut c_void,
+                std::mem::size_of::<usize>(),
+                &mut read,
+            ) == 0
+                || params_addr == 0
+            {
+                return Err("读取 PEB.ProcessParameters 失败".to_string());
+            }
+
+            let mut env_addr = 0usize;
+            if ReadProcessMemory(
+                h,
+                (params_addr + RPP_ENVIRONMENT_OFFSET) as *const c_void,
+                &mut env_addr as *mut _ as *mut c_void,
+                std::mem::size_of::<usize>(),
+                &mut read,
+            ) == 0
+                || env_addr == 0
+            {
+                return Err("读取 ProcessParameters.Environment 失败".to_string());
+            }
+
+            let mut env_size = 0usize;
+            if ReadProcessMemory(
+                h,
+                (params_addr + RPP_ENVIRONMENT_SIZE_OFFSET) as *const c_void,
+                &mut env_size as *mut _ as *mut c_void,
+                std::mem::size_of::<usize>(),
+                &mut read,
+            ) == 0
+                || env_size == 0
+            {
+                return Err("读取 ProcessParameters.EnvironmentSize 失败".to_string());
+            }
+            // 上限保护：异常大的长度会一次性申请巨量内存
+            if env_size > 1 << 22 {
+                return Err(format!("环境块长度异常（{env_size} 字节），拒绝读取"));
+            }
+
+            let mut buf = vec![0u16; env_size / 2];
+            if ReadProcessMemory(
+                h,
+                env_addr as *const c_void,
+                buf.as_mut_ptr() as *mut c_void,
+                env_size,
+                &mut read,
+            ) == 0
+            {
+                return Err("读取环境块失败".to_string());
+            }
+
+            let mut out = Vec::new();
+            let mut start = 0usize;
+            for i in 0..buf.len() {
+                if buf[i] == 0 {
+                    if i > start {
+                        let s = String::from_utf16_lossy(&buf[start..i]);
+                        // 只收 "K=V" 形式；环境块里也有以 "=" 开头的伪变量（如 =C:），保留为 key 空值
+                        if let Some(eq) = s.find('=') {
+                            out.push(EnvVar {
+                                key: s[..eq].to_string(),
+                                value: s[eq + 1..].to_string(),
+                            });
+                        }
+                    }
+                    start = i + 1;
+                }
+            }
+            Ok(out)
+        }
+    })();
+
+    unsafe { let _ = CloseHandle(h); };
+    result
+}
+
+/// C6 内存映射：`VirtualQueryEx` 遍历。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID
+///
+/// # 返回值
+/// 映射列表
+fn mappings_of(pid: i32) -> Result<Vec<MappingInfo>, String> {
+    use windows::Win32::System::Threading::PROCESS_QUERY_INFORMATION;
+
+    let h = open_process(pid, PROCESS_QUERY_INFORMATION)
+        .map_err(|e| format!("{e}；遍历内存映射需要 PROCESS_QUERY_INFORMATION"))?;
+    let mut out = Vec::new();
+    unsafe {
+        let mut addr: usize = 0;
+        let mut guard = 0;
+        loop {
+            guard += 1;
+            if guard > 200_000 {
+                break; // 防不收敛
+            }
+            let mut mbi = MemoryBasicInformation::default();
+            let n = VirtualQueryEx(
+                h,
+                addr as *const c_void,
+                &mut mbi,
+                std::mem::size_of::<MemoryBasicInformation>(),
+            );
+            if n == 0 {
+                break;
+            }
+            let base = mbi.base_address as usize;
+            let size = mbi.region_size as usize;
+            if size == 0 {
+                break;
+            }
+            // 只报已提交的区域；空闲/保留区没有意义且条目极多
+            if mbi.state == 0x1000 {
+                let path = {
+                    let mut buf = [0u16; 1024];
+                    let len = GetMappedFileNameW(h, base as *const c_void, buf.as_mut_ptr(), buf.len() as u32);
+                    if len > 0 {
+                        Some(String::from_utf16_lossy(&buf[..len as usize]))
+                    } else {
+                        None
+                    }
+                };
+                out.push(MappingInfo {
+                    base_address: format!("{:x}", base),
+                    size: size as u64,
+                    protection: protection_str(mbi.protect),
+                    kind: match mbi.mem_type {
+                        0x1000000 => "image",
+                        0x40000 => "mapped",
+                        0x20000 => "private",
+                        _ => "unknown",
+                    }
+                    .to_string(),
+                    path,
+                });
+            }
+            addr = base.saturating_add(size);
+            if addr == 0 {
+                break;
+            }
+        }
+        let _ = CloseHandle(h);
+    }
+    if out.is_empty() {
+        return Err(format!(
+            "进程 {pid} 未返回任何已提交内存区域；可能需要管理员权限或进程已退出"
+        ));
+    }
+    Ok(out)
+}
+
+/// 把 `MEMORY_BASIC_INFORMATION.Protect` 转成简写权限串。
+///
+/// # 参数
+/// * `protect` - 保护标志
+///
+/// # 返回值
+/// 形如 `r-x` / `rw-` 的串
+fn protection_str(protect: u32) -> String {
+    let base = protect & 0xFF;
+    match base {
+        0x01 => "---",
+        0x02 => "r--",
+        0x04 => "rw-",
+        0x08 => "--w",
+        0x10 => "r-x",
+        0x20 => "r-x",
+        0x40 => "rwx",
+        0x80 => "rwx",
+        _ => "???",
+    }
+    .to_string()
+}
+
+/// C7 套接字 / 连接：全系统 TCP/UDP 表（按 pid 过滤）。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID；None 表示全系统
+///
+/// # 返回值
+/// 连接列表
+fn sockets_of(pid: Option<i32>) -> Result<Vec<SocketInfo>, String> {
+    let mut out = Vec::new();
+    out.extend(tcp_sockets(pid)?);
+    out.extend(udp_sockets(pid)?);
+    if out.is_empty() {
+        return Err(match pid {
+            Some(p) => format!("进程 {p} 没有 TCP/UDP 连接"),
+            None => "未取到任何 TCP/UDP 连接".to_string(),
+        });
+    }
+    Ok(out)
+}
+
+/// IPv4 网络序整型转点分十进制。
+///
+/// # 参数
+/// * `addr` - 网络序地址
+///
+/// # 返回值
+/// 点分十进制串
+fn ipv4_str(addr: u32) -> String {
+    let b = addr.to_ne_bytes();
+    format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
+}
+
+/// 端口（网络序低 16 位）转主机序。
+///
+/// # 参数
+/// * `port` - 网络序端口
+///
+/// # 返回值
+/// 主机序端口
+fn port_of(port: u32) -> u16 {
+    u16::from_be((port & 0xFFFF) as u16)
+}
+
+/// 枚举 TCP 连接。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID；None 表示全系统
+///
+/// # 返回值
+/// 连接列表
+fn tcp_sockets(pid: Option<i32>) -> Result<Vec<SocketInfo>, String> {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct TcpRow {
+        state: u32,
+        local_addr: u32,
+        local_port: u32,
+        remote_addr: u32,
+        remote_port: u32,
+        owning_pid: u32,
+    }
+    #[link(name = "iphlpapi")]
+    extern "system" {
+        fn GetExtendedTcpTable(
+            ptcptable: *mut c_void,
+            pdwsize: *mut u32,
+            border: i32,
+            ulaf: u32,
+            tableclass: i32,
+            reserved: u32,
+        ) -> u32;
+    }
+    const AF_INET: u32 = 2;
+    const TCP_TABLE_OWNER_PID_ALL: i32 = 5;
+
+    let mut size = 0u32;
+    unsafe { GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) };
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buf = vec![0u8; size as usize];
+    let rc = unsafe {
+        GetExtendedTcpTable(
+            buf.as_mut_ptr() as *mut c_void,
+            &mut size,
+            0,
+            AF_INET,
+            TCP_TABLE_OWNER_PID_ALL,
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("GetExtendedTcpTable 失败: {rc}"));
+    }
+    let count = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let row_size = std::mem::size_of::<TcpRow>();
+    let mut out = Vec::new();
+    for i in 0..count {
+        let off = 4 + i * row_size;
+        if off + row_size > buf.len() {
+            break;
+        }
+        let row: TcpRow = unsafe { std::ptr::read_unaligned(buf[off..].as_ptr() as *const TcpRow) };
+        if let Some(p) = pid {
+            if row.owning_pid as i32 != p {
+                continue;
+            }
+        }
+        out.push(SocketInfo {
+            protocol: "tcp".to_string(),
+            local: format!("{}:{}", ipv4_str(row.local_addr), port_of(row.local_port)),
+            remote: if row.remote_addr == 0 {
+                None
+            } else {
+                Some(format!("{}:{}", ipv4_str(row.remote_addr), port_of(row.remote_port)))
+            },
+            state: tcp_state(row.state),
+            pid: Some(row.owning_pid as i32),
+            inode: None,
+        });
+    }
+    Ok(out)
+}
+
+/// 枚举 UDP 端点。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID；None 表示全系统
+///
+/// # 返回值
+/// 端点列表
+fn udp_sockets(pid: Option<i32>) -> Result<Vec<SocketInfo>, String> {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct UdpRow {
+        local_addr: u32,
+        local_port: u32,
+        owning_pid: u32,
+    }
+    #[link(name = "iphlpapi")]
+    extern "system" {
+        fn GetExtendedUdpTable(
+            pudptable: *mut c_void,
+            pdwsize: *mut u32,
+            border: i32,
+            ulaf: u32,
+            tableclass: i32,
+            reserved: u32,
+        ) -> u32;
+    }
+    const AF_INET: u32 = 2;
+    const UDP_TABLE_OWNER_PID: i32 = 1;
+
+    let mut size = 0u32;
+    unsafe { GetExtendedUdpTable(std::ptr::null_mut(), &mut size, 0, AF_INET, UDP_TABLE_OWNER_PID, 0) };
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buf = vec![0u8; size as usize];
+    let rc = unsafe {
+        GetExtendedUdpTable(
+            buf.as_mut_ptr() as *mut c_void,
+            &mut size,
+            0,
+            AF_INET,
+            UDP_TABLE_OWNER_PID,
+            0,
+        )
+    };
+    if rc != 0 {
+        return Err(format!("GetExtendedUdpTable 失败: {rc}"));
+    }
+    let count = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let row_size = std::mem::size_of::<UdpRow>();
+    let mut out = Vec::new();
+    for i in 0..count {
+        let off = 4 + i * row_size;
+        if off + row_size > buf.len() {
+            break;
+        }
+        let row: UdpRow = unsafe { std::ptr::read_unaligned(buf[..].as_ptr().add(off) as *const UdpRow) };
+        if let Some(p) = pid {
+            if row.owning_pid as i32 != p {
+                continue;
+            }
+        }
+        out.push(SocketInfo {
+            protocol: "udp".to_string(),
+            local: format!("{}:{}", ipv4_str(row.local_addr), port_of(row.local_port)),
+            remote: None,
+            state: "NONE".to_string(),
+            pid: Some(row.owning_pid as i32),
+            inode: None,
+        });
+    }
+    Ok(out)
+}
+
+/// TCP 状态码转名字。
+///
+/// # 参数
+/// * `s` - MIB_TCP_STATE 值
+///
+/// # 返回值
+/// 状态名
+fn tcp_state(s: u32) -> String {
+    match s {
+        1 => "CLOSED",
+        2 => "LISTEN",
+        3 => "SYN_SENT",
+        4 => "SYN_RCVD",
+        5 => "ESTABLISHED",
+        6 => "FIN_WAIT1",
+        7 => "FIN_WAIT2",
+        8 => "CLOSE_WAIT",
+        9 => "CLOSING",
+        10 => "LAST_ACK",
+        11 => "TIME_WAIT",
+        12 => "DELETE_TCB",
+        _ => "UNKNOWN",
+    }
+    .to_string()
+}
+
+/// A8 每磁盘 IO：`IOCTL_DISK_PERFORMANCE`。
+///
+/// # 返回值
+/// 磁盘 IO 列表
+fn disk_io_of() -> Result<Vec<DiskIo>, String> {
+    const IOCTL_DISK_PERFORMANCE: u32 = 0x0007_0020;
+    let mut out = Vec::new();
+    for i in 0..32u32 {
+        let name = to_wide(&format!("\\\\.\\PhysicalDrive{i}"));
+        let h = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                0x8000_0000, // GENERIC_READ
+                // FILE_SHARE_READ | FILE_SHARE_WRITE：独占打开会被系统占用挡住
+                0x0000_0001 | 0x0000_0002,
+                std::ptr::null_mut(),
+                3, // OPEN_EXISTING
+                0,
+                HANDLE::default(),
+            )
+        };
+        if h.is_invalid() {
+            continue;
+        }
+        let mut perf = DiskPerformance::default();
+        let mut ret = 0u32;
+        let ok = unsafe {
+            DeviceIoControl(
+                h,
+                IOCTL_DISK_PERFORMANCE,
+                std::ptr::null_mut(),
+                0,
+                &mut perf as *mut _ as *mut c_void,
+                std::mem::size_of::<DiskPerformance>() as u32,
+                &mut ret,
+                std::ptr::null_mut(),
+            )
+        };
+        unsafe { let _ = CloseHandle(h); };
+        if ok == 0 {
+            continue;
+        }
+        out.push(DiskIo {
+            name: format!("PhysicalDrive{i}"),
+            read_bytes: perf.bytes_read.max(0) as u64,
+            written_bytes: perf.bytes_written.max(0) as u64,
+            read_count: perf.read_count as u64,
+            write_count: perf.write_count as u64,
+            queue_depth: Some(perf.queue_depth as u64),
+        });
+    }
+    if out.is_empty() {
+        return Err("未能打开任何 PhysicalDrive 查询性能；通常需要管理员权限".to_string());
+    }
+    Ok(out)
+}
+
+/// D4 内核模块 / 驱动：`NtQuerySystemInformation(SystemModuleInformation)`。
+///
+/// # 返回值
+/// 内核模块列表
+fn kernel_modules_of() -> Result<Vec<KernelModuleInfo>, String> {
+    let mut buf = vec![0u8; 1 << 20];
+    let mut len = buf.len() as u32;
+    let mut rc = 0i32;
+    for _ in 0..4 {
+        let mut ret = 0u32;
+        rc = unsafe {
+            NtQuerySystemInformation(
+                SYSTEM_MODULE_INFORMATION,
+                buf.as_mut_ptr() as *mut c_void,
+                len,
+                &mut ret,
+            )
+        };
+        if rc == STATUS_SUCCESS {
+            break;
+        }
+        if rc == 0xC000_0004u32 as i32 && ret > len && ret < (1 << 28) {
+            len = ret;
+            buf = vec![0u8; len as usize];
+            continue;
+        }
+        break;
+    }
+    if rc != STATUS_SUCCESS {
+        return Err(format!(
+            "NtQuerySystemInformation(SystemModuleInformation) 失败: 0x{:08x}",
+            rc as u32
+        ));
+    }
+
+    // RTL_PROCESS_MODULES { ULONG NumberOfModules; RTL_PROCESS_MODULE_INFORMATION Modules[] }
+    // x64 上每项 296 字节：Section(8) MappedBase(8) ImageBase(8) ImageSize(4) Flags(4)
+    //   LoadOrderIndex(2) InitOrderIndex(2) LoadCount(2) OffsetToFileName(2) FullPathName(256)
+    const MOD_HDR: usize = 8;
+    const MOD_ENTRY: usize = 296;
+    const FULL_PATH: usize = 8 + 8 + 8 + 4 + 4 + 2 + 2 + 2 + 2;
+    let n = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let mut out = Vec::new();
+    for i in 0..n.min(4096) {
+        let off = MOD_HDR + i * MOD_ENTRY;
+        if off + MOD_ENTRY > buf.len() {
+            break;
+        }
+        let image_base = usize::from_ne_bytes([
+            buf[off + 16], buf[off + 17], buf[off + 18], buf[off + 19],
+            buf[off + 20], buf[off + 21], buf[off + 22], buf[off + 23],
+        ]);
+        let image_size = u32::from_ne_bytes([buf[off + 24], buf[off + 25], buf[off + 26], buf[off + 27]]);
+        let offset_to_name = u16::from_ne_bytes([buf[off + 34], buf[off + 35]]) as usize;
+        let path_start = off + FULL_PATH + offset_to_name;
+        if path_start >= buf.len() {
+            continue;
+        }
+        let end = buf[path_start..]
+            .iter()
+            .position(|c| *c == 0)
+            .map(|p| path_start + p)
+            .unwrap_or(path_start);
+        let path = String::from_utf8_lossy(&buf[path_start..end]).to_string();
+        let name = path
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or(&path)
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        out.push(KernelModuleInfo {
+            name,
+            path: Some(path),
+            base_address: Some(format!("{image_base:x}")),
+            size: Some(image_size as u64),
+        });
+    }
+    if out.is_empty() {
+        return Err("SystemModuleInformation 返回 0 个模块".to_string());
+    }
+    Ok(out)
+}
+
+/// D6 服务列表：SCM 枚举。
+///
+/// # 返回值
+/// 服务列表
+fn services_of() -> Result<Vec<ServiceInfo>, String> {
+    const SC_MANAGER_ENUMERATE_SERVICE: u32 = 0x0004;
+    const SERVICE_WIN32: u32 = 0x30;
+    const SC_ENUM_PROCESS_INFO: i32 = 0;
+
+    let h = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ENUMERATE_SERVICE) };
+    if h == 0 {
+        return Err("OpenSCManagerW 失败；通常需要管理员权限".to_string());
+    }
+    let mut size = 0u32;
+    let mut needed = 0u32;
+    let mut returned = 0u32;
+    let mut resume = 0u32;
+    // 第一次拿所需缓冲大小（预期返回 ERROR_MORE_DATA）
+    unsafe {
+        EnumServicesStatusExW(
+            h,
+            SC_ENUM_PROCESS_INFO,
+            SERVICE_WIN32,
+            0x0000_0003, // SERVICE_STATE_ALL
+            std::ptr::null_mut(),
+            0,
+            &mut needed,
+            &mut returned,
+            &mut resume,
+            std::ptr::null(),
+        );
+    }
+    if needed == 0 {
+        unsafe { CloseServiceHandle(h); }
+        return Err("EnumServicesStatusExW 未返回所需缓冲大小".to_string());
+    }
+    // 申报上限，异常大时拒绝（服务数上千时该缓冲也就几百 KB）
+    if needed > 1 << 26 {
+        unsafe { CloseServiceHandle(h); }
+        return Err(format!("服务枚举缓冲异常大（{needed} 字节），拒绝分配"));
+    }
+    size = needed;
+    let mut buf = vec![0u8; size as usize];
+    let ok = unsafe {
+        EnumServicesStatusExW(
+            h,
+            SC_ENUM_PROCESS_INFO,
+            SERVICE_WIN32,
+            0x0000_0003,
+            buf.as_mut_ptr(),
+            size,
+            &mut needed,
+            &mut returned,
+            &mut resume,
+            std::ptr::null(),
+        )
+    };
+    unsafe { CloseServiceHandle(h); };
+    if ok == 0 {
+        return Err("EnumServicesStatusExW 失败".to_string());
+    }
+
+    // ENUM_SERVICE_STATUS_PROCESSW（x64）：
+    //   LPWSTR lpServiceName(0) LPWSTR lpDisplayName(8) SERVICE_STATUS_PROCESS ServiceStatus(16)
+    // SERVICE_STATUS_PROCESS 内部偏移：
+    //   dwServiceType(0) dwCurrentState(4) dwControlsAccepted(8) dwWin32ExitCode(12)
+    //   dwServiceSpecificExitCode(16) dwCheckPoint(20) dwWaitHint(24) dwProcessId(28)
+    //   dwServiceFlags(32)  —— 共 36 字节，因 8 字节对齐补到 40
+    // 结构总长 8+8+40 = 56
+    //
+    // 曾把 dwCurrentState 读成 off+16（其实是 dwServiceType=0x30），
+    // 把 dwProcessId 读成 off+48（其实是 dwServiceFlags），
+    // 结果 297 个服务的状态全部落到 "unknown"、pid 全部错位。
+    // 编译不会报错，只有真跑并断言"至少有一个 running"才发现。
+    const ENTRY: usize = 56;
+    const STATE_OFF: usize = 20;
+    const PID_OFF: usize = 44;
+    let mut out = Vec::new();
+    for i in 0..(returned as usize).min(8192) {
+        let off = i * ENTRY;
+        if off + ENTRY > buf.len() {
+            break;
+        }
+        let name_ptr = usize::from_ne_bytes([
+            buf[off], buf[off + 1], buf[off + 2], buf[off + 3],
+            buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7],
+        ]);
+        let disp_ptr = usize::from_ne_bytes([
+            buf[off + 8], buf[off + 9], buf[off + 10], buf[off + 11],
+            buf[off + 12], buf[off + 13], buf[off + 14], buf[off + 15],
+        ]);
+        let state = u32::from_ne_bytes([
+            buf[off + STATE_OFF], buf[off + STATE_OFF + 1],
+            buf[off + STATE_OFF + 2], buf[off + STATE_OFF + 3],
+        ]);
+        let pid = u32::from_ne_bytes([
+            buf[off + PID_OFF], buf[off + PID_OFF + 1],
+            buf[off + PID_OFF + 2], buf[off + PID_OFF + 3],
+        ]);
+        let name = unsafe { read_wide_ptr(name_ptr) }.unwrap_or_default();
+        let display = unsafe { read_wide_ptr(disp_ptr) }.unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        out.push(ServiceInfo {
+            name,
+            display_name: display,
+            state: match state {
+                1 => "stopped",
+                2 => "start_pending",
+                3 => "stop_pending",
+                4 => "running",
+                5 => "continue_pending",
+                6 => "pause_pending",
+                7 => "paused",
+                _ => "unknown",
+            }
+            .to_string(),
+            // 启动类型与账号需另调 QueryServiceConfigW；本实现未做，留空而不编造
+            start_type: "unknown".to_string(),
+            account: None,
+            binary_path: None,
+            is_driver: None,
+            pid: if pid == 0 { None } else { Some(pid as i32) },
+        });
+    }
+    if out.is_empty() {
+        return Err("EnumServicesStatusExW 返回 0 个服务".to_string());
+    }
+    Ok(out)
+}
+
+/// 读一个由本机分配的 UTF-16 字符串指针。
+///
+/// # 安全性
+/// `ptr` 必须指向以 NUL 结尾的合法 UTF-16 串，或为 0。
+unsafe fn read_wide_ptr(ptr: usize) -> Option<String> {
+    if ptr == 0 {
+        return None;
+    }
+    let p = ptr as *const u16;
+    let mut len = 0usize;
+    // 与 handles_of 同样给上界：不信任长度字段，最多扫 4096 个码元
+    while len < 4096 && *p.add(len) != 0 {
+        len += 1;
+    }
+    if len == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
+}
+
+/// A10 GPU：枚举显示适配器。
+///
+/// 只返回**确实拿得到**的字段（适配器名、设备 ID）。使用率/显存/温度/功耗需要
+/// `D3DKMTQueryStatistics`（其结构含大联合体，偏移写错会内存损坏），本实现不做，
+/// 相应字段一律为 null 而不是 0。
+///
+/// # 返回值
+/// 适配器列表
+fn gpus_of() -> Result<Vec<GpuInfo>, String> {
+    let mut out = Vec::new();
+    for i in 0..16u32 {
+        let mut dd = DisplayDeviceW::default();
+        let ok = unsafe { EnumDisplayDevicesW(std::ptr::null(), i, &mut dd, 0) };
+        if ok == 0 {
+            break;
+        }
+        let name = String::from_utf16_lossy(
+            &dd.device_string[..dd.device_string.iter().position(|c| *c == 0).unwrap_or(0)],
+        );
+        let id = String::from_utf16_lossy(
+            &dd.device_id[..dd.device_id.iter().position(|c| *c == 0).unwrap_or(0)],
+        );
+        if name.is_empty() {
+            continue;
+        }
+        let vendor = if id.contains("VEN_10DE") {
+            "nvidia"
+        } else if id.contains("VEN_1002") || id.contains("VEN_1022") {
+            "amd"
+        } else if id.contains("VEN_8086") {
+            "intel"
+        } else if id.contains("VEN_106B") || id.contains("APPLE") {
+            "apple"
+        } else {
+            "unknown"
+        };
+        out.push(GpuInfo {
+            vendor: vendor.to_string(),
+            name,
+            memory_total: None,
+            memory_used: None,
+            usage: None,
+            temperature_c: None,
+            power_w: None,
+            driver_version: None,
+        });
+    }
+    if out.is_empty() {
+        return Err("EnumDisplayDevicesW 未枚举到显示适配器".to_string());
+    }
+    Ok(out)
+}
+
