@@ -2670,6 +2670,46 @@ fn smbios_string(raw: &[u8], strbase: usize, idx: usize) -> Option<String> {
     None
 }
 
+/// Linux 侧的进程列表：过滤掉 sysinfo 混进来的**线程**。
+///
+/// # 为什么要过滤
+/// `sysinfo` 0.33 的 Linux 后端会递归进 `/proc/<pid>/task/`，把每个 task（线程）
+/// 也 push 进同一个进程列表（源码 `unix/linux/process.rs` 的 `get_all_pid_entries`，
+/// 它自己还留了 `// FIXME: ... it can be listed in /proc/[PID]/task subfolder and
+/// directly in /proc at the same time`）。
+///
+/// 后果有两个，Kali 真机实测：
+///   * 语义不一致 —— Windows 的 `process.list` 返回 321 个**进程**，
+///     而 Linux 返回 1338（进程 + 线程），调用方拿到的根本不是同一种东西。
+///   * 性能浪费 —— 多枚举 6.5 倍条目，`process.list` 因此从应有的几十毫秒
+///     变成 228~379ms。
+///
+/// # 判据
+/// **线程只有 `/proc/<pid>/task/<tid>`，没有顶层 `/proc/<tid>`；进程两种都有。**
+/// `ps -e` 与 procps 的判定与此一致（实测 `/proc` 顶层 207 个、`ps -e` 201 个）。
+/// 内核线程（如 kworker）**有**顶层目录，因此不会被误过滤。
+///
+/// # 返回值
+/// 只含进程的列表
+fn linux_processes() -> Vec<ProcessDetail> {
+    common::sysinfo_processes()
+        .into_iter()
+        .filter(|p| Path::new(&format!("/proc/{}", p.pid)).is_dir())
+        .collect()
+}
+
+/// Linux 侧的进程树：基于 [`linux_processes`] 构建，避免把线程挂进树。
+///
+/// # 返回值
+/// 根节点列表
+fn linux_process_tree() -> Vec<crate::model::ProcessTreeNode> {
+    let flat: Vec<(i32, Option<i32>, String)> = linux_processes()
+        .into_iter()
+        .map(|p| (p.pid, p.ppid, p.name))
+        .collect();
+    common::build_tree(&flat)
+}
+
 /// 平台入口：按 op 分发。
 ///
 /// # 参数
@@ -2683,20 +2723,22 @@ pub fn call(op: &str, args: &str) -> String {
     match op {
         // ---------- 进程列表 / 树 ----------
         "process.list" => {
-            let mut list = common::sysinfo_processes();
+            let mut list = linux_processes();
             for p in list.iter_mut() {
                 fill_linux_fields(p);
             }
             ok_json(list)
         }
-        "process.tree" => ok_json(common::process_tree()),
+        "process.tree" => ok_json(linux_process_tree()),
 
         // ---------- 进程详情 ----------
         "process.detail" => match need_pid(&a) {
             Ok(pid) => match proc_detail(pid) {
                 Ok(mut d) => {
                     // 合并 sysinfo 的 CPU/内存等跨平台指标（Linux /proc 拿不到使用率差值）。
-                    if let Some(s) = common::sysinfo_processes().into_iter().find(|p| p.pid == pid) {
+                    // 用单进程刷新：此前是 sysinfo_processes()（枚举**全部**进程，在 Linux 上
+                    // 还会把线程也算进来）再筛出目标，白付全量代价。
+                    if let Some(s) = common::sysinfo_process_one(pid) {
                         d.cpu_usage = s.cpu_usage;
                         if s.rss > 0 {
                             d.rss = s.rss;
