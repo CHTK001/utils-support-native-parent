@@ -47,14 +47,19 @@ jobs:
             file_expect: 'ELF 64-bit.*x86-64'
             smoke: true
           - platform: darwin-x86_64
-            # macos-15 主机是 arm64，x86_64 dylib 由 build.sh 交叉编译产出；
-            # 本机 python 是 arm64，装不上 x86_64 dylib，故本腿不做运行时冒烟
-            runs-on: macos-15
+            # 用 macos-15-intel（**原生 Intel x86_64**），从而能真 dlopen x86_64
+            # dylib 做运行时冒烟。
+            # 此前跑在 macos-15（arm64）上，arm64 的 python 装不上 x86_64 dylib，
+            # 该腿只能做导出+架构断言 —— 这是本模块最后一个「有产物但无运行时验证」
+            # 的平台，已由 A/N 记录为未验项。
+            # macos-15-intel 是 Actions 最后一个 x86_64 镜像，支持到 2027-08
+            # （GitHub 公告：macOS 15 runner 退役后不再提供该架构）。
+            runs-on: macos-15-intel
             build_os: darwin
             build_arch: x86_64
             lib: libsysinformer.dylib
             file_expect: 'Mach-O 64-bit.*x86_64'
-            smoke: false
+            smoke: true
           - platform: darwin-aarch64
             runs-on: macos-15
             build_os: darwin
