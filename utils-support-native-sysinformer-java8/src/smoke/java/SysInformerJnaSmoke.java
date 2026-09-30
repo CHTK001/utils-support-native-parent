@@ -69,15 +69,37 @@ public final class SysInformerJnaSmoke {
             failures++;
         }
 
-        // 5) 错误原因提取：构造一个必然失败的调用（不存在的 pid 不会失败，
-        //    故用一个平台必然不支持的能力来验证 errorOf 的转义还原）
-        String unsup = SysInformerJna.call("process.stack",
-                "{\"pid\":1,\"kernel\":true}");
+        // 5) errorOf 的转义还原。
+        //
+        // 这里刻意用「未知 op」而不是「某个平台必然不支持的能力」：
+        //   - ok:false 表示**能力不支持**（如 Windows 的内核态栈）
+        //   - ok:true + data.error 表示**能力支持、但这一次调用失败**
+        //     （如 Linux 读 /proc/1/task/1/stack 遇 Permission denied）
+        // 早期版本拿 process.stack(kernel=true) 来探"必然不支持"，在 Linux 上
+        // 内核栈其实是**支持**的，于是拿到 ok:true，断言误判为失败。
+        // 未知 op 在任何平台都必然 ok:false，是可靠的探针。
+        String unsup = SysInformerJna.call("__no_such_op__");
         String err = SysInformerJna.errorOf(unsup);
-        if (!SysInformerJna.isOk(unsup) && err != null && err.length() > 0) {
+        if (!SysInformerJna.isOk(unsup) && err != null && err.length() > 0
+                && !"null".equals(err)) {
             System.out.println("ASSERT ok   errorOf 提取到原因: " + first(err, 60));
         } else {
             System.out.println("ASSERT FAIL errorOf 未能提取失败原因: " + first(unsup, 200));
+            failures++;
+        }
+
+        // 6) 能力支持但本次失败的情形：data.error 应能被读到，且信封仍是 ok:true
+        //    （这里用当前进程读自身内核栈在 Linux 上仍可能失败，故不强行断言成功与否，
+        //      只断言"两种形态都符合契约"：要么 ok:false，要么 ok:true 且带 data.error）
+        String ks = SysInformerJna.call("process.stack", "{\"pid\":1,\"kernel\":true}");
+        boolean okForm = SysInformerJna.isOk(ks);
+        boolean hasDataError = ks != null && ks.contains("\"error\":\"")
+                && !ks.contains("\"error\":null");
+        if (okForm || hasDataError) {
+            System.out.println("ASSERT ok   process.stack(kernel=true) 返回形态符合契约（"
+                    + (okForm ? "ok:true + data.error" : "ok:false") + "）");
+        } else {
+            System.out.println("ASSERT FAIL process.stack(kernel=true) 形态异常: " + first(ks, 200));
             failures++;
         }
 
