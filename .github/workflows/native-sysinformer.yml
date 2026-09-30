@@ -492,6 +492,23 @@ jobs:
             "-Dchua.sysinformer.native.path=$(pwd)/$LIB_PATH" \
             -cp "target/smoke-jna${SEP}$CP" SysInformerJnaSmoke
 
+      - name: Production acceptance (boundary / concurrency / perf / leak / numeric)
+        # 四平台都跑。这套验收回答的是"能用"之上的问题，且它的**数值对照**是
+        # "返回了结构但数字是错的"的唯一防线 —— 本模块至今的 6 个 bug 全部是
+        # 它在真机上抓出来的（netlink 报文、服务状态偏移、DMI 步进、线程混入等），
+        # 全部是 cargo check 与"符号存在"级别冒烟发现不了的。
+        if: matrix.smoke != false
+        run: |
+          case "${{ matrix.build_os }}" in
+            windows) PLAT=windows ;;
+            linux)   PLAT=linux ;;
+            darwin)  PLAT=macos ;;
+            *)       echo "未知平台"; exit 1 ;;
+          esac
+          echo "生产验收平台 = $PLAT"
+          python3 -X utf8 tools/sysinformer-accept/prod_accept.py \
+            "$(pwd)/$LIB_PATH" --platform "$PLAT"
+
       - name: Stage artifact for upload
         run: |
           rm -rf stage
