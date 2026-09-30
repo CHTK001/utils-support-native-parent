@@ -78,6 +78,13 @@ def rss_bytes():
         if PLAT == "linux":
             with open("/proc/self/statm") as f:
                 return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+        if PLAT == "macos":
+            # macOS 的 ru_maxrss 单位是**字节**（Linux 是 KB），不能混用
+            import resource
+            import sys as _s
+            if _s.platform != "darwin":
+                return -1
+            return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
         # Windows：必须显式设 argtypes/restype。
         # GetCurrentProcess 的默认返回类型是 32 位 int，在 x64 上会把 64 位句柄
         # **截断**，后续调用全部失败（上一版就因此返回 -1，让泄漏检查空转）。
@@ -109,7 +116,10 @@ def rss_bytes():
 
 def handle_count():
     try:
-        if PLAT == "linux":
+        if PLAT in ("linux", "macos"):
+            # macOS 也有 /dev/fd（fdescfs），等价于 Linux 的 /proc/self/fd
+            if PLAT == "macos":
+                return len(os.listdir("/dev/fd"))
             return len(os.listdir("/proc/self/fd"))
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         k32.GetCurrentProcess.restype = ctypes.c_void_p
@@ -322,6 +332,10 @@ n_api = len(env.get("data") or []) if env and env.get("ok") else 0
 if PLAT == "linux":
     out = subprocess.run(["ps", "-e", "--no-headers"], capture_output=True, text=True)
     n_ps = len([l for l in out.stdout.splitlines() if l.strip()])
+elif PLAT == "macos":
+    # BSD ps 不支持 --no-headers；用 -o pid= 显式要求无表头
+    out = subprocess.run(["ps", "-eo", "pid="], capture_output=True, text=True)
+    n_ps = len([l for l in out.stdout.splitlines() if l.strip()])
 else:
     out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True,
                          shell=False)
@@ -342,6 +356,9 @@ if env and env.get("ok"):
         with open("/proc/meminfo") as f:
             kb = int([l for l in f if l.startswith("MemTotal")][0].split()[1])
         total_os = kb * 1024
+    elif PLAT == "macos":
+        out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
+        total_os = int(out.stdout.strip())
     else:
         import ctypes.wintypes as wt
         class MEMSTATUS(ctypes.Structure):
