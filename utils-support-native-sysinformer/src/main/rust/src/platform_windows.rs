@@ -652,6 +652,11 @@ pub fn call(op: &str, args: &str) -> String {
             }
             ok(serde_json::to_value(list).unwrap_or(serde_json::Value::Null))
         }
+        "process.tree" => {
+            // 跨平台基线即可满足：树结构由 common::process_tree() 用显式栈构建
+            // （带 visited 环切断，防恶意进程表构造环导致栈溢出）。
+            serde_json::to_string(&Envelope::ok(common::process_tree())).unwrap_or_default()
+        }
         "process.detail" => wrap(need_pid().and_then(|pid| {
             let mut found = common::sysinfo_processes()
                 .into_iter()
