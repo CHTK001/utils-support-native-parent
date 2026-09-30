@@ -138,6 +138,7 @@ jobs:
           python3 -X utf8 - "$LIB_PATH" "${{ matrix.build_os }}" <<'PY'
           import ctypes
           import json
+          import os
           import sys
 
           lib_path, expect_platform = sys.argv[1], sys.argv[2]
@@ -250,6 +251,108 @@ jobs:
           else:
               print(f"ASSERT FAIL 未知 op 未被拒绝: {raw[:120]!r}")
               failures += 1
+
+          # --- 5) Windows 专属 op 的功能断言 ---
+          # GitHub 的 windows runner 以管理员运行，故这些能力可测。
+          # 断言"至少拿到一条"，而不是"符号存在"——被验的是真的实现了。
+          if expect_platform == "windows":
+              for op, args, min_n, field in [
+                  ("kernel.modules", b"{}", 20, "name"),
+                  ("socket.list", b"{}", 1, "local"),
+                  ("service.list", b"{}", 20, "display_name"),
+                  ("disk.io", b"{}", 1, "name"),
+                  ("gpu.list", b"{}", 1, "vendor"),
+                  ("memory.modules", b"{}", 1, "slot"),
+              ]:
+                  p = lib.sysinformer_call(op.encode(), args)
+                  raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+                  lib.sysinformer_free_string(p)
+                  e = json.loads(raw)
+                  if e.get("ok") is not True:
+                      print(f"ASSERT FAIL {op} ok != true: {e.get('error')}")
+                      failures += 1
+                      continue
+                  data = e.get("data") or []
+                  if len(data) < min_n:
+                      print(f"ASSERT FAIL {op} 只返回 {len(data)} 条（期望 >= {min_n}）")
+                      failures += 1
+                      continue
+                  if not all(d.get(field) is not None for d in data[:10]):
+                      print(f"ASSERT FAIL {op} 有项缺少字段 {field}")
+                      failures += 1
+                      continue
+                  print(f"ASSERT ok   {op} -> {len(data)} 条")
+
+              # process.env 读自身进程，与 os.environ 交叉核对（大小写两边都要归一化）
+              p = lib.sysinformer_call(b"process.env", json.dumps({"pid": os.getpid()}).encode())
+              raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+              lib.sysinformer_free_string(p)
+              e = json.loads(raw)
+              if e.get("ok") is not True:
+                  print(f"ASSERT FAIL process.env: {e.get('error')}")
+                  failures += 1
+              else:
+                  peb = {x["key"].lower(): x["value"] for x in e["data"]}
+                  ose = {k.lower(): v for k, v in os.environ.items()}
+                  mism = [k for k in ose if k in peb and peb[k] != ose[k]]
+                  if mism:
+                      print(f"ASSERT FAIL process.env 与 os.environ 有 {len(mism)} 处不一致: {mism[:3]}")
+                      failures += 1
+                  else:
+                      print(f"ASSERT ok   process.env -> {len(e['data'])} 条，与 os.environ 一致")
+
+              # process.mappings 读自身
+              p = lib.sysinformer_call(b"process.mappings", json.dumps({"pid": os.getpid()}).encode())
+              raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+              lib.sysinformer_free_string(p)
+              e = json.loads(raw)
+              if e.get("ok") is True and len(e.get("data") or []) > 5:
+                  print(f"ASSERT ok   process.mappings -> {len(e['data'])} 个区域")
+              else:
+                  print(f"ASSERT FAIL process.mappings: {e.get('error') or '条数过少'}")
+                  failures += 1
+
+              # 事件驱动（ETW）：启动 -> 派生进程 -> 必须收到 ProcessStart -> 停止
+              p = lib.sysinformer_call(b"events.start", b'{"mask":65535}')
+              raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+              lib.sysinformer_free_string(p)
+              e = json.loads(raw)
+              if e.get("ok") is not True:
+                  print(f"ASSERT FAIL events.start: {e.get('error')}")
+                  failures += 1
+              else:
+                  import subprocess as _sp
+                  procs = [_sp.Popen(["cmd", "/c", "echo", "ci-probe"],
+                                     stdout=_sp.DEVNULL, stderr=_sp.DEVNULL) for _ in range(2)]
+                  for q in procs:
+                      q.wait(timeout=20)
+                  import time as _t
+                  _t.sleep(2)
+                  p = lib.sysinformer_call(b"events.poll", b"{}")
+                  raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+                  lib.sysinformer_free_string(p)
+                  e = json.loads(raw)
+                  kinds = {x["kind"] for x in (e.get("data") or [])}
+                  # 派生进程后必须能看到 ProcessStart；否则事件通路是假的
+                  if "ProcessStart" in kinds:
+                      print(f"ASSERT ok   events.poll 收到 ProcessStart（共 {len(e.get('data') or [])} 条）")
+                  else:
+                      print(f"ASSERT FAIL events.poll 未收到 ProcessStart，实际类型: {kinds}")
+                      failures += 1
+                  lib.sysinformer_call(b"events.stop", b"{}")
+
+              # 内核栈必须显式不支持（不伪造）
+              p = lib.sysinformer_call(
+                  b"process.stack",
+                  json.dumps({"pid": os.getpid(), "kernel": True}).encode())
+              raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+              lib.sysinformer_free_string(p)
+              e = json.loads(raw)
+              if e.get("ok") is False and e.get("error"):
+                  print("ASSERT ok   process.stack(kernel=true) 显式不支持")
+              else:
+                  print("ASSERT FAIL 内核栈未被显式拒绝")
+                  failures += 1
 
           if failures:
               print(f"SYNINFORMER_SMOKE_FAILED failures={failures}")

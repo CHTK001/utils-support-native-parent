@@ -15,15 +15,16 @@
 
 use crate::common;
 use crate::model::{
-    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, EnvVar, Envelope, GpuInfo,
-    HandleInfo, KernelModuleInfo, MappingInfo, ModuleInfo, PrivilegeInfo, ProcessDetail,
-    ServiceInfo, SocketInfo, ThreadInfo,
+    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, EnvVar, Envelope, EventKind,
+    EventRecord, GpuInfo, HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo,
+    PrivilegeInfo, ProcessDetail, SensorInfo, ServiceInfo, SocketInfo, StackFrame, StackTrace,
+    ThreadInfo,
 };
 use crate::PLATFORM;
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, MAX_PATH};
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, Process32FirstW, Process32NextW,
     Thread32First, Thread32Next, MODULEENTRY32W, PROCESSENTRY32W, THREADENTRY32,
@@ -717,29 +718,656 @@ pub fn call(op: &str, args: &str) -> String {
         }
 
         // ---------- 仍不支持（原因写清，不用空集合冒充）----------
-        "process.stack" => unsupported_json(
-            "process.stack",
-            "用户态栈回溯需 dbghelp StackWalk64（按其 API 需先 SymInitialize + 逐帧读取栈内存）；\
-             内核态栈需 ETW + 管理员权限。本实现均未做",
+        "sensor.list" => {
+            wrap(sensors_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
+        }
+        "memory.modules" => wrap(
+            memory_modules_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())),
         ),
-        "sensor.list" => unsupported_json(
-            "sensor.list",
-            "温度/风扇/电压需 WMI（MSAcpi_ThermalZoneTemperature 等）或 LibreHardwareMonitor 级方案，\
-             前者在多数机器上返回不支持、后者依赖第三方驱动；本实现未做",
-        ),
-        "memory.modules" => unsupported_json(
-            "memory.modules",
-            "物理内存条信息需 WMI Win32_PhysicalMemory 查询（COM 通道），本实现未做",
-        ),
-        "events.start" | "events.poll" | "events.stop" => unsupported_json(
-            op,
-            "事件驱动需 ETW 实时消费（StartTrace + EnableTraceEx2 + ProcessTrace + 回调线程），\
-             需管理员权限；且本机无法运行验证，为避免写入不可验证的代码，本实现未做",
-        ),
+        // ---------- D1 事件驱动（ETW 实时会话，需管理员）----------
+        "events.start" => {
+            let mask = arg_i64(args, "mask").unwrap_or(-1);
+            let mask = if mask < 0 { u32::MAX } else { mask as u32 };
+            serde_json::to_string(&match events_start(mask) {
+                Ok(()) => Envelope::ok(()),
+                Err(e) => Envelope::err(e),
+            })
+            .unwrap_or_default()
+        }
+        "events.poll" => serde_json::to_string(&match events_poll() {
+            Ok(v) => Envelope::ok(v),
+            Err(e) => Envelope::err(e),
+        })
+        .unwrap_or_default(),
+        "events.stop" => {
+            events_stop();
+            serde_json::to_string(&Envelope::ok(())).unwrap_or_default()
+        }
 
+        // ---------- D2 栈回溯 ----------
+        "process.stack" => {
+            let want_kernel = serde_json::from_str::<serde_json::Value>(args)
+                .ok()
+                .and_then(|v| v.get("kernel").and_then(|x| x.as_bool()))
+                .unwrap_or(false);
+            let pid = arg_i64(args, "pid").map(|p| p as i32);
+            if want_kernel {
+                return unsupported_json(
+                    "process.stack",
+                    "内核态栈需 ETW 的栈事件或内核调试器；用户态库无法安全获取，本实现未做",
+                );
+            }
+            match pid {
+                Some(p) if p == std::process::id() as i32 => {
+                    // 只能回溯调用线程自身。注意：本函数经 FFI 被 Java 调用，
+                    // 采集到的是**调用线程**的栈，不是某个任意线程的。
+                    serde_json::to_string(&match capture_own_user_stack(2) {
+                        Ok(frames) => Envelope::ok(StackTrace {
+                            pid: p,
+                            tid: None,
+                            kernel: false,
+                            frames,
+                            error: None,
+                        }),
+                        Err(e) => Envelope::err(e),
+                    })
+                    .unwrap_or_default()
+                }
+                Some(p) => unsupported_json(
+                    "process.stack",
+                    &format!(
+                        "回溯其它进程（pid={p}）的用户态栈需挂起目标线程 + GetThreadContext + \
+                         StackWalk64 逐帧读目标内存（dbghelp），且目标运行期间栈可能不一致；\
+                         本实现只支持当前进程"
+                    ),
+                ),
+                None => unsupported_json("process.stack", "缺少 pid 参数"),
+            }
+        }
+
+        // ---------- 未知 op ----------
         other => serde_json::to_string(&Envelope::<()>::err(unsupported(other, PLATFORM)))
             .unwrap_or_default(),
     }
+}
+
+/// D4 内存条（A5）：WMI `Win32_PhysicalMemory`。
+///
+/// # 返回值
+/// 内存条列表
+fn memory_modules_of() -> Result<Vec<MemoryModule>, String> {
+    use wmi::WMIConnection;
+
+    // wmi 0.18 起 WMIConnection::new() 无参，内部自行初始化 COM；
+    // COMLibrary 在该版本已不再是公开类型（早先按旧 API 写导致编译失败）。
+    let wmi = WMIConnection::new().map_err(|e| format!("连接 WMI 失败: {e}"))?;
+    let rows: Vec<std::collections::HashMap<String, wmi::Variant>> = wmi
+        .raw_query("SELECT BankLabel, DeviceLocator, Capacity, Speed, SMBIOSMemoryType, Manufacturer, SerialNumber FROM Win32_PhysicalMemory")
+        .map_err(|e| format!("查询 Win32_PhysicalMemory 失败: {e}"))?;
+
+    let mut out = Vec::new();
+    for (i, r) in rows.into_iter().enumerate() {
+        let s = |k: &str| -> Option<String> {
+            r.get(k).and_then(|v| match v {
+                wmi::Variant::String(x) => Some(x.clone()),
+                _ => None,
+            })
+        };
+        let u = |k: &str| -> Option<u64> {
+            r.get(k).and_then(|v| match v {
+                wmi::Variant::UI8(x) => Some(*x),
+                wmi::Variant::UI4(x) => Some(*x as u64),
+                wmi::Variant::I8(x) if *x >= 0 => Some(*x as u64),
+                wmi::Variant::String(x) => x.parse().ok(),
+                _ => None,
+            })
+        };
+        let slot = s("DeviceLocator")
+            .or_else(|| s("BankLabel"))
+            .unwrap_or_else(|| format!("slot{i}"));
+        // SMBIOSMemoryType：0x1A=DDR4, 0x22=DDR5, 0x18=DDR3 ...（按 SMBIOS 规范）
+        let mtype = u("SMBIOSMemoryType").map(|t| {
+            match t {
+                0x18 => "DDR3",
+                0x1A => "DDR4",
+                0x22 => "DDR5",
+                0x14 => "DDR2",
+                _ => "unknown",
+            }
+            .to_string()
+        });
+        out.push(MemoryModule {
+            slot,
+            capacity: u("Capacity").unwrap_or(0),
+            memory_type: mtype,
+            speed_mhz: u("Speed").map(|v| v as u32),
+            manufacturer: s("Manufacturer").map(|x| x.trim().to_string()).filter(|x| !x.is_empty()),
+            serial: s("SerialNumber").map(|x| x.trim().to_string()).filter(|x| !x.is_empty()),
+        });
+    }
+    if out.is_empty() {
+        return Err("Win32_PhysicalMemory 未返回任何内存条；虚拟机或 WMI 不可用时常见".to_string());
+    }
+    Ok(out)
+}
+
+/// A11 硬件传感器：WMI 温度/风扇/电压。
+///
+/// 注意：`MSAcpi_ThermalZoneTemperature` 等类**多数机器上由 BIOS 决定是否提供**，
+/// 返回空是正常情况而非缺陷。此处如实返回"未取到"，不编造数值。
+///
+/// # 返回值
+/// 传感器列表
+fn sensors_of() -> Result<Vec<SensorInfo>, String> {
+    use wmi::WMIConnection;
+
+    let wmi = WMIConnection::new().map_err(|e| format!("连接 WMI 失败: {e}"))?;
+    let mut out = Vec::new();
+
+    // 温度：返回值是开尔文的十倍
+    if let Ok(rows) = wmi.raw_query::<std::collections::HashMap<String, wmi::Variant>>(
+        "SELECT InstanceName, CurrentTemperature FROM MSAcpi_ThermalZoneTemperature",
+    ) {
+        for r in rows {
+            let name = r
+                .get("InstanceName")
+                .and_then(|v| match v {
+                    wmi::Variant::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "thermal zone".to_string());
+            if let Some(wmi::Variant::UI4(t)) = r.get("CurrentTemperature") {
+                out.push(SensorInfo {
+                    name,
+                    kind: "temperature".to_string(),
+                    value: (*t as f32) / 10.0 - 273.15,
+                    unit: "C".to_string(),
+                });
+            }
+        }
+    }
+    // 风扇
+    if let Ok(rows) =
+        wmi.raw_query::<std::collections::HashMap<String, wmi::Variant>>(
+            "SELECT Name, DesiredSpeed FROM Win32_Fan",
+        )
+    {
+        for r in rows {
+            let name = r
+                .get("Name")
+                .and_then(|v| match v {
+                    wmi::Variant::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "fan".to_string());
+            if let Some(v) = r.get("DesiredSpeed") {
+                if let Some(n) = variant_u64(v) {
+                    out.push(SensorInfo { name, kind: "fan".to_string(), value: n as f32, unit: "rpm".to_string() });
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(
+            "WMI 未提供任何温度/风扇传感器；多数机器的 BIOS 不实现 MSAcpi_ThermalZoneTemperature，\
+             这属于正常情况而非缺陷"
+                .to_string(),
+        );
+    }
+    Ok(out)
+}
+
+/// 从 `wmi::Variant` 取无符号整数。
+///
+/// # 参数
+/// * `v` - WMI 变体值
+///
+/// # 返回值
+/// 数值；类型不匹配时为 None
+fn variant_u64(v: &wmi::Variant) -> Option<u64> {
+    match v {
+        wmi::Variant::UI8(x) => Some(*x),
+        wmi::Variant::UI4(x) => Some(*x as u64),
+        wmi::Variant::UI2(x) => Some(*x as u64),
+        wmi::Variant::I4(x) if *x >= 0 => Some(*x as u64),
+        _ => None,
+    }
+}
+
+// ============================================================================
+// D1 事件驱动（ETW）
+// ============================================================================
+//
+// 真实实现，不是轮询伪装：StartTraceW 建实时会话 -> EnableTraceEx2 打开
+// Microsoft-Windows-Kernel-Process 提供者 -> OpenTraceW + ProcessTrace 在独立线程
+// 阻塞消费 -> 回调把事件推进有界队列 -> poll_events 取走 -> stop_events 用
+// ControlTraceW(EVENT_TRACE_CONTROL_STOP) 收尾。
+//
+// 需要管理员权限（ETW 实时会话受限）。
+//
+// **已知限制（如实说明，不假装完整）**：事件负载（payload）的完整解析需要 TDH
+// （TdhGetEventInformation + TdhGetProperty，tdh.dll），本实现未引入。因此
+// EventRecord 里只填**头部可靠可得**的字段：事件类型（由 EventId 映射）、
+// 时间戳、进程 ID、线程 ID，以及对可打印负载的尽力提取。要拿到镜像路径等
+// 全部属性，需接 TDH，属后续增强。
+
+/// `Microsoft-Windows-Kernel-Process` 提供者的 GUID。
+const KERNEL_PROCESS_PROVIDER: windows::core::GUID = windows::core::GUID::from_u128(
+    0x22FB_2CD6_0E7B_422B_A0C7_2FAD_1FD0_E716,
+);
+
+/// 事件队列上限。ETW 可能高频产出，无界队列会吃光内存。
+const EVENT_QUEUE_CAP: usize = 4096;
+
+/// 已订阅的事件位掩码（由 `events.start` 设置，回调据此过滤）。
+static EVENT_MASK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// 事件队列。
+static EVENTS: once_cell::sync::Lazy<std::sync::Mutex<std::collections::VecDeque<EventRecord>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
+
+/// 会话是否在运行。
+static EVENTS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 当前会话句柄（供 stop 使用）。
+static SESSION_HANDLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// ETW 会话名。必须与后续 ControlTraceW 用的一致。
+const SESSION_NAME: &str = "SysInformerSession";
+
+/// 把 EventId 映射成事件类型。
+///
+/// # 参数
+/// * `id` - Kernel-Process 提供者的 EventId
+///
+/// # 返回值
+/// 事件类型；未知 Id 返回 None
+fn event_kind_of(id: u16) -> Option<EventKind> {
+    match id {
+        1 => Some(EventKind::ProcessStart),
+        2 => Some(EventKind::ProcessStop),
+        3 => Some(EventKind::ThreadStart),
+        4 => Some(EventKind::ThreadStop),
+        5 => Some(EventKind::ImageLoad),
+        6 => Some(EventKind::ImageUnload),
+        _ => None,
+    }
+}
+
+/// EventKind 对应的位序号，用于 `events.start` 的掩码过滤。
+///
+/// # 参数
+/// * `k` - 事件类型
+///
+/// # 返回值
+/// 位序号
+fn event_bit(k: EventKind) -> u32 {
+    match k {
+        EventKind::ProcessStart => 1,
+        EventKind::ProcessStop => 2,
+        EventKind::ThreadStart => 4,
+        EventKind::ThreadStop => 8,
+        EventKind::ImageLoad => 16,
+        EventKind::ImageUnload => 32,
+        EventKind::NetworkConnect => 64,
+    }
+}
+
+/// ETW 回调。由 ETW 自己的工作线程调用。
+///
+/// # 安全性
+/// `record` 由 ETW 拥有，仅在回调期间有效；本函数只读它。
+unsafe extern "system" fn etw_callback(record: *mut windows::Win32::System::Diagnostics::Etw::EVENT_RECORD) {
+    // 回调里绝不能 panic：panic 会跨 FFI 边界展开进 ETW 的 C 代码，属未定义行为。
+    let _ = std::panic::catch_unwind(|| {
+        if record.is_null() {
+            return;
+        }
+        let r = &*record;
+        let id = r.EventHeader.EventDescriptor.Id;
+        let Some(kind) = event_kind_of(id) else {
+            return;
+        };
+        if (EVENT_MASK.load(std::sync::atomic::Ordering::Relaxed) & event_bit(kind)) == 0 {
+            return;
+        }
+        let ts = (r.EventHeader.TimeStamp as i64) / 10_000; // 100ns -> 毫秒
+        let pid = r.EventHeader.ProcessId as i32;
+        let tid = r.EventHeader.ThreadId as i32;
+
+        // 尽力从负载里提取一个可打印名（Kernel-Process 的多数事件在负载开头附近
+        // 带一个内联宽字符串）。这不是完整属性解析（那需要 TDH），故只做尽力提取。
+        let mut name = None;
+        if !r.UserData.is_null() && r.UserDataLength >= 4 {
+            let bytes = std::slice::from_raw_parts(
+                r.UserData as *const u8,
+                r.UserDataLength as usize,
+            );
+            name = best_effort_wide_string(bytes);
+        }
+
+        if let Ok(mut q) = EVENTS.lock() {
+            if q.len() >= EVENT_QUEUE_CAP {
+                q.pop_front(); // 丢最旧的，保住最新的（监控场景关心近况）
+            }
+            q.push_back(EventRecord {
+                kind,
+                timestamp_ms: ts,
+                pid,
+                ppid: if kind == EventKind::ProcessStart && tid != 0 { Some(tid) } else { None },
+                related_id: if matches!(kind, EventKind::ThreadStart | EventKind::ThreadStop) {
+                    Some(tid as i64)
+                } else {
+                    None
+                },
+                name,
+                detail: Some(format!("EventId={id}")),
+            });
+        }
+    });
+}
+
+/// 在字节负载里扫描第一个像"可打印宽字符串"的片段。
+///
+/// # 参数
+/// * `bytes` - 事件负载
+///
+/// # 返回值
+/// 提取到的字符串；找不到可打印片段时返回 None
+fn best_effort_wide_string(bytes: &[u8]) -> Option<String> {
+    // 按 2 字节对齐扫 UTF-16LE，要求至少 4 个连续可打印字符且以 NUL 结尾
+    let mut i = 0usize;
+    while i + 8 <= bytes.len() {
+        let mut chars: Vec<u16> = Vec::new();
+        let mut j = i;
+        while j + 1 < bytes.len() {
+            let c = u16::from_le_bytes([bytes[j], bytes[j + 1]]);
+            if c == 0 {
+                break;
+            }
+            if !(0x20..0x7F).contains(&c) && c < 0x80 {
+                break; // 控制字符，说明不是字符串
+            }
+            chars.push(c);
+            j += 2;
+            if chars.len() > 512 {
+                break;
+            }
+        }
+        if chars.len() >= 4 && j + 1 < bytes.len() {
+            let s: String = String::from_utf16_lossy(&chars);
+            if s.contains('\\') || s.contains('/') || s.contains('.') {
+                return Some(s);
+            }
+        }
+        i += 2;
+    }
+    None
+}
+
+/// 分配并初始化 EVENT_TRACE_PROPERTIES 缓冲（含会话名）。
+///
+/// # 参数
+/// * `name` - 会话名
+/// * `log_file_mode` - LogFileMode
+///
+/// # 返回值
+/// (缓冲, BufferSize)。缓冲必须活到 StartTraceW 返回；调用方负责保持。
+fn make_properties(name: &str, log_file_mode: u32) -> (Vec<u8>, u32) {
+    use windows::Win32::System::Diagnostics::Etw::EVENT_TRACE_PROPERTIES;
+
+    let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let props_len = std::mem::size_of::<EVENT_TRACE_PROPERTIES>();
+    // 结构后面紧跟会话名，并留 4 字节余量（对齐/结尾）
+    let total = props_len + name_wide.len() * 2 + 4;
+    let mut buf = vec![0u8; total];
+
+    let props = buf.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES;
+    unsafe {
+        (*props).Wnode.BufferSize = total as u32;
+        (*props).Wnode.Flags = 0x0000_0002; // WNODE_FLAG_TRACED_GUID
+        (*props).LogFileMode = log_file_mode;
+        (*props).LoggerNameOffset = props_len as u32;
+        // 不写日志文件：LogFileNameOffset = 0
+        (*props).LogFileNameOffset = 0;
+    }
+    // 会话名写在结构之后
+    let dst = unsafe { buf.as_mut_ptr().add(props_len) as *mut u16 };
+    for (i, c) in name_wide.iter().enumerate() {
+        unsafe { *dst.add(i) = *c; }
+    }
+    (buf, total as u32)
+}
+
+/// 启动事件订阅。
+///
+/// # 参数
+/// * `mask` - 事件位掩码（见 `event_bit`）
+///
+/// # 返回值
+/// 成功时 Ok(())；失败时给出具体原因
+fn events_start(mask: u32) -> Result<(), String> {
+    use windows::Win32::Foundation::ERROR_ALREADY_EXISTS;
+    use windows::Win32::System::Diagnostics::Etw::{
+        CloseTrace, ControlTraceW, EnableTraceEx2, OpenTraceW, ProcessTrace, StartTraceW,
+        CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_TRACE_CONTROL_STOP,
+        EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE,
+        PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME,
+    };
+    use windows::core::{GUID, PCWSTR};
+
+    if EVENTS_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("事件订阅已在运行；请先 events.stop".to_string());
+    }
+    EVENT_MASK.store(mask, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut q) = EVENTS.lock() {
+        q.clear();
+    }
+
+    let name_wide: Vec<u16> = SESSION_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+
+    // 若上次异常退出留下同名会话，先停掉它，否则 StartTraceW 返回 ERROR_ALREADY_EXISTS
+    {
+        let (mut props, _) = make_properties(SESSION_NAME, 0);
+        unsafe {
+            let _ = ControlTraceW(
+                CONTROLTRACE_HANDLE { Value: 0 },
+                PCWSTR(name_wide.as_ptr()),
+                props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+                EVENT_TRACE_CONTROL_STOP,
+            );
+        }
+    }
+
+    let (mut props, _) = make_properties(SESSION_NAME, EVENT_TRACE_REAL_TIME_MODE);
+    let mut session = CONTROLTRACE_HANDLE { Value: 0 };
+    let rc = unsafe {
+        StartTraceW(
+            &mut session,
+            PCWSTR(name_wide.as_ptr()),
+            props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+        )
+    };
+    if rc == ERROR_ALREADY_EXISTS {
+        return Err("已存在同名 ETW 会话，请稍后重试或先 events.stop".to_string());
+    }
+    if rc.0 != 0 {
+        return Err(format!("StartTraceW 失败: {}（ETW 实时会话需要管理员权限）", rc.0));
+    }
+    SESSION_HANDLE.store(session.Value, std::sync::atomic::Ordering::SeqCst);
+
+    // 打开 Kernel-Process 提供者。level 5 = TRACE_LEVEL_VERBOSE，过滤交给 mask。
+    let provider: GUID = KERNEL_PROCESS_PROVIDER;
+    let rc = unsafe {
+        EnableTraceEx2(
+            session,
+            &provider,
+            EVENT_CONTROL_CODE_ENABLE_PROVIDER.0,
+            5,
+            0,
+            0,
+            0,
+            None,
+        )
+    };
+    if rc.0 != 0 {
+        // 回滚已建的会话，避免留下孤儿会话
+        unsafe {
+            let _ = ControlTraceW(
+                session,
+                PCWSTR(name_wide.as_ptr()),
+                props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+                EVENT_TRACE_CONTROL_STOP,
+            );
+        }
+        SESSION_HANDLE.store(0, std::sync::atomic::Ordering::SeqCst);
+        return Err(format!("EnableTraceEx2 失败: {}（需要管理员权限）", rc.0));
+    }
+
+    // 会话名缓冲要活到 ProcessTrace 结束，随线程移动进去
+    let name_for_thread = name_wide.clone();
+    EVENTS_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    std::thread::spawn(move || {
+        let mut logfile = EVENT_TRACE_LOGFILEW::default();
+        logfile.LoggerName = windows::core::PWSTR(name_for_thread.as_ptr() as *mut u16);
+        // ProcessTraceMode 与 EventRecordCallback 都在匿名联合体里，必须走字段路径
+        logfile.Anonymous1.ProcessTraceMode =
+            PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+        logfile.Anonymous2.EventRecordCallback = Some(etw_callback);
+        let handle = unsafe { OpenTraceW(&mut logfile) };
+        if handle.Value == u64::MAX || handle.Value == 0 {
+            EVENTS_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+        // ProcessTrace 阻塞直到会话被 ControlTraceW(STOP) 关闭
+        unsafe { ProcessTrace(&[handle], None, None) };
+        unsafe { let _ = CloseTrace(handle); }
+        EVENTS_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+
+    // 给会话一点时间真正起来；否则紧接着的 poll 拿不到任何事件，
+    // 调用方会误以为"事件没发生"。
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    Ok(())
+}
+
+/// 取出已缓存的事件。
+///
+/// # 返回值
+/// 事件列表；订阅未启动时返回具体原因
+fn events_poll() -> Result<Vec<EventRecord>, String> {
+    if SESSION_HANDLE.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        return Err("事件订阅未启动，请先调用 events.start（需管理员权限）".to_string());
+    }
+    let mut q = EVENTS.lock().map_err(|_| "事件队列锁不可用".to_string())?;
+    let out: Vec<EventRecord> = q.drain(..).collect();
+    Ok(out)
+}
+
+/// 停止事件订阅。
+///
+/// # 返回值
+/// 无（尽力收尾；失败也不阻塞调用方）
+fn events_stop() {
+    use windows::Win32::System::Diagnostics::Etw::{
+        ControlTraceW, CONTROLTRACE_HANDLE, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_PROPERTIES,
+    };
+    use windows::core::PCWSTR;
+
+    let session = SESSION_HANDLE.swap(0, std::sync::atomic::Ordering::SeqCst);
+    if session == 0 {
+        return;
+    }
+    let name_wide: Vec<u16> = SESSION_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+    let (mut props, _) = make_properties(SESSION_NAME, 0);
+    unsafe {
+        let _ = ControlTraceW(
+            CONTROLTRACE_HANDLE { Value: session },
+            PCWSTR(name_wide.as_ptr()),
+            props.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES,
+            EVENT_TRACE_CONTROL_STOP,
+        );
+    }
+}
+
+// ============================================================================
+// D2 用户态栈回溯（RtlCaptureStackBackTrace）
+// ============================================================================
+//
+// 说明：`RtlCaptureStackBackTrace` 只能回溯**调用线程自身**的栈（它是当前上下文的
+// 快照）。要回溯**别的进程/线程**的栈，需要挂起目标线程 + GetThreadContext +
+// StackWalk64 逐帧读目标内存，那要求 dbghelp 与目标进程的读权限，且容易在
+// 目标运行时读到不一致的栈（属已知的困难问题）。
+//
+// 因此本实现对 `pid == 当前进程` 的情形给出**真实可用的用户态栈**；
+// 对其它进程明确返回不支持并说明原因，不返回伪造的帧。
+
+/// 采集本线程的用户态栈。
+///
+/// # 参数
+/// * `skip` - 跳过的帧数（去掉本函数与采集函数自身）
+///
+/// # 返回值
+/// 栈帧列表
+fn capture_own_user_stack(skip: u32) -> Result<Vec<StackFrame>, String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn RtlCaptureStackBackTrace(
+            framestoskip: u32,
+            framestocapture: u32,
+            backtrace: *mut *mut c_void,
+            backtracehash: *mut u32,
+        ) -> u16;
+    }
+    const MAX: usize = 62;
+    let mut frames: [*mut c_void; MAX] = [std::ptr::null_mut(); MAX];
+    let n = unsafe {
+        RtlCaptureStackBackTrace(skip, MAX as u32, frames.as_mut_ptr(), std::ptr::null_mut())
+    } as usize;
+    if n == 0 {
+        return Err("RtlCaptureStackBackTrace 返回 0 帧".to_string());
+    }
+    let mut out = Vec::with_capacity(n);
+    for f in frames.iter().take(n) {
+        let addr = *f as usize;
+        // 尝试把地址归到某个已加载模块（用本进程的模块表）
+        let (module, offset) = module_of_address(addr);
+        out.push(StackFrame {
+            address: format!("{addr:x}"),
+            module,
+            module_offset: offset,
+            // 符号名需 dbghelp SymFromAddr，本实现未引入
+            symbol: None,
+        });
+    }
+    Ok(out)
+}
+
+/// 把地址归属到本进程的某个已加载模块。
+///
+/// # 参数
+/// * `addr` - 指令地址
+///
+/// # 返回值
+/// (模块名, 模块内偏移)；无法归属时均为 None
+fn module_of_address(addr: usize) -> (Option<String>, Option<String>) {
+    let pid = std::process::id() as i32;
+    if let Ok(mods) = modules_of(pid) {
+        for m in mods {
+            let base = m
+                .base_address
+                .as_deref()
+                .and_then(|s| usize::from_str_radix(s, 16).ok());
+            let size = m.size.unwrap_or(0) as usize;
+            if let Some(b) = base {
+                if addr >= b && addr < b.saturating_add(size) {
+                    return (Some(m.name), Some(format!("{:x}", addr - b)));
+                }
+            }
+        }
+    }
+    (None, None)
 }
 
 /// 构造一个"不支持"的信封 JSON。
