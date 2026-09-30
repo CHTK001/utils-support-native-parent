@@ -33,11 +33,41 @@ fn now_ms() -> i64 {
 }
 
 /// 刷新并返回全局 `System` 的锁。
-fn refreshed() -> std::sync::MutexGuard<'static, System> {
+fn refreshed_sys() -> std::sync::MutexGuard<'static, System> {
     let mut sys = SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
     sys.refresh_cpu_all();
     sys.refresh_memory();
+    sys
+}
+
+/// 刷新 CPU + 内存 + **全部进程**。
+///
+/// 只在确实需要进程列表时用。全量刷新进程是这里最贵的一步：生产验收实测
+/// `system.snapshot`（只需要 CPU/内存/磁盘/网络）因为复用了"含全量进程"的刷新，
+/// p50 高达 565ms、p95 1520ms；而磁盘/网络/主机信息本身都是毫秒级。
+/// 需要进程时用本函数，否则用 [`refreshed_sys`]。
+fn refreshed() -> std::sync::MutexGuard<'static, System> {
+    let mut sys = refreshed_sys();
     sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys
+}
+
+/// 只刷新指定进程，用于单进程查询。
+///
+/// `process.detail` 原先走 `sysinfo_processes()`（刷新**全部**进程）再筛出目标，
+/// 实测 p50 204ms；单进程刷新可把这一步降到接近零。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID
+///
+/// # 返回值
+/// 刷新后的 System 锁
+fn refreshed_one(pid: i32) -> std::sync::MutexGuard<'static, System> {
+    let mut sys = SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
+    sys.refresh_cpu_all();
+    sys.refresh_memory();
+    let pids = [Pid::from_u32(pid as u32)];
+    sys.refresh_processes(ProcessesToUpdate::Some(&pids), true);
     sys
 }
 
@@ -50,7 +80,9 @@ fn refreshed() -> std::sync::MutexGuard<'static, System> {
 /// # 返回值
 /// (每核列表, 汇总)
 pub fn cpu_all() -> (Vec<CpuCore>, CpuSummary) {
-    let sys = refreshed();
+    // 用 refreshed_sys：CPU/内存不需要进程列表，刷新全量进程会让本函数
+    // 从毫秒级退化到几百毫秒（生产验收实测过）。
+    let sys = refreshed_sys();
     let cpus = sys.cpus();
     let logical = cpus.len() as u32;
     let cores: Vec<CpuCore> = cpus
@@ -116,7 +148,8 @@ pub fn load_average() -> LoadAverage {
 /// # 返回值
 /// 内存总量与已用；`cached` / `buffers` 与内存条列表由平台实现补
 pub fn memory() -> MemoryInfo {
-    let sys = refreshed();
+    // 只要内存，不需要进程列表
+    let sys = refreshed_sys();
     let total = sys.total_memory();
     let used = sys.used_memory();
     let free = sys.free_memory();
@@ -137,7 +170,8 @@ pub fn memory() -> MemoryInfo {
 /// # 返回值
 /// swap 用量
 pub fn swap() -> SwapInfo {
-    let sys = refreshed();
+    // 只要 swap，不需要进程列表
+    let sys = refreshed_sys();
     SwapInfo {
         total: sys.total_swap(),
         used: sys.used_swap(),
@@ -351,6 +385,80 @@ pub fn pid_i32(pid: &Pid) -> i32 {
     pid.as_u32() as i32
 }
 
+/// 取单个进程的跨平台字段（只刷新该进程，不刷新全量）。
+///
+/// `process.detail` 原先复用 [`sysinfo_processes`]（刷新**全部**进程）再筛出目标，
+/// 生产验收实测 p50 204ms。单进程刷新把这一步降到接近零。
+///
+/// # 参数
+/// * `pid` - 目标进程 ID
+///
+/// # 返回值
+/// 该进程的详情；进程不存在时返回 None
+pub fn sysinfo_process_one(pid: i32) -> Option<crate::model::ProcessDetail> {
+    let sys = refreshed_one(pid);
+    let p = sys.process(Pid::from_u32(pid as u32))?;
+    Some(process_detail_of(p, pid))
+}
+
+/// 把 sysinfo 的 Process 转成 ProcessDetail（跨平台基线部分）。
+///
+/// 平台实现只在此基础上补自己特有的字段。抽成独立函数是为了让
+/// 「全量列表」与「单进程查询」两条路径**共用同一份字段填充逻辑**，
+/// 避免两处写法漂移（此前 process.list 与 process.detail 就出现过不一致）。
+///
+/// # 参数
+/// * `p` - sysinfo 的进程引用
+/// * `pid` - 进程 ID
+///
+/// # 返回值
+/// 跨平台部分的进程详情
+fn process_detail_of(p: &sysinfo::Process, pid: i32) -> crate::model::ProcessDetail {
+    use crate::model::ProcessDetail;
+
+    let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+    let disk = p.disk_usage();
+    ProcessDetail {
+        pid,
+        ppid: p.parent().map(|x| pid_i32(&x)),
+        name: p.name().to_string_lossy().into_owned(),
+        session_id: None,
+        user: p.user_id().and_then(|u| user_name_str(&u.to_string())),
+        uid: p.user_id().and_then(|u| u.to_string().parse::<i32>().ok()),
+        gid: p.group_id().and_then(|g| g.to_string().parse::<i32>().ok()),
+        status: format!("{:?}", p.status()).to_lowercase(),
+        priority: None,
+        priority_class: None,
+        start_time_ms: {
+            let s = p.start_time();
+            if s == 0 { None } else { Some(s as i64 * 1000) }
+        },
+        run_time_sec: Some(p.run_time()),
+        is_wow64: None,
+        is_elevated: None,
+        is_protected: None,
+        cpu_usage: p.cpu_usage(),
+        rss: p.memory(),
+        virtual_memory: p.virtual_memory(),
+        private_bytes: None,
+        shared_bytes: None,
+        thread_count: p.tasks().map(|t| t.len() as u32).unwrap_or(0),
+        handle_count: None,
+        // sysinfo 的 disk_usage 是自进程启动起的累计值，语义与
+        // GetProcessIoCounters / /proc/PID/io 一致，可直接使用。
+        io_read_bytes: Some(disk.read_bytes),
+        io_written_bytes: Some(disk.written_bytes),
+        io_read_count: None,
+        io_write_count: None,
+        command_line: if cmd.is_empty() { None } else { Some(cmd.join(" ")) },
+        args: cmd,
+        exe_path: p.exe().map(|e| e.to_string_lossy().into_owned()),
+        cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()),
+        root_dir: p.root().map(|r| r.to_string_lossy().into_owned()),
+        signature: None,
+    }
+}
+
 /// B 段跨平台基线：sysinfo 能一致拿到的进程字段。
 ///
 /// 这是三平台的共同起点，平台实现只在此基础上补自己特有的字段
@@ -360,55 +468,11 @@ pub fn pid_i32(pid: &Pid) -> i32 {
 /// # 返回值
 /// 进程详情列表，按 CPU 使用率降序
 pub fn sysinfo_processes() -> Vec<crate::model::ProcessDetail> {
-    use crate::model::ProcessDetail;
-
     let sys = refreshed();
-    let mut out: Vec<ProcessDetail> = sys
+    let mut out: Vec<crate::model::ProcessDetail> = sys
         .processes()
         .iter()
-        .map(|(pid, p)| {
-            let cmd: Vec<String> = p.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
-            let disk = p.disk_usage();
-            ProcessDetail {
-                pid: pid_i32(pid),
-                ppid: p.parent().map(|x| pid_i32(&x)),
-                name: p.name().to_string_lossy().into_owned(),
-                session_id: None,
-                user: p.user_id().and_then(|u| user_name_str(&u.to_string())),
-                uid: p.user_id().and_then(|u| u.to_string().parse::<i32>().ok()),
-                gid: p.group_id().and_then(|g| g.to_string().parse::<i32>().ok()),
-                status: format!("{:?}", p.status()).to_lowercase(),
-                priority: None,
-                priority_class: None,
-                start_time_ms: {
-                    let s = p.start_time();
-                    if s == 0 { None } else { Some(s as i64 * 1000) }
-                },
-                run_time_sec: Some(p.run_time()),
-                is_wow64: None,
-                is_elevated: None,
-                is_protected: None,
-                cpu_usage: p.cpu_usage(),
-                rss: p.memory(),
-                virtual_memory: p.virtual_memory(),
-                private_bytes: None,
-                shared_bytes: None,
-                thread_count: p.tasks().map(|t| t.len() as u32).unwrap_or(0),
-                handle_count: None,
-                // sysinfo 的 disk_usage 是自进程启动起的累计值，语义与
-                // GetProcessIoCounters / /proc/PID/io 一致，可直接使用。
-                io_read_bytes: Some(disk.read_bytes),
-                io_written_bytes: Some(disk.written_bytes),
-                io_read_count: None,
-                io_write_count: None,
-                command_line: if cmd.is_empty() { None } else { Some(cmd.join(" ")) },
-                args: cmd,
-                exe_path: p.exe().map(|e| e.to_string_lossy().into_owned()),
-                cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()),
-                root_dir: p.root().map(|r| r.to_string_lossy().into_owned()),
-                signature: None,
-            }
-        })
+        .map(|(pid, p)| process_detail_of(p, pid_i32(pid)))
         .collect();
     out.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
     out
