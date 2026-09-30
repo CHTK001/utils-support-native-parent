@@ -103,6 +103,11 @@ pub(crate) fn dispatch(op: &str, args: &str) -> String {
     match op {
         // ---------- 跨平台：系统级快照 ----------
         // 只有这一项在 lib.rs 内组装，因为它全部来自 sysinfo，三平台一致。
+        //
+        // **刻意不含 sensor.list 与 memory.modules**：这两项在 Windows 上走 WMI
+        // （COM 通道），实测把快照 p50 从几十毫秒推到近 200ms；而内存条是**静态数据**，
+        // 温度也不需要秒级刷新。生产验收实测把它们并进快照后，1s 周期采样有 20% 时间
+        // 耗在采集上。需要时请单独调用对应 op。
         "system.snapshot" => {
             // 一次刷新同时产出核列表与汇总：分两次调用会把使用率差值窗口压成微秒。
             let (cpu_cores, cpu) = common::cpu_all();
@@ -117,11 +122,9 @@ pub(crate) fn dispatch(op: &str, args: &str) -> String {
                 "batteries": common::batteries(),
                 "timeline": common::timeline(),
                 "host": common::host(),
-                // 平台相关的部分一并并入快照，缺失时由平台给出原因，不静默省略
+                // 平台相关的部分并入快照；缺失时由平台给出原因，不静默省略
                 "disk_io": platform_value("disk.io"),
                 "gpus": platform_value("gpu.list"),
-                "sensors": platform_value("sensor.list"),
-                "memory_modules": platform_value("memory.modules"),
             });
             serde_json::to_string(&Envelope::ok(v)).unwrap_or_default()
         }
