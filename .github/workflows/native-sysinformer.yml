@@ -372,6 +372,99 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - name: Runtime smoke (event driver, Linux netlink, needs root)
+        # netlink proc connector 的 CN_IDX_PROC 订阅需要 root 或 CAP_NET_ADMIN，
+        # 故这一条必须用 sudo 跑——普通用户跑会拿到 EPERM，断言会失败。
+        # GitHub 的 ubuntu runner 默认用户有免密 sudo。
+        #
+        # 验证方式与 Windows 的 ETW 一致：启动订阅 -> 派生真实子进程 ->
+        # **必须**收到 ProcessStart，否则判失败。轮询伪装或空实现都过不了这一关。
+        if: matrix.build_os == 'linux'
+        run: |
+          cat > /tmp/evtest.py <<'PY'
+          import ctypes, json, os, subprocess, sys, time
+
+          lib_path = sys.argv[1]
+          lib = ctypes.CDLL(lib_path)
+          lib.sysinformer_call.restype = ctypes.c_void_p
+          lib.sysinformer_call.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+          lib.sysinformer_free_string.argtypes = [ctypes.c_void_p]
+
+          def call(op, args=None):
+              p = lib.sysinformer_call(op.encode(), json.dumps(args or {}).encode())
+              raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+              lib.sysinformer_free_string(p)
+              return json.loads(raw)
+
+          failures = 0
+          r = call("events.start", {"mask": 0xFFFF})
+          if r.get("ok") is not True:
+              print(f"ASSERT FAIL events.start: {r.get('error')}")
+              sys.exit(1)
+          print("ASSERT ok   events.start（root 下 netlink 订阅成功）")
+
+          procs = [subprocess.Popen(["/bin/true"]) for _ in range(3)]
+          for p in procs:
+              p.wait(timeout=20)
+          time.sleep(1.5)
+
+          r = call("events.poll", {})
+          evs = r.get("data") or []
+          kinds = {}
+          for e in evs:
+              kinds[e["kind"]] = kinds.get(e["kind"], 0) + 1
+          print(f"      事件类型分布: {kinds}")
+          if "ProcessStart" in kinds:
+              print(f"ASSERT ok   收到 ProcessStart（共 {len(evs)} 条）")
+          else:
+              print(f"ASSERT FAIL 未收到 ProcessStart，实际类型: {kinds}")
+              failures += 1
+
+          r = call("events.stop", {})
+          if r.get("ok") is True:
+              print("ASSERT ok   events.stop")
+          else:
+              print(f"ASSERT FAIL events.stop: {r.get('error')}")
+              failures += 1
+
+          # stop 后必须能再次 start（会话正确释放）
+          r = call("events.start", {"mask": 0xFFFF})
+          if r.get("ok") is True:
+              print("ASSERT ok   stop 后可再次 start")
+              call("events.stop", {})
+          else:
+              print(f"ASSERT FAIL 再次 start: {r.get('error')}")
+              failures += 1
+
+          # 非 root 时同一能力应给出明确的权限原因，而不是静默失败
+          if failures:
+              print(f"LINUX_EVENTS_FAILED failures={failures}")
+              sys.exit(1)
+          print("LINUX_EVENTS_OK")
+          PY
+          sudo --preserve-env=PATH python3 -X utf8 /tmp/evtest.py "$(pwd)/$LIB_PATH"
+          # 非 root 对照：同一条命令必须给出**明确原因**而不是崩掉
+          python3 -X utf8 - "$(pwd)/$LIB_PATH" <<'PY'
+          import ctypes, json, sys
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.sysinformer_call.restype = ctypes.c_void_p
+          lib.sysinformer_call.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+          lib.sysinformer_free_string.argtypes = [ctypes.c_void_p]
+          p = lib.sysinformer_call(b"events.start", b'{"mask":65535}')
+          raw = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+          lib.sysinformer_free_string(p)
+          e = json.loads(raw)
+          if e.get("ok") is False and e.get("error"):
+              print(f"ASSERT ok   非 root 下给出明确原因: {e['error'][:70]}")
+          elif e.get("ok") is True:
+              # runner 可能允许非特权 netlink 订阅，那也算合理
+              print("ASSERT ok   非 root 下仍可订阅（该 runner 允许）")
+              lib.sysinformer_call(b"events.stop", b"{}")
+          else:
+              print(f"ASSERT FAIL 非 root 下未给出原因: {raw[:150]}")
+              sys.exit(1)
+          PY
+
       - name: Runtime smoke (JNA bridge, Java 8 module)
         # 上一条验的是 Java 25 侧的 Panama FFM 绑定。Java 8 侧有**另一套**绑定
         # （JNA + 自己的动态库抽取逻辑），在 CI 上从未运行过，必须单独跑。

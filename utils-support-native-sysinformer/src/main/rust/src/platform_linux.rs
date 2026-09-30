@@ -40,8 +40,8 @@ use once_cell::sync::Lazy;
 use crate::common;
 use crate::model::{
     unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, Envelope, EnvVar, GpuInfo,
-    HandleInfo, KernelModuleInfo, MappingInfo, ModuleInfo, ProcessDetail, SensorInfo, ServiceInfo,
-    SocketInfo, StackFrame, StackTrace, ThreadInfo,
+    HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo, ProcessDetail, SensorInfo,
+    ServiceInfo, SocketInfo, StackFrame, StackTrace, ThreadInfo,
 };
 use crate::PLATFORM;
 
@@ -2199,6 +2199,428 @@ fn sensors() -> Vec<SensorInfo> {
 // 入口
 // ============================================================================
 
+// ============================================================================
+// 进程事件驱动（netlink proc connector）
+// ============================================================================
+//
+// 用内核的 proc connector（CN_IDX_PROC）做**真实事件驱动**，不是轮询伪装：
+// 创建 NETLINK_CONNECTOR socket -> 绑定到 CN_IDX_PROC 多播组 ->
+// 发 PROC_CN_MCAST_LISTEN 订阅 -> 独立线程 recv 内核推送的 proc_event ->
+// 解析成 EventRecord 推入有界队列 -> poll 取走 -> stop 时发
+// PROC_CN_MCAST_IGNORE 并关 socket。
+//
+// **权限**：需要 root 或 CAP_NET_ADMIN，否则 bind 返回 EPERM。
+
+/// `PROC_CN_MCAST_LISTEN`：开始订阅。
+const PROC_CN_MCAST_LISTEN: u32 = 1;
+
+/// `PROC_CN_MCAST_IGNORE`：取消订阅。
+const PROC_CN_MCAST_IGNORE: u32 = 2;
+
+/// 事件队列上限，防止高频事件吃光内存。
+const EVENT_QUEUE_CAP: usize = 4096;
+
+/// 已订阅的事件位掩码。
+static EVENT_MASK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// 事件队列。
+static EVENTS: Lazy<std::sync::Mutex<std::collections::VecDeque<crate::model::EventRecord>>> =
+    Lazy::new(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
+
+/// 订阅是否在运行。
+static EVENTS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 用于 stop 的 socket fd（-1 表示无）。
+static EVENT_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// `proc_event.what`：无事件（订阅确认）。
+const PROC_EVENT_NONE: u32 = 0x0000_0000;
+/// `proc_event.what`：fork。
+const PROC_EVENT_FORK: u32 = 0x0000_0001;
+/// `proc_event.what`：exec。
+const PROC_EVENT_EXEC: u32 = 0x0000_0002;
+/// `proc_event.what`：exit。
+const PROC_EVENT_EXIT: u32 = 0x8000_0000;
+
+/// `proc_event` 头长：what(4) + cpu(4) + timestamp_ns(8)。
+const PROC_EVENT_HEADER: usize = 16;
+
+/// 事件类型对应的位序号（与 Windows 侧一致，便于调用方写平台无关代码）。
+///
+/// # 参数
+/// * `kind` - 事件类型
+///
+/// # 返回值
+/// 位序号
+fn event_bit(kind: crate::model::EventKind) -> u32 {
+    match kind {
+        crate::model::EventKind::ProcessStart => 1,
+        crate::model::EventKind::ProcessStop => 2,
+        crate::model::EventKind::ThreadStart => 4,
+        crate::model::EventKind::ThreadStop => 8,
+        crate::model::EventKind::ImageLoad => 16,
+        crate::model::EventKind::ImageUnload => 32,
+        crate::model::EventKind::NetworkConnect => 64,
+    }
+}
+
+/// 当前墙钟的 Unix 毫秒。
+///
+/// 内核给的 `timestamp_ns` 是 CLOCK_MONOTONIC，与其他平台的
+/// `timestamp_ms`（Unix 毫秒）语义不同，故在用户态统一填墙钟。
+///
+/// # 返回值
+/// Unix 毫秒
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 读 4 字节本机序 u32。
+///
+/// # 参数
+/// * `b` - 字节切片
+/// * `off` - 偏移
+///
+/// # 返回值
+/// 值；越界返回 0
+fn u32_at(b: &[u8], off: usize) -> u32 {
+    if off + 4 > b.len() {
+        return 0;
+    }
+    u32::from_ne_bytes([b[off], b[off + 1], b[off + 2], b[off + 3]])
+}
+
+/// 解析一批 netlink 报文中的 proc_event 并推入队列。
+///
+/// 一个 recv 可能含多条报文；按 nlmsghdr.len 逐条前进，并按 4 字节对齐。
+///
+/// # 参数
+/// * `buf` - recv 到的原始字节
+///
+/// # 返回值
+/// 解析出的事件条数
+fn parse_netlink_events(buf: &[u8]) -> usize {
+    let mask = EVENT_MASK.load(std::sync::atomic::Ordering::Relaxed);
+    let mut n = 0usize;
+    let mut off = 0usize;
+    while off + 16 <= buf.len() {
+        let msg_len = u32_at(buf, off) as usize;
+        if msg_len < 16 || off + msg_len > buf.len() {
+            break;
+        }
+        // nlmsghdr(16) + cn_msg(20) 之后是 proc_event
+        let pe = off + 16 + 20;
+        if pe + PROC_EVENT_HEADER <= off + msg_len {
+            let what = u32_at(buf, pe);
+            let mapped = match what {
+                PROC_EVENT_FORK => Some(crate::model::EventKind::ProcessStart),
+                PROC_EVENT_EXEC => Some(crate::model::EventKind::ImageLoad),
+                PROC_EVENT_EXIT => Some(crate::model::EventKind::ProcessStop),
+                _ => None,
+            };
+            if let Some(kind) = mapped {
+                if (mask & event_bit(kind)) != 0 {
+                    let d = pe + PROC_EVENT_HEADER;
+                    // fork 负载：parent_pid, parent_tgid, child_pid, child_tgid
+                    // 其余负载首字段即 process_pid
+                    let (pid, ppid) = if what == PROC_EVENT_FORK {
+                        (u32_at(buf, d + 8) as i32, Some(u32_at(buf, d) as i32))
+                    } else {
+                        (u32_at(buf, d) as i32, None)
+                    };
+                    if let Ok(mut q) = EVENTS.lock() {
+                        if q.len() >= EVENT_QUEUE_CAP {
+                            q.pop_front();
+                        }
+                        q.push_back(crate::model::EventRecord {
+                            kind,
+                            timestamp_ms: now_ms(),
+                            pid,
+                            ppid,
+                            related_id: None,
+                            name: None,
+                            detail: Some(format!("proc_event.what=0x{what:08x}")),
+                        });
+                        n += 1;
+                    }
+                }
+            }
+        }
+        off += (msg_len + 3) & !3;
+    }
+    n
+}
+
+/// 启动事件订阅。
+///
+/// # 参数
+/// * `mask` - 事件位掩码
+///
+/// # 返回值
+/// 成功时 Ok(())；失败时给出具体原因（含权限提示）
+fn events_start(mask: u32) -> Result<(), String> {
+    if EVENTS_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("事件订阅已在运行；请先 events.stop".to_string());
+    }
+    EVENT_MASK.store(mask, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut q) = EVENTS.lock() {
+        q.clear();
+    }
+
+    /// NETLINK_CONNECTOR 协议号。libc 常量名在不同版本不一，直接写数值并注明。
+    const NETLINK_CONNECTOR: i32 = 11;
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_NETLINK,
+            libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+            NETLINK_CONNECTOR,
+        )
+    };
+    if fd < 0 {
+        return Err(format!(
+            "socket(AF_NETLINK, NETLINK_CONNECTOR) 失败: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    // 绑定 CN_IDX_PROC（idx=1,val=1 -> 多播组位 1）
+    let mut addr: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    addr.nl_family = libc::AF_NETLINK as u16;
+    addr.nl_pid = 0;
+    addr.nl_groups = 1 << 1;
+    let rc = unsafe {
+        libc::bind(
+            fd,
+            &addr as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(format!(
+            "bind(CN_IDX_PROC) 失败: {e}；订阅内核进程事件需要 root 或 CAP_NET_ADMIN"
+        ));
+    }
+
+    if !send_mcast_op(fd, PROC_CN_MCAST_LISTEN) {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(format!("订阅（PROC_CN_MCAST_LISTEN）失败: {e}"));
+    }
+
+    EVENT_FD.store(fd, std::sync::atomic::Ordering::SeqCst);
+    EVENTS_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 16384];
+        while EVENTS_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+            let n = unsafe {
+                libc::recv(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0)
+            };
+            if n <= 0 {
+                let e = std::io::Error::last_os_error();
+                // EINTR / EAGAIN 属正常中断，继续；其余错误退出，避免忙循环烧 CPU
+                if e.raw_os_error() == Some(libc::EINTR) || e.raw_os_error() == Some(libc::EAGAIN) {
+                    continue;
+                }
+                break;
+            }
+            parse_netlink_events(&buf[..n as usize]);
+        }
+    });
+
+    // 给订阅一点时间生效；否则紧接着的 poll 会拿不到事件，被误判成"没有事件"
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    Ok(())
+}
+
+/// 发送 proc connector 的多播操作报文。
+///
+/// 报文布局：nlmsghdr(16) + cn_msg(20) + 操作码 u32(4)。
+///
+/// # 参数
+/// * `fd` - netlink socket
+/// * `op` - `PROC_CN_MCAST_LISTEN` 或 `PROC_CN_MCAST_IGNORE`
+///
+/// # 返回值
+/// 发送成功返回 true
+fn send_mcast_op(fd: i32, op: u32) -> bool {
+    let mut msg = vec![0u8; 16 + 20 + 4];
+    msg[0..4].copy_from_slice(&((16 + 20 + 4) as u32).to_ne_bytes());
+    msg[8..12].copy_from_slice(&1u32.to_ne_bytes()); // seq
+    msg[16..20].copy_from_slice(&1u32.to_ne_bytes()); // CN_IDX_PROC
+    msg[20..24].copy_from_slice(&1u32.to_ne_bytes()); // CN_VAL_PROC
+    msg[36..40].copy_from_slice(&op.to_ne_bytes());
+    let mut dst: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
+    dst.nl_family = libc::AF_NETLINK as u16;
+    let sent = unsafe {
+        libc::sendto(
+            fd,
+            msg.as_ptr() as *const libc::c_void,
+            msg.len(),
+            0,
+            &dst as *const libc::sockaddr_nl as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_nl>() as libc::socklen_t,
+        )
+    };
+    sent >= 0
+}
+
+/// 取出已缓存的事件。
+///
+/// # 返回值
+/// 事件列表；未启动时给出具体原因
+fn events_poll() -> Result<Vec<crate::model::EventRecord>, String> {
+    if EVENT_FD.load(std::sync::atomic::Ordering::SeqCst) < 0 {
+        return Err(
+            "事件订阅未启动，请先调用 events.start（需 root 或 CAP_NET_ADMIN）".to_string(),
+        );
+    }
+    let mut q = EVENTS.lock().map_err(|_| "事件队列锁不可用".to_string())?;
+    Ok(q.drain(..).collect())
+}
+
+/// 停止事件订阅。
+fn events_stop() {
+    let fd = EVENT_FD.swap(-1, std::sync::atomic::Ordering::SeqCst);
+    if fd < 0 {
+        return;
+    }
+    send_mcast_op(fd, PROC_CN_MCAST_IGNORE);
+    EVENTS_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    // 关 fd 会让阻塞中的 recv 立即返回，线程随之退出
+    unsafe { libc::close(fd) };
+}
+
+/// 经由 DMI 表读取物理内存条（A5），**不依赖 dmidecode**。
+///
+/// `/sys/firmware/dmi/tables/DMI` 是内核导出的原始 SMBIOS 结构表，逐条扫描
+/// type 17（Memory Device）即可。需要 root（该文件通常权限 0400）。
+///
+/// # 返回值
+/// 内存条列表
+fn memory_modules() -> Result<Vec<MemoryModule>, String> {
+    let raw = std::fs::read("/sys/firmware/dmi/tables/DMI").map_err(|e| {
+        format!(
+            "读取 /sys/firmware/dmi/tables/DMI 失败: {e}；{}",
+            permission_hint(&e)
+        )
+    })?;
+
+    let mut out = Vec::new();
+    let mut off = 0usize;
+    while off + 4 <= raw.len() {
+        let stype = raw[off];
+        let slen = raw[off + 1] as usize;
+        if slen < 4 || off + slen > raw.len() {
+            break;
+        }
+        // 结构体之后是字符串区：NUL 分隔，双 NUL 结束
+        let mut next = off + slen;
+        if next < raw.len() && raw[next] == 0 {
+            next += 1;
+        } else {
+            while next + 1 < raw.len() && !(raw[next] == 0 && raw[next + 1] == 0) {
+                next += 1;
+            }
+            next = (next + 2).min(raw.len());
+        }
+        let strbase = off + slen;
+
+        if stype == 17 && slen >= 0x15 {
+            // Type 17 关键字段偏移（SMBIOS 规范）：
+            //   0x06 Size（bit15 为 1 时单位是 KB，否则 MB）
+            //   0x0A Device Locator（字符串索引）
+            //   0x0C Memory Type
+            //   0x15 Speed（MT/s）
+            //   0x17 Manufacturer（字符串索引）
+            //   0x18 Serial Number（字符串索引）
+            let size_raw = u16::from_le_bytes([raw[off + 0x06], raw[off + 0x07]]);
+            let capacity = if size_raw == 0 || size_raw == 0xFFFF {
+                None
+            } else if (size_raw & 0x8000) != 0 {
+                Some((size_raw & 0x7FFF) as u64 * 1024)
+            } else {
+                Some(size_raw as u64 * 1024 * 1024)
+            };
+            let mem_type = match raw[off + 0x0C] {
+                0x18 => Some("DDR3".to_string()),
+                0x1A => Some("DDR4".to_string()),
+                0x22 => Some("DDR5".to_string()),
+                0x14 => Some("DDR2".to_string()),
+                _ => None,
+            };
+            let speed = if slen >= 0x18 {
+                let s = u16::from_le_bytes([raw[off + 0x15], raw[off + 0x16]]);
+                if s == 0 || s == 0xFFFF { None } else { Some(s as u32) }
+            } else {
+                None
+            };
+            let idx_loc = raw[off + 0x0A] as usize;
+            let idx_man = if slen > 0x17 { raw[off + 0x17] as usize } else { 0 };
+            let idx_ser = if slen > 0x18 { raw[off + 0x18] as usize } else { 0 };
+            // 容量为空的条目是空插槽，跳过而不是记为 0
+            if let Some(cap) = capacity {
+                out.push(MemoryModule {
+                    slot: smbios_string(&raw, strbase, idx_loc)
+                        .unwrap_or_else(|| format!("slot{}", out.len())),
+                    capacity: cap,
+                    memory_type: mem_type,
+                    speed_mhz: speed,
+                    manufacturer: smbios_string(&raw, strbase, idx_man),
+                    serial: smbios_string(&raw, strbase, idx_ser),
+                });
+            }
+        }
+        if next <= off {
+            break;
+        }
+        off = next;
+    }
+
+    if out.is_empty() {
+        return Err(
+            "DMI 表中没有已安装的内存条记录；虚拟机与容器里通常没有该表".to_string(),
+        );
+    }
+    Ok(out)
+}
+
+/// 从 SMBIOS 字符串区按 1 起的索引取字符串。
+///
+/// # 参数
+/// * `raw` - 整个 DMI 表
+/// * `strbase` - 该结构的字符串区起点
+/// * `idx` - 1 起的索引，0 表示无
+///
+/// # 返回值
+/// 字符串；索引无效或内容为空时返回 None
+fn smbios_string(raw: &[u8], strbase: usize, idx: usize) -> Option<String> {
+    if idx == 0 {
+        return None;
+    }
+    let mut cur = 1usize;
+    let mut p = strbase;
+    while p < raw.len() {
+        let end = raw[p..].iter().position(|c| *c == 0).map(|x| p + x)?;
+        if cur == idx {
+            let s = String::from_utf8_lossy(&raw[p..end]).trim().to_string();
+            return if s.is_empty() { None } else { Some(s) };
+        }
+        // 双 NUL 表示字符串区结束
+        if end + 1 >= raw.len() || raw[end + 1] == 0 {
+            return None;
+        }
+        p = end + 1;
+        cur += 1;
+    }
+    None
+}
+
 /// 平台入口：按 op 分发。
 ///
 /// # 参数
@@ -2344,14 +2766,28 @@ pub fn call(op: &str, args: &str) -> String {
         // ---------- 可选能力 ----------
         "gpu.list" => ok_json(gpus()),
         "sensor.list" => ok_json(sensors()),
-        "memory.modules" => err_json(unsupported(
-            "memory.modules（需 root 且依赖 dmidecode 解析 DMI，本实现未做）",
-            PLATFORM,
-        )),
-        "events.start" | "events.poll" | "events.stop" => err_json(unsupported(
-            "进程事件驱动（netlink proc connector CN_IDX_PROC，需 root 或 CAP_NET_ADMIN，本实现未实现）",
-            PLATFORM,
-        )),
+        "memory.modules" => match memory_modules() {
+            Ok(v) => ok_json(v),
+            Err(e) => err_json(e),
+        },
+
+        // ---------- 进程事件驱动（netlink proc connector）----------
+        "events.start" => {
+            let mask = arg_i64(&a, "mask").unwrap_or(-1);
+            let mask = if mask < 0 { u32::MAX } else { mask as u32 };
+            match events_start(mask) {
+                Ok(()) => ok_json(()),
+                Err(e) => err_json(e),
+            }
+        }
+        "events.poll" => match events_poll() {
+            Ok(v) => ok_json(v),
+            Err(e) => err_json(e),
+        },
+        "events.stop" => {
+            events_stop();
+            ok_json(())
+        }
 
         other => err_json(unsupported(other, PLATFORM)),
     }
