@@ -772,6 +772,28 @@ fn read_cmdline(pid: i32) -> Vec<String> {
 /// * `p` - 待补齐的进程详情
 fn fill_linux_fields(p: &mut ProcessDetail) {
     let pid = p.pid;
+
+    // 命令行与工作目录：必须在这里自己从 /proc 读，不能依赖 sysinfo。
+    // 实测 sysinfo 的 `cmd()` 在本场景返回空，于是 process.list 里
+    // command_line 为 null、args 为空，而 process.detail（走 /proc）却是好的——
+    // 同一份数据两条路径不一致。凡 /proc 能直接拿到的，就自己拿。
+    if p.args.is_empty() {
+        let args = read_cmdline(pid);
+        if !args.is_empty() {
+            p.command_line = Some(args.join(" "));
+            p.args = args;
+        }
+    }
+    if p.cwd.is_none() {
+        p.cwd = read_link_str(&format!("/proc/{}/cwd", pid));
+    }
+    if p.exe_path.is_none() {
+        p.exe_path = read_link_str(&format!("/proc/{}/exe", pid));
+    }
+    if p.root_dir.is_none() {
+        p.root_dir = read_link_str(&format!("/proc/{}/root", pid));
+    }
+
     if let Some(st) = read_stat(pid) {
         if p.ppid.is_none() {
             p.ppid = st.ppid;
@@ -2540,10 +2562,16 @@ fn memory_modules() -> Result<Vec<MemoryModule>, String> {
         if slen < 4 || off + slen > raw.len() {
             break;
         }
-        // 结构体之后是字符串区：NUL 分隔，双 NUL 结束
+        // 结构体之后是字符串区。按 SMBIOS 规范：字符串区以**双 NUL** 结束；
+        // 若没有字符串，格式化区之后**紧跟**两个 NUL，下一结构在 +2 处。
+        //
+        // 曾写成"若 raw[next]==0 则 next += 1"，只跳过一个 NUL，于是把第二个 NUL
+        // 当成下一个结构的起始，解析出 type=0 len=3 之类的垃圾并提前终止——
+        // 真实症状是"在 off=820 处结构长度异常"，且后面可能存在的 type 17 被整段漏掉。
+        // 这是 off-by-one，编译与类型检查都发现不了，只有拿真实 DMI 表跑才暴露。
         let mut next = off + slen;
-        if next < raw.len() && raw[next] == 0 {
-            next += 1;
+        if next + 1 < raw.len() && raw[next] == 0 && raw[next + 1] == 0 {
+            next += 2;
         } else {
             while next + 1 < raw.len() && !(raw[next] == 0 && raw[next + 1] == 0) {
                 next += 1;
