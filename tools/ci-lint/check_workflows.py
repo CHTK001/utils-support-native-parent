@@ -62,6 +62,24 @@ def strip_quotes(s: str) -> str:
     return s
 
 
+def path_covers(pattern: str, target: str) -> bool:
+    """判断 paths 里的一条是否覆盖目标路径。
+
+    GitHub 的 paths 支持 glob。这里只处理实际会用到的两种：
+      - 完全相等
+      - `前缀/**`（含裸 `**`）覆盖其下所有文件
+    其余写法（段内 `*`、`?` 等）按「不覆盖」处理 —— 宁可让人改成显式写法，
+    也不要在门禁里放过。
+    """
+    if pattern == target:
+        return True
+    if pattern == "**":
+        return True
+    if pattern.endswith("/**"):
+        return target.startswith(pattern[: -len("/**")] + "/")
+    return False
+
+
 def top_block(lines: list[str], key: str) -> tuple[int, int] | None:
     """返回顶格键 `key:` 的块范围 [start, end)（不含键行本身）。"""
     for i, ln in enumerate(lines):
@@ -146,10 +164,11 @@ def check_file(path: Path) -> list[Finding]:
             else:
                 vals = list_values(lines, paths_rng)
                 self_ref = f".github/workflows/{path.name}"
-                if self_ref not in vals:
+                if not any(path_covers(v, self_ref) for v in vals):
                     findings.append(Finding(
                         path, "C2", paths_rng[0],
-                        f"pull_request.paths 缺 {self_ref}：只改 CI 定义的 PR 不触发任何 CI"))
+                        f"pull_request.paths 未覆盖 {self_ref}：只改 CI 定义的 PR 不触发"
+                        f"任何 CI（可用 `{self_ref}` 或 `.github/workflows/**`）"))
 
     # C3 / C4 concurrency
     conc_rng = top_block(lines, "concurrency")
