@@ -69,17 +69,79 @@ STREAM = os.path.join(tempfile.gettempdir(), "pdh_diag.jsonl")
 TYPEPERF_TXT = os.path.join(tempfile.gettempdir(), "typeperf_diag.txt")
 
 PDH_FMT_DOUBLE = 0x200
-CSTATUS_VALID = 0          # PDH_CSTATUS_VALID_DATA 就是 0
-CSTATUS_INVALID_DATA = 0xC0000006
-CSTATUS_NO_COUNTER = 0xC0000BB3
+
+# PDH 状态码取自 Windows SDK 的 um/pdhmsg.h（本机 10.0.17134.0 已核对）。
+# 之前凭记忆写的两个常量是错的（INVALID_DATA 写成 0xC0000006、
+# NO_COUNTER 写成 0xC0000BB3，真值分别是 0xC0000BBA 与 0xC0000BB9），
+# 那样会把「无效」误标成「未知码」，掩盖真正的失败原因。
+CSTATUS_VALID = 0x00000000
+CSTATUS_NEW_DATA = 0x00000001
+CSTATUS_NO_MACHINE = 0x800007D0
+CSTATUS_NO_INSTANCE = 0x800007D1
+CSTATUS_MORE_DATA = 0x800007D2
+CSTATUS_ITEM_NOT_VALIDATED = 0x800007D3
+CSTATUS_RETRY = 0x800007D4
+CSTATUS_NO_DATA = 0x800007D5
+# 关键的一个：分母非正 = 两次采样时间戳没有正向推进。
+# cpu_windows.rs 只检查 API 返回码、**不检查 CStatus**，
+# 所以这种读数会被当成真值使用。它也最能解释「数值稳定得反常」。
+CSTATUS_NEGATIVE_DENOM = 0x800007D6
+CSTATUS_NEGATIVE_TIMEBASE = 0x800007D7
+CSTATUS_NO_OBJECT = 0xC0000BB8
+CSTATUS_NO_COUNTER = 0xC0000BB9
+CSTATUS_INVALID_DATA = 0xC0000BBA
 
 
 def rcname(rc):
-    return {0: "SUCCESS",
-            0xC0000006: "INVALID_DATA",
-            0xC0000BB3: "CSTATUS_NO_COUNTER",
-            0x80004005: "E_FAIL",
-            0xC00000E5: "INVALID_ARGUMENT"}.get(rc, f"0x{rc & 0xFFFFFFFF:08X}")
+    if isinstance(rc, int):
+        rc &= 0xFFFFFFFF
+    return {
+        0: "SUCCESS",
+        CSTATUS_VALID: "VALID_DATA",
+        CSTATUS_NEW_DATA: "NEW_DATA",
+        CSTATUS_NO_MACHINE: "NO_MACHINE",
+        CSTATUS_NO_INSTANCE: "NO_INSTANCE",
+        CSTATUS_MORE_DATA: "MORE_DATA",
+        CSTATUS_ITEM_NOT_VALIDATED: "ITEM_NOT_VALIDATED",
+        CSTATUS_RETRY: "RETRY",
+        CSTATUS_NO_DATA: "NO_DATA",
+        CSTATUS_NEGATIVE_DENOM: "CALC_NEGATIVE_DENOMINATOR",
+        CSTATUS_NEGATIVE_TIMEBASE: "CALC_NEGATIVE_TIMEBASE",
+        CSTATUS_NO_OBJECT: "NO_OBJECT",
+        CSTATUS_NO_COUNTER: "NO_COUNTER",
+        CSTATUS_INVALID_DATA: "INVALID_DATA",
+        0xC0000BBC: "INVALID_HANDLE",
+        0xC0000BBD: "INVALID_ARGUMENT",
+        0x80004005: "E_FAIL",
+    }.get(rc, f"0x{rc:08X}" if isinstance(rc, int) else str(rc))
+
+# FILETIME 是 100ns 单位
+FILETIME = wintypes.FILETIME
+
+
+def proc_cpu_seconds():
+    """本进程已消耗的 CPU 秒数（用户态 + 内核态）。
+
+    用途：量出「测量装置自己」占了多少系统 CPU。若本库报出的 20% 里
+    有 18pp 是这个采样循环自己烧掉的，那问题不在口径而在**自扰动** ——
+    参考源用 1s 窗口摊薄了这项开销，所以两者必然对不上。
+    """
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetProcessTimes.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(FILETIME), ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME), ctypes.POINTER(FILETIME)]
+    creation, exit_, kernel, user = FILETIME(), FILETIME(), FILETIME(), FILETIME()
+    if not k32.GetProcessTimes(
+            ctypes.windll.kernel32.GetCurrentProcess(),
+            ctypes.byref(creation), ctypes.byref(exit_),
+            ctypes.byref(kernel), ctypes.byref(user)):
+        return None
+
+    def hi_lo(ft):
+        return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
+
+    return (hi_lo(kernel) + hi_lo(user)) / 1e7
 
 
 class PDH_FMT_COUNTERVALUE(ctypes.Structure):
@@ -136,7 +198,9 @@ class RawPdh:
                 c, PDH_FMT_DOUBLE, None, ctypes.byref(v))
             vals.append((v.CStatus, None if r != 0 else v.doubleValue))
         total = vals[0][1] if vals else None
-        cores = [v for _, v in vals[1:]]
+        # 过滤 None：PDH 偶发返回非 SUCCESS 时值是 None，混进求和会 TypeError，
+        # 而一次偶发失败不该让整个诊断崩掉（要崩的话日志里就少了其它四个源）
+        cores = [v for _, v in vals[1:] if v is not None]
         return total, cores, rc, vals
 
     def close(self):
@@ -272,30 +336,64 @@ def main():
     collect_rcs, cstatus_hist = [], {}
     a_core_identical = 0
     samples = 0
-    t_end = time.time() + SECS
+    loop_cost_ms = []
+    loop_errors = 0
+    loop_err_first = ""
+    t_wall0 = time.time()
+    t_cpu0 = proc_cpu_seconds()
+    t_end = t_wall0 + SECS
     try:
         while time.time() < t_end:
             t1 = time.perf_counter()
-            at, ac = lib_cpu()
-            bt, bc, crc, vals = pdh.sample()
-            for cs, _v in vals:
-                cstatus_hist[cs] = cstatus_hist.get(cs, 0) + 1
-            collect_rcs.append(crc)
-            samples += 1
-            if at is not None:
-                a_tot.append(at)
-            if ac:
-                a_core.append(sum(ac) / len(ac))
-                if len(set(ac)) == 1 and len(ac) > 1:
-                    a_core_identical += 1
-            if bt is not None:
-                b_tot.append(bt)
-            if bc:
-                b_core.append(sum(bc) / len(bc))
+            # 单次迭代的任何异常都不能让整个诊断死掉。
+            # 2026-10-02 实测踩到：CI 上 PdhGetFormattedCounterValue 偶发
+            # 非 SUCCESS（同一条件即 CALC_NEGATIVE_DENOMINATOR），值是 None，
+            # 混进 sum() 直接 TypeError，结果整份诊断只留下一条 warning、
+            # 一个数据都没有 —— 而它本该回答的问题恰恰是「这个失败频率多高」。
+            # 崩掉的诊断比没有诊断更糟：它把「没测到」伪装成「测过了」。
+            try:
+                at, ac = lib_cpu()
+                bt, bc, crc, vals = pdh.sample()
+                loop_cost_ms.append((time.perf_counter() - t1) * 1000)
+                for cs, _v in vals:
+                    cstatus_hist[cs] = cstatus_hist.get(cs, 0) + 1
+                collect_rcs.append(crc)
+                samples += 1
+                if at is not None:
+                    a_tot.append(at)
+                if ac:
+                    a_core.append(sum(ac) / len(ac))
+                    if len(set(ac)) == 1 and len(ac) > 1:
+                        a_core_identical += 1
+                if bt is not None:
+                    b_tot.append(bt)
+                if bc:
+                    b_core.append(sum(bc) / len(bc))
+            except Exception as e:
+                loop_errors += 1
+                if not loop_err_first:
+                    loop_err_first = f"{type(e).__name__}: {e}"
             time.sleep(max(0.02 - (time.perf_counter() - t1), 0))
     finally:
         pdh.close()
+        t_wall1 = time.time()
+        t_cpu1 = proc_cpu_seconds()
         out, err = ref.communicate(timeout=SECS + 120)
+
+    if loop_errors:
+        print(f"\n  [采样循环异常] {loop_errors}/{samples + loop_errors} 次迭代抛错，"
+              f"首个 = {loop_err_first}")
+        print("  这些迭代被跳过，不计入任何统计。异常本身也是信息："
+              "它说明 PDH 读取在该机器上不总是成功。")
+    if samples == 0:
+        print("\n  !! 一次有效采样都没有，无法给出任何结论。"
+              "这不是「通过」，是「没测到」。")
+
+    # 自扰动：本采样循环自身吃掉了多少系统 CPU
+    self_pct = None
+    if t_cpu0 is not None and t_cpu1 is not None and t_wall1 > t_wall0:
+        self_pct = (t_cpu1 - t_cpu0) / ((t_wall1 - t_wall0) * ncpu) * 100.0
+    period_ms = med([(t_wall1 - t_wall0) / max(samples, 1) * 1000])
 
     # ---- typeperf 单独跑，避免与上面争 CPU ----
     tp = run_typeperf(TYPEPERF_TXT, SECS)
@@ -367,6 +465,52 @@ def main():
               f"  （≈0 说明 .NET 与 typeperf 同源一致）")
     if ew and a_tot:
         print(f"  A - D      = {med(a_tot) - med(ew):+.2f}pp")
+
+    print("\n[6] 自扰动：本采样循环自身吃掉的系统 CPU")
+    print(f"  循环周期      = {period_ms:.2f} ms（{samples} 次采样 / "
+          f"{t_wall1 - t_wall0:.1f}s）")
+    if loop_cost_ms:
+        srt = sorted(loop_cost_ms)
+        p95 = srt[min(int(len(srt) * 0.95), len(srt) - 1)]
+        print(f"  单次迭代耗时  = p50 {med(loop_cost_ms):.2f} ms  p95 {p95:.2f} ms")
+    else:
+        print("  单次迭代耗时  = (无有效样本)")
+    if self_pct is not None:
+        print(f"  本进程 CPU 占用系统比例 = {self_pct:.2f}%")
+        print(f"  （{ncpu} 核机器上，{self_pct:.2f}% 相当于 "
+              f"{self_pct * ncpu / 100:.2f} 个核被测量装置本身占住）")
+        excess = (med(a_tot) - med(c_ref)) if (a_tot and c_ref) else float("nan")
+        if excess != excess:            # NaN
+            pass
+        elif excess <= 0:
+            # 本库读数并不比参考高，自扰动解释不了「偏高」这件事
+            print(f"  本库读数不比参考高（{excess:+.2f}pp），"
+                  f"自扰动不构成差异来源")
+        elif self_pct >= abs(excess) * 0.6:
+            print(f"  本库比参考高 {excess:+.2f}pp，自扰动 {self_pct:.2f}pp "
+                  f"-> 自扰动可解释大部分差异")
+        else:
+            print(f"  本库比参考高 {excess:+.2f}pp，自扰动只有 {self_pct:.2f}pp "
+                  f"-> 自扰动不足以解释")
+    else:
+        print("  GetProcessTimes 不可用，无法量化自扰动")
+
+    if any(k != CSTATUS_VALID for k in cstatus_hist):
+        bad_total = sum(v for k, v in cstatus_hist.items() if k != CSTATUS_VALID)
+        all_total = sum(cstatus_hist.values())
+        print(f"\n[7] 非 VALID 的 CStatus 共 {bad_total}/{all_total} "
+              f"({bad_total * 100.0 / all_total:.2f}%)：")
+        for k, v in sorted(cstatus_hist.items(), key=lambda x: -x[1]):
+            if k != CSTATUS_VALID:
+                print(f"    0x{k:08X} {rcname(k):<28} x{v}")
+        if CSTATUS_NEGATIVE_DENOM in cstatus_hist:
+            print(f"  其中 PDH_CALC_NEGATIVE_DENOMINATOR 占 "
+                  f"{cstatus_hist[CSTATUS_NEGATIVE_DENOM]} 次 —— "
+                  f"两次采样时间戳没有正向推进，分母非正，doubleValue 无意义。")
+            print(f"  ** cpu_windows.rs 只检查 API 返回码、不检查 CStatus，"
+                  f"这类读数会被原样当成真值 **")
+            print(f"  若本机上该码占比高，CI 上很可能同理；"
+                  f"这能解释「数值稳定得反常」—— 冻结/陈旧读数的方差天然接近 0")
 
     if err and err.strip():
         print(f"\n  [参考流 stderr] {err.strip()[:300]}")
