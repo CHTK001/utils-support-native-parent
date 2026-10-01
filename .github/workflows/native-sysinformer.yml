@@ -26,10 +26,16 @@ on:
     paths:
       - 'utils-support-native-sysinformer/**'
       - 'tools/sysinformer-accept/**'
+      # workflow 文件自身也要在 paths 里：只改 CI 定义的 PR 同样得触发 CI，
+      # 否则 CI 配置变更会未经检验就合入（判据与 push 侧一致）。
+      - '.github/workflows/native-sysinformer.yml'
 
 concurrency:
-  group: sysinformer-${{ github.ref }}
-  cancel-in-progress: true
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消。concurrency 对**所有**触发器生效、同组即互相取消
+  # ——「连推几次、一次都没跑完」正是这么来的。
+  group: sysinformer-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   build:

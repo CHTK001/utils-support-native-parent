@@ -22,10 +22,13 @@ on:
     paths:
       - 'utils-support-native-filesearch/**'
       - 'utils-support-native-filesearch-java8/**'
+      - '.github/workflows/native-filesearch.yml'
 
 concurrency:
-  group: filesearch-${{ github.ref }}
-  cancel-in-progress: true
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消。concurrency 对**所有**触发器生效、同组即互相取消。
+  group: filesearch-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   build:
