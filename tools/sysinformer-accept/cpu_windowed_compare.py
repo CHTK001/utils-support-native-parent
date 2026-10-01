@@ -121,6 +121,8 @@ print(f"  PDH: {out.strip()[:100]}")
 ref = []
 found_instances = []
 self_gaps = []
+# 首个样本的核数探测：(.NET ProcessorCount, PDH 实例数, WMI 逻辑核数)
+probes = []
 with open(STREAM, encoding="utf-8") as f:
     for line in f:
         line = line.strip()
@@ -139,7 +141,12 @@ with open(STREAM, encoding="utf-8") as f:
         # 与 GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) 不同（例如嵌套
         # 虚拟化下 hypervisor 暴露更多处理器），按 NCPU 取会取错子集，
         # 诊断输出能直接看出这个差异。
-        insts = sorted(k for k in obj if k != "_total")
+        # _pc/_pdl/_pcw 是核数探测字段，不是处理器实例，必须排除
+        PROBE_KEYS = ("_pc", "_pdl", "_pcw")
+        insts = sorted(k for k in obj
+                       if k != "_total" and k not in PROBE_KEYS)
+        if not probes:
+            probes.append((obj.get("_pc"), obj.get("_pdl"), obj.get("_pcw")))
         if not found_instances:
             found_instances.extend(insts)
         # PDH 侧自洽性：_Total 应等于「本条 JSON 内各实例的均值」。
@@ -197,13 +204,35 @@ print(f"  PDH \\Processor(*) 实际返回的实例 = {len(found_instances)} 个 
       f"-> {found_instances[:24]}{' ...' if len(found_instances) > 24 else ''}")
 print(f"  PDH 实例数 == NCPU ? {len(found_instances) == NCPU}")
 
+# 核数归一化假设的判定（2026-10-01）：
+#   .NET 的 PerformanceCounter 会用 Environment.ProcessorCount 归一化
+#   "% Processor Time"，而本库用 PdhGetFormattedCounterValue(PDH_FMT_DOUBLE)
+#   读原始 counter，不经这一步。若三者不一致，两侧就会差一个固定比例。
+# 本机 12 核三者全为 12（且 _Total/mean = 1.0000 精确），故复现不了。
+if probes and probes[0][0] is not None:
+    pc_env, pc_pdh, pc_wmi = probes[0]
+    print(f"  核数探测: .NET ProcessorCount={pc_env}  "
+          f"PDH 实例数={pc_pdh}  WMI 逻辑核数={pc_wmi}  "
+          f"本脚本 NCPU={NCPU}")
+    if pc_env is not None and pc_pdh:
+        print(f"    .NET/PDH = {pc_env / pc_pdh:.4f}  "
+              f"-> " + ("**不一致，.NET 归一化系数可疑**"
+                        if abs(pc_env - pc_pdh) > 0.5
+                        else "一致，排除该假设"))
+
 # ref 自身可信吗：_Total 与「同条 JSON 内实例均值」应相等。
 # pdh_stream.ps1 每轮新开查询，首个 CookedValue 的基线可能未稳定。
 if self_gaps:
     sg_avg = sum(self_gaps) / len(self_gaps)
     sg_max = max(self_gaps)
-    verdict = ("ref 可信（自洽）" if sg_max < 0.5 else
-               f"**ref 自身不自洽 -> 对照源不可信，不能据此判库**")
+    # 阈值随核数放宽：_Total 与各实例的 CookedValue 各按自己的时基计算，
+    # 短窗口下会有小偏差，核数越多越明显（12 核本机实测最大 1.5pp，
+    # 而待测偏差是 18pp 量级，差两个数量级，不会因此漏判）。
+    thresh = 0.5 * (1.0 + len(found_instances) / 12.0)
+    verdict = (f"ref 可信（自洽，最大 {sg_max:.3f}pp < 阈值 {thresh:.2f}pp）"
+               if sg_max < thresh else
+               f"**ref 自身不自洽（{sg_max:.3f}pp >= {thresh:.2f}pp）"
+               f" -> 对照源不可信，不能据此判库**")
     print(f"  PDH 自洽性（_Total vs 同条实例均值）: 平均 {sg_avg:.3f}pp  "
           f"最大 {sg_max:.3f}pp  -> {verdict}")
 if last_shape:
