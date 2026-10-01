@@ -108,13 +108,11 @@ while time.time() < t_end:
     ts = int(time.time() * 1000)
     total, cores_avg, cores = sample_once()
     if cores:
-        mine.append((ts, total))
+        mine.append((ts, total, cores_avg))
         # 诊断：库内部汇总与每核均值是否同源。差应恒为 0；
         # 不为 0 说明某些核回退到了 sysinfo 口径（真缺陷，需单独立项）。
-        mix_diffs.append(abs(total - cores_avg))
-        d = call("system.snapshot")["data"]
-        last_shape = (len(d["cpu_cores"]), (d.get("cpu") or {}).get("logical_count"),
-                      (total, cores, cores_avg))
+        mix_diffs.append(total - cores_avg)   # 带符号：方向比绝对值重要
+        last_shape = (len(cores), None, (total, cores, cores_avg))
     time.sleep(0.02)
 
 out, err = proc.communicate(timeout=DURATION + 90)
@@ -151,7 +149,8 @@ with open(STREAM, encoding="utf-8") as f:
         if total is not None and vals:
             self_gaps.append(abs(float(total) - sum(vals) / len(vals)))
         if total is not None:
-            ref.append((int(ts_s), float(total), insts))
+            ref.append((int(ts_s), float(total),
+                        (sum(vals) / len(vals)) if vals else None, insts))
 
 ref.sort()
 print(f"\n  PDH 样本 = {len(ref)}   本库样本 = {len(mine)}")
@@ -168,8 +167,9 @@ print(f"  PDH 窗口（相邻样本间隔）: 中位 {sorted(gaps)[len(gaps)//2]
 # ---- 窗口对齐：每个 PDH 样本配它自己窗口内的本库样本均值 ----
 mine_ts = [m[0] for m in mine]
 pairs, windows = [], []
+quads = []
 for i in range(len(ref) - 1):
-    ts, total, _insts = ref[i]
+    ts, total, ref_cores_avg, _insts = ref[i]
     nxt = ref[i + 1][0]
     lo = bisect.bisect_left(mine_ts, ts)
     hi = bisect.bisect_left(mine_ts, nxt)
@@ -179,6 +179,9 @@ for i in range(len(ref) - 1):
     avg = sum(seg) / len(seg)
     pairs.append(avg - total)
     windows.append(nxt - ts)
+    if ref_cores_avg is not None:
+        seg2 = [mine[j][2] for j in range(lo, hi)]
+        quads.append((avg, sum(seg2) / len(seg2), total, ref_cores_avg))
 
 n = len(pairs)
 mean = sum(pairs) / n
@@ -225,9 +228,23 @@ if mix_diffs:
     # 属 PDH 极短采样窗口的量化现象；口径混用会表现为**稳定正**偏差
     # （100-%Idle 比 %ProcessorTime 高 3~5pp，CI 不含 0），与此不同。
     # 判据本身用 cpu.usage 作参考，因此这个诊断不影响判定结果。
-    print(f"  [诊断] 库内 cpu.usage 与每核均值的最大差 = {mx:.4f}pp"
-          f"（超 0.01pp 的采样占比 "
-          f"{sum(1 for x in mix_diffs if x > 0.01) / len(mix_diffs) * 100:.0f}%）")
+    signed = sum(mix_diffs) / len(mix_diffs)
+    print(f"  [诊断] 库内 cpu.usage - 每核均值: 平均 {signed:+.4f}pp（带符号），"
+          f"最大绝对 {mx:.4f}pp，超 0.01pp 占比 "
+          f"{sum(1 for x in mix_diffs if abs(x) > 0.01) / len(mix_diffs) * 100:.0f}%")
+if quads:
+    print("\n  四元组对照（决定性）本库_Total | 本库每核均值 | PDH_Total | PDH实例均值")
+    st = max(1, len(quads) // 12)
+    for k in range(0, len(quads), st):
+        a, b, c, d = quads[k]
+        print(f"    {a:8.2f} | {b:8.2f} | {c:8.2f} | {d:8.2f}"
+              f"   [本库_T-PDH_T={a - c:+7.2f}  本库核-PDH核={b - d:+7.2f}]")
+    da = sum(abs(q[0] - q[2]) for q in quads) / len(quads)
+    db = sum(abs(q[1] - q[3]) for q in quads) / len(quads)
+    print(f"\n  平均 |本库_Total - PDH_Total|     = {da:.3f}pp")
+    print(f"  平均 |本库每核均值 - PDH实例均值| = {db:.3f}pp")
+    print("  哪一项大，哪一侧的计数器读数就与 PDH 不一致。")
+
 print(f"  有效配对 = {n}（每对含 {3}~{max(20, int(sorted(windows)[len(windows)//2]//27))} "
       f"个本库样本，窗口中位 {sorted(windows)[len(windows)//2]}ms）")
 print(f"  均值差 = {mean:+.3f}pp")
