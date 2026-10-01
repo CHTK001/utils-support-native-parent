@@ -25,19 +25,28 @@ tmpfs 挂载点。sysfs 本身不可写，但**挂载点本身可以被覆盖**�
 
 ## 用法
 
+两种模式，**断言逻辑完全相同**（同一段校验脚本被复用，不存在两份实现）：
+
+### 远端模式（SSH 到 Linux 主机）
+
     export SI_SSH_PASSWORD='...'
-    python battery_value_linux.py <host> <user> <remote.so>
+    export SI_SO_PATH='<本地 libsysinformer.so 路径>'
+    python battery_value_linux.py <host> <user> /tmp/sysinf/libsysinformer.so
 
-    # 例如
-    export SI_SSH_PASSWORD='kali'
-    python battery_value_linux.py 192.168.50.198 kali /tmp/sysinf/libsysinformer.so
+密码只从环境变量读，不落盘、不设默认值。
 
-密码只从环境变量读，不落盘、不写默认值。
+### 本地模式（CI 用，sudo 免密）
+
+    sudo -n python battery_value_linux.py --local <libsysinformer.so>
+
+CI 的 Linux runner 本身就是 Linux 且 `sudo` 免密，可以直接在 runner 上
+bind mount 夹具，不需要连任何外部主机 —— 电池取值验收因此从一次性的
+人工验证升级为**常驻 CI 门禁**。
 
 ## 判定
 
-三个用例全绿且顺序符合契约时打印 `KALI_BATTERY_VALUE_OK`，退出码 0；
-否则打印 `KALI_BATTERY_VALUE_FAILED`，退出码 1。
+三个用例全绿且顺序符合契约时打印 `BATTERY_VALUE_OK` / `KALI_BATTERY_VALUE_OK`，
+退出码 0；否则打印对应的 `..._FAILED`，退出码 1。
 
 **顺序也是被断言的一部分**：三平台均约定按 `name` 升序。Linux 侧
 曾经漏了排序，`read_dir` 的返回顺序由文件系统决定（ext4 哈希序、
@@ -224,7 +233,116 @@ def shq(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+class SshShell:
+    """把 SSH 会话包装成与 LocalShell 相同的接口。"""
+
+    def __init__(self, run, sudo):
+        self.run = run
+        self.sudo = sudo
+
+
+class LocalShell:
+    """本机 shell（CI 用）。CI 的 Linux runner 上 `sudo` 是免密的。"""
+
+    def __init__(self, sudo_flag="-n"):
+        self.sudo_flag = sudo_flag
+
+    def run(self, cmd, timeout=180):
+        import subprocess
+        p = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
+                           timeout=timeout)
+        return (p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+
+    def sudo(self, cmd, timeout=180):
+        return self.run(f"sudo {self.sudo_flag} sh -c {shq(cmd)}", timeout)
+
+
+def run_cases(shell, so_path: str, work_dir: str, marker: str,
+              pwd_hint: bool = False) -> bool:
+    """跑全部用例。SSH 与本地两种模式共用，断言逻辑只有这一份。
+
+    :param pwd_hint: SSH 模式下 `sudo` 会提示输密码，stderr 里的
+        "password for" 不是错误，需要忽略。
+    """
+    def mount_fixture(entries: dict) -> tuple:
+        script = "set -e\nFAKE=/tmp/fakebat\nrm -rf $FAKE\nmkdir -p $FAKE\n"
+        for d, files in entries.items():
+            script += f"mkdir -p $FAKE/{d}\n"
+            for fn, val in files.items():
+                script += f"echo {shq(val)} > $FAKE/{d}/{fn}\n"
+        script += "mount --bind $FAKE /sys/class/power_supply\n"
+        return shell.sudo(script)
+
+    cases_path = posixpath.join(work_dir, "bat_cases.json")
+    verify_path = posixpath.join(work_dir, "verify_bat.py")
+    shell.run(f"mkdir -p {work_dir}")
+    # 校验脚本与本文件同源，SSH/本地跑的是**同一份断言**
+    shell.run(f"cat > {verify_path} <<'PYEOF'\n"
+              f"SO_PATH = {so_path!r}\n"
+              f"CASES_PATH = {cases_path!r}\n"
+              f"{REMOTE_VERIFY}\nPYEOF")
+
+    all_ok = True
+    try:
+        for n, case in enumerate(CASES, 1):
+            print(f"\n=== case {n}: {case['label']} ===")
+            shell.sudo("umount /sys/class/power_supply 2>/dev/null; true")
+            _, e = mount_fixture(case["entries"])
+            if e.strip() and not (pwd_hint and "password for" in e):
+                print(f"  [stderr] {e[:200]}")
+            shell.run(f"cat > {cases_path} <<'JEOF'\n"
+                      f"{json.dumps([case], ensure_ascii=False)}\nJEOF")
+            o, e = shell.run(f"python3 {verify_path}")
+            print("  " + (o.strip().replace("\n", "\n  ") or "(no stdout)"))
+            if e.strip():
+                print("  [stderr] " + e[:400].replace("\n", "\n  "))
+            all_ok = all_ok and "BATTERY_VALUE_OK" in o
+
+        # ---- 顺序取证：证明「为什么必须断言顺序」 ----
+        print("\n=== order evidence: read_dir order != sorted order ===")
+        o, _ = shell.run("ls -U /sys/class/power_supply/ 2>/dev/null | tr '\\n' ' '")
+        print("  ls -U (same order as read_dir) = " + o.strip())
+        o, _ = shell.run("ls /sys/class/power_supply/ 2>/dev/null | tr '\\n' ' '")
+        print("  ls      (sorted)                = " + o.strip())
+        print("  Rust read_dir order == os.listdir; neither is sorted")
+    finally:
+        print("\n=== cleanup ===")
+        shell.sudo("umount /sys/class/power_supply 2>/dev/null; "
+                   f"rm -rf /tmp/fakebat {work_dir}; true")
+        o, _ = shell.run("mount | grep -c power_supply || true")
+        print("  leftover power_supply mounts = " + (o.strip() or "0"))
+
+    print("\n" + "=" * 60)
+    for n, case in enumerate(CASES, 1):
+        print(f"  case{n} {case['label']}")
+    print("  " + (marker if all_ok else marker.replace("_OK", "_FAILED")))
+    return all_ok
+
+
+def run_local_mode(so_path: str) -> int:
+    """本地模式：CI 的 Linux runner 上直接跑，不需要连外部主机。"""
+    if os.geteuid() != 0 and os.environ.get("SI_ALLOW_SUDO") != "1":
+        print("本地模式需要 root（bind mount 权限）。"
+              "CI 里请用 `sudo -n python battery_value_linux.py --local <so>`。",
+              file=sys.stderr)
+        return 2
+    if not os.path.isfile(so_path):
+        print(f"被测 .so 不存在: {so_path}", file=sys.stderr)
+        return 2
+    work = "/tmp/sysinf-battery-accept"
+    ok = run_cases(LocalShell(), os.path.abspath(so_path), work,
+                   "BATTERY_VALUE_OK")
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--local":
+        return run_local_mode(sys.argv[2] if len(sys.argv) > 2 else "")
+    return run_ssh_mode()
+
+
+def run_ssh_mode() -> int:
     host = sys.argv[1] if len(sys.argv) > 1 else HOST
     user = sys.argv[2] if len(sys.argv) > 2 else USER
     remote_so = sys.argv[3] if len(sys.argv) > 3 else \
@@ -255,13 +373,18 @@ def main() -> int:
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, username=user, password=pwd, timeout=20)
 
-    def run(cmd, timeout=180):
+    def _run(cmd, timeout=180):
         _, o, e = ssh.exec_command(cmd, timeout=timeout)
         return (o.read().decode("utf-8", "replace"),
                 e.read().decode("utf-8", "replace"))
 
-    def sudo(cmd, timeout=180):
-        return run(f"echo {shq(pwd)} | sudo -S -k sh -c {shq(cmd)}", timeout)
+    def _sudo(cmd, timeout=180):
+        return _run(f"echo {shq(pwd)} | sudo -S -k sh -c {shq(cmd)}", timeout)
+
+    shell = SshShell(_run, _sudo)
+
+    run = _run
+    sudo = _sudo
 
     run(f"mkdir -p {REMOTE_DIR}")
 
@@ -299,60 +422,10 @@ def main() -> int:
         ssh.close()
         return 1
 
-    # ---- 挂夹具 ----
-    def mount_fixture(entries: dict) -> tuple:
-        script = "set -e\nFAKE=/tmp/fakebat\nrm -rf $FAKE\nmkdir -p $FAKE\n"
-        for d, files in entries.items():
-            script += f"mkdir -p $FAKE/{d}\n"
-            for fn, val in files.items():
-                script += f"echo {shq(val)} > $FAKE/{d}/{fn}\n"
-        script += "mount --bind $FAKE /sys/class/power_supply\n"
-        return sudo(script)
-
-    cases_path = posixpath.join(REMOTE_DIR, "bat_cases.json")
-    verify_path = posixpath.join(REMOTE_DIR, "verify_bat.py")
-    run(f"cat > {verify_path} <<'PYEOF'\n"
-        f"SO_PATH = {remote_so!r}\n"
-        f"CASES_PATH = {cases_path!r}\n"
-        f"{REMOTE_VERIFY}\nPYEOF")
-
-    all_ok = True
-    try:
-        for n, case in enumerate(CASES, 1):
-            print(f"\n=== case {n}: {case['label']} ===")
-            sudo("umount /sys/class/power_supply 2>/dev/null; true")
-            _, e = mount_fixture(case["entries"])
-            if e.strip() and "password for" not in e:
-                print(f"  [stderr] {e[:200]}")
-            run(f"cat > {cases_path} <<'JEOF'\n"
-                f"{json.dumps([case], ensure_ascii=False)}\nJEOF")
-            o, e = run(f"python3 {verify_path}")
-            print("  " + (o.strip().replace("\n", "\n  ") or "(no stdout)"))
-            if e.strip():
-                print("  [stderr] " + e[:400].replace("\n", "\n  "))
-            all_ok = all_ok and "BATTERY_VALUE_OK" in o
-
-        # ---- 顺序取证：证明「为什么必须断言顺序」 ----
-        print("\n=== order evidence: read_dir 顺序 != 排序顺序 ===")
-        o, _ = run("ls -U /sys/class/power_supply/ 2>/dev/null | tr '\\n' ' '")
-        print("  ls -U (read_dir 同序) = " + o.strip())
-        o, _ = run("ls /sys/class/power_supply/ 2>/dev/null | tr '\\n' ' '")
-        print("  ls      (排序后)       = " + o.strip())
-        print("  Rust read_dir 顺序 == os.listdir，两者都不保证排序")
-    finally:
-        print("\n=== cleanup ===")
-        sudo(f"umount /sys/class/power_supply 2>/dev/null; "
-             f"rm -rf /tmp/fakebat {remote_so}.b64 {cases_path}; true")
-        o, _ = run("mount | grep -c power_supply || true")
-        print("  残留 power_supply 挂载数 = " + (o.strip() or "0"))
-        ssh.close()
-
-    print("\n" + "=" * 60)
-    for n, case in enumerate(CASES, 1):
-        print(f"  case{n} {case['label']}")
-    print("  " + ("KALI_BATTERY_VALUE_OK" if all_ok
-                 else "KALI_BATTERY_VALUE_FAILED"))
-    return 0 if all_ok else 1
+    ok = run_cases(shell, remote_so, REMOTE_DIR,
+                   "KALI_BATTERY_VALUE_OK", pwd_hint=True)
+    ssh.close()
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
