@@ -15,10 +15,10 @@
 
 use crate::common;
 use crate::model::{
-    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, EnvVar, Envelope, EventKind,
-    EventRecord, GpuInfo, HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo,
-    PrivilegeInfo, ProcessDetail, SensorInfo, ServiceInfo, SocketInfo, StackFrame, StackTrace,
-    ThreadInfo,
+    unsupported, ActionKind, ActionResult, BatteryInfo, CredentialInfo, DiskIo, EnvVar, Envelope,
+    EventKind, EventRecord, GpuInfo, HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule,
+    ModuleInfo, PrivilegeInfo, ProcessDetail, SensorInfo, ServiceInfo, SocketInfo, StackFrame,
+    StackTrace, ThreadInfo,
 };
 use crate::PLATFORM;
 
@@ -41,18 +41,45 @@ use windows::Win32::System::Threading::{
 /// NT 状态码：成功。
 const STATUS_SUCCESS: i32 = 0;
 
-/// 系统句柄信息类号（`SystemHandleInformation`）。
-const SYSTEM_HANDLE_INFORMATION: u32 = 16;
-
-/// `SYSTEM_HANDLE_TABLE_ENTRY_INFO` 在句柄表里的定长部分长度（64 位 Windows）。
+/// 系统扩展句柄信息类号（`SystemExtendedHandleInformation`）。
 ///
-/// 结构为：`USHORT UniqueProcessId; USHORT CreatorBackTraceIndex; UCHAR ObjectTypeIndex;
-/// UCHAR HandleAttributes; USHORT HandleValue; PVOID Object; ULONG GrantedAccess;`
-/// —— 共 2+2+1+1+2+8+4 = 20 字节。
-const HANDLE_ENTRY_SIZE: usize = 20;
+/// # 为什么不用 `SystemHandleInformation`(16)
+///
+/// 类号 16 已废弃，Win10 2004+ 返回的记录**不是** `SYSTEM_HANDLE_TABLE_ENTRY_INFO`。
+/// 实测（本机 Win11）返回长度与记录数的唯一吻合组合是 **24 字节/条**
+/// （`8 + 150037 * 24 == 3600896`），而按旧结构的 20 字节解析会逐条错位，
+/// 导致 pid 读错、`process.handles` **系统性少报约 80%**
+/// （实测 `OpenChamber.exe` 报 103 / 真实 514；`System` 报 1630 / 真实 7390）。
+/// 类号 64 是微软现行推荐的结构，布局稳定且 pid 是 8 字节 `HANDLE`。
+const SYSTEM_EXTENDED_HANDLE_INFORMATION: u32 = 64;
 
-/// 由 `NtQuerySystemInformation` 返回的句柄表头：`ULONG NumberOfHandles;` 后接数组。
-const HANDLE_INFO_HEADER_SIZE: usize = 8;
+/// `SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX` 的定长长度（64 位 Windows）。
+///
+/// 结构为：`PVOID Object; ULONG_PTR UniqueProcessId; ULONG_PTR HandleValue;
+/// ULONG GrantedAccess; USHORT CreatorBackTraceIndex; USHORT ObjectTypeIndex;
+/// USHORT HandleAttributes; ULONG Reserved;` —— 共 8+8+8+4+2+2+2+4 = 38，
+/// 数组元素按 8 字节对齐，故实际 stride 为 40。
+const HANDLE_ENTRY_SIZE: usize = 40;
+
+/// 记录内各字段相对记录起点的偏移（单位字节）。
+mod handle_field {
+    /// `Object`（对象指针）。
+    pub const OBJECT: usize = 0;
+    /// `UniqueProcessId`（属主进程 id，8 字节）。
+    pub const PID: usize = 8;
+    /// `HandleValue`（句柄值，8 字节）。
+    pub const HANDLE_VALUE: usize = 16;
+    /// `GrantedAccess`（访问掩码）。
+    pub const ACCESS: usize = 24;
+    /// `ObjectTypeIndex`（对象类型下标，可解出对象类型名）。
+    pub const TYPE_INDEX: usize = 32;
+}
+
+/// 由 `NtQuerySystemInformation` 返回的句柄表头长度（64 位 Windows）。
+///
+/// `SYSTEM_HANDLE_TABLE_ENTRY_INFO_EX` 数组前的字段共 16 字节：
+/// `ULONG_PTR NumberOfHandles; ULONG_PTR Reserved;`。
+const HANDLE_INFO_HEADER_SIZE: usize = 16;
 
 /// 释放系统分配的本机内存（`LocalFree`）。
 #[link(name = "kernel32")]
@@ -483,11 +510,15 @@ unsafe fn integrity_name(sid: windows::Win32::Security::PSID) -> Option<String> 
 
 /// 枚举全系统句柄表并按 pid 过滤。
 ///
+/// 用 `SystemExtendedHandleInformation`（见 [`SYSTEM_EXTENDED_HANDLE_INFORMATION`]
+/// 的说明：类号 16 的布局在 Win10 2004+ 已变，按旧结构解析会系统性少报约 80%）。
+///
 /// # 参数
 /// * `pid` - 目标进程 ID
 ///
 /// # 返回值
-/// 句柄列表（只给句柄值、属性与访问掩码；对象名需要额外解引用，未实现）
+/// 句柄列表（只给句柄值、类型下标与访问掩码；对象名需要 `NtQueryObject` 解引用，
+/// 会挂在部分句柄上，未实现）
 fn handles_of(pid: i32) -> Result<Vec<HandleInfo>, String> {
     let mut len = 1u32 << 20;
     let mut buf: Vec<u8>;
@@ -497,7 +528,7 @@ fn handles_of(pid: i32) -> Result<Vec<HandleInfo>, String> {
         let mut ret = 0u32;
         rc = unsafe {
             NtQuerySystemInformation(
-                SYSTEM_HANDLE_INFORMATION,
+                SYSTEM_EXTENDED_HANDLE_INFORMATION,
                 buf.as_mut_ptr() as *mut c_void,
                 len,
                 &mut ret,
@@ -512,45 +543,51 @@ fn handles_of(pid: i32) -> Result<Vec<HandleInfo>, String> {
             continue;
         }
         return Err(format!(
-            "NtQuerySystemInformation(SystemHandleInformation) 失败: 0x{:08x}",
+            "NtQuerySystemInformation(SystemExtendedHandleInformation) 失败: 0x{:08x}",
             rc as u32
         ));
     }
 
     let mut out = Vec::new();
-    let count = u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let mut u64_at = |o: usize| -> u64 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(&buf[o..o + 8]);
+        u64::from_ne_bytes(b)
+    };
+    // 记录数是 8 字节（ULONG_PTR）
+    let count = u64_at(0) as usize;
+    // 以实际取到的字节数为上限，避免句柄表在读取期间增长导致越界
+    let max_count = (buf.len().saturating_sub(HANDLE_INFO_HEADER_SIZE)) / HANDLE_ENTRY_SIZE;
     let base = HANDLE_INFO_HEADER_SIZE;
-    for i in 0..count {
+    for i in 0..count.min(max_count) {
         let off = base + i * HANDLE_ENTRY_SIZE;
-        if off + HANDLE_ENTRY_SIZE > buf.len() {
-            break;
-        }
-        let u16_at = |o: usize| u16::from_ne_bytes([buf[o], buf[o + 1]]);
-        let owner = u16_at(off) as i32;
+        let owner = u64_at(off + handle_field::PID) as i32;
         if owner != pid {
             continue;
         }
-        let handle_value = u16_at(off + 6);
-        let object = usize::from_ne_bytes([
-            buf[off + 8],
-            buf[off + 9],
-            buf[off + 10],
-            buf[off + 11],
-            buf[off + 12],
-            buf[off + 13],
-            buf[off + 14],
-            buf[off + 15],
+        let handle_value = u64_at(off + handle_field::HANDLE_VALUE);
+        let access = u32::from_ne_bytes([
+            buf[off + handle_field::ACCESS],
+            buf[off + handle_field::ACCESS + 1],
+            buf[off + handle_field::ACCESS + 2],
+            buf[off + handle_field::ACCESS + 3],
         ]);
-        let access = u32::from_ne_bytes([buf[off + 16], buf[off + 17], buf[off + 18], buf[off + 19]]);
+        let type_index = u16::from_ne_bytes([
+            buf[off + handle_field::TYPE_INDEX],
+            buf[off + handle_field::TYPE_INDEX + 1],
+        ]);
         out.push(HandleInfo {
             id: format!("0x{:x}", handle_value),
-            kind: "unknown".to_string(),
+            // 类型下标能给出稳定的类型编号，但要变成 "File"/"Key" 这类可读名
+            // 需要查 SystemHandleTypeInformation 的类型表；这里如实给出下标，
+            // 不用 "unknown" 冒充已解析。
+            kind: format!("type#{}", type_index),
             name: None,
             access: Some(format!("0x{:08x}", access)),
             // 对象指针只用于调试定位，不当作"引用计数"；留空而不是编造
             ref_count: None,
         });
-        let _ = object;
+        let _ = u64_at(off + handle_field::OBJECT);
     }
     if out.is_empty() {
         return Err(format!(
@@ -722,6 +759,10 @@ pub fn call(op: &str, args: &str) -> String {
             wrap(gpus_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
         }
 
+        // ---------- A12 电池 ----------
+        "battery.list" => wrap(
+            serde_json::to_value(batteries_of()).map_err(|e| e.to_string())
+        ),
         // ---------- 仍不支持（原因写清，不用空集合冒充）----------
         "sensor.list" => {
             wrap(sensors_of().and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())))
@@ -2356,7 +2397,74 @@ unsafe fn read_wide_ptr(ptr: usize) -> Option<String> {
     Some(String::from_utf16_lossy(std::slice::from_raw_parts(p, len)))
 }
 
-/// A10 GPU：枚举显示适配器。
+/// A12 电池：`GetSystemPowerStatus`。
+///
+/// 这是 Windows 上拿电池状态的正规用户态接口，无需 WMI。
+///
+/// # 返回值
+/// 电池列表；无电池设备时返回空列表（**不是**错误 —— 台式机本来就没有电池）
+fn batteries_of() -> Vec<BatteryInfo> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct SystemPowerStatus {
+        ac_line_status: u8,
+        battery_flag: u8,
+        battery_life_percent: u8,
+        battery_life_time: u32,
+        battery_full_life_time: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+
+    let mut st = SystemPowerStatus::default();
+    if unsafe { GetSystemPowerStatus(&mut st) } == 0 {
+        return Vec::new();
+    }
+    // BatteryFlag: 128 = 无系统电池；255 = 未知
+    if st.battery_flag == 128 || st.battery_flag == 255 {
+        return Vec::new();
+    }
+    // 255 = 未知；0xFFFFFFFF = 未知/无限
+    let pct = if st.battery_life_percent == 255 {
+        None
+    } else {
+        Some(st.battery_life_percent as f32)
+    };
+    let to_empty = if st.battery_life_time == u32::MAX || st.battery_life_time == 0 {
+        None
+    } else {
+        Some(st.battery_life_time as u64)
+    };
+    let to_full = if st.battery_full_life_time == u32::MAX || st.battery_full_life_time == 0 {
+        None
+    } else {
+        Some(st.battery_full_life_time as u64)
+    };
+    // BatteryFlag 的位含义（可组合）：1 充电中、2 电量低、4 严重低、8 充电中(AC)
+    let state = if st.ac_line_status == 255 || st.battery_flag == 8 {
+        "unknown"
+    } else if (st.battery_flag & 1) != 0 || st.ac_line_status == 1 {
+        "charging"
+    } else if (st.battery_flag & 4) != 0 {
+        "critical"
+    } else if (st.battery_flag & 2) != 0 {
+        "low"
+    } else {
+        "discharging"
+    };
+
+    vec![BatteryInfo {
+        name: "System Battery".to_string(),
+        percentage: pct,
+        state: state.to_string(),
+        time_to_empty_sec: to_empty,
+        time_to_full_sec: to_full,
+    }]
+}
+
+/// A1 GPU：枚举显示适配器。
 ///
 /// 只返回**确实拿得到**的字段（适配器名、设备 ID）。使用率/显存/温度/功耗需要
 /// `D3DKMTQueryStatistics`（其结构含大联合体，偏移写错会内存损坏），本实现不做，

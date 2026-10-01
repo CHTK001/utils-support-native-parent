@@ -39,9 +39,9 @@ use once_cell::sync::Lazy;
 
 use crate::common;
 use crate::model::{
-    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, Envelope, EnvVar, GpuInfo,
-    HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo, ProcessDetail, SensorInfo,
-    ServiceInfo, SocketInfo, StackFrame, StackTrace, ThreadInfo,
+    unsupported, ActionKind, ActionResult, BatteryInfo, CredentialInfo, DiskIo, Envelope, EnvVar,
+    GpuInfo, HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo, ProcessDetail,
+    SensorInfo, ServiceInfo, SocketInfo, StackFrame, StackTrace, ThreadInfo,
 };
 use crate::PLATFORM;
 
@@ -2189,6 +2189,79 @@ fn collect_sensors(
     }
 }
 
+/// A12 电池：枚举 `/sys/class/power_supply` 里的电池类电源。
+///
+/// 只认 `type == "Battery"` 的条目（`Mains`/`USB` 等是供电设备，不是电池）。
+/// 剩余时间优先用 `power_now` 推算（`energy_now / power_now`），
+/// 无电流信息时退回内核直接给的 `time_to_empty_now`（单位秒）。
+///
+/// # 返回值
+/// 电池列表；台式机（无 `type=Battery`）返回空列表，这是正确结果而非失败
+fn batteries() -> Vec<BatteryInfo> {
+    let mut out = Vec::new();
+    let rd = match std::fs::read_dir("/sys/class/power_supply") {
+        Ok(r) => r,
+        Err(_) => {
+            return out;
+        }
+    };
+    for e in rd.flatten() {
+        let dir = e.path();
+        let typ = std::fs::read_to_string(dir.join("type"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if typ != "Battery" {
+            continue;
+        }
+        let name = std::fs::read_to_string(dir.join("model_name"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
+        // capacity 是 0..100 的整数，但部分驱动会写到 0 表示未知
+        let percentage = std::fs::read_to_string(dir.join("capacity"))
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .filter(|p| *p > 0.0 && *p <= 100.0);
+        let status = std::fs::read_to_string(dir.join("status"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "Unknown".to_string());
+        let state = match status.as_str() {
+            "Charging" => "charging",
+            "Discharging" => "discharging",
+            "Full" => "full",
+            _ => "unknown",
+        };
+        // 剩余时间：优先 energy_now/power_now，其次内核给的 time_to_empty_now
+        let read_num = |f: &str| -> Option<f64> {
+            std::fs::read_to_string(dir.join(f))
+                .ok()
+                .and_then(|s| s.trim().parse::<f64>().ok())
+        };
+        let (energy_now, energy_full, power_now) =
+            (read_num("energy_now"), read_num("energy_full"), read_num("power_now"));
+        let to_empty = match (energy_now, power_now) {
+            // 微瓦时/微瓦 = 小时，乘 3600 转秒
+            (Some(e), Some(p)) if p > 0.0 => Some((e / p * 3600.0) as u64),
+            _ => read_num("time_to_empty_now").map(|s| s as u64),
+        };
+        let to_full = match (energy_full, energy_now, power_now) {
+            (Some(f), Some(e), Some(p)) if p > 0.0 && e > 0.0 && f > e => {
+                Some(((f - e) / p * 3600.0) as u64)
+            }
+            _ => read_num("time_to_full_now").map(|s| s as u64),
+        };
+        out.push(BatteryInfo {
+            name,
+            percentage,
+            state: state.to_string(),
+            time_to_empty_sec: to_empty,
+            time_to_full_sec: to_full,
+        });
+    }
+    out
+}
+
 /// 枚举 hwmon 传感器（温度/风扇/电压）。
 ///
 /// # 返回值
@@ -2862,6 +2935,7 @@ pub fn call(op: &str, args: &str) -> String {
         // ---------- 可选能力 ----------
         "gpu.list" => ok_json(gpus()),
         "sensor.list" => ok_json(sensors()),
+        "battery.list" => ok_json(batteries()),
         "memory.modules" => match memory_modules() {
             Ok(v) => ok_json(v),
             Err(e) => err_json(e),
