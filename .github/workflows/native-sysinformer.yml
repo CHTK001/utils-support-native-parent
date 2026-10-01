@@ -17,10 +17,15 @@ on:
   push:
     paths:
       - 'utils-support-native-sysinformer/**'
+      # 验收脚本改动必须触发 CI：它们本身就是门禁。
+      # 2026-10-01 之前漏了这条，改 prod_accept.py（新增 battery 断言）
+      # 触发了一个 0-job 秒失败的 run，绕过了全部验收。
+      - 'tools/sysinformer-accept/**'
       - '.github/workflows/native-sysinformer.yml'
   pull_request:
     paths:
       - 'utils-support-native-sysinformer/**'
+      - 'tools/sysinformer-accept/**'
 
 concurrency:
   group: sysinformer-${{ github.ref }}
@@ -522,7 +527,9 @@ jobs:
           # 运算符，会把 $(pwd) 求值成当前目录，于是 $(pwd)/$LIB_PATH 变成
           # "目录名/" + 相对路径的拼接 -> 传给 Python 的路径被截断，
           # ctypes.CDLL 报 FileNotFoundError（2026-10-01 实际踩到）。
-          # GitHub 的 ${{ }} 才是表达式语法；用 $PWD 是 PowerShell 原生的。
+          # GitHub Actions 的表达式语法是双花括号，本仓库禁用 PS 5.1
+          # （无 BOM 的 .ps1 会被按 ANSI 读，中文与转义被破坏），
+          # 故一律用 PowerShell 7 自带的 $PWD。
           $dll = Join-Path $PWD $env:LIB_PATH
           Write-Host "dll = $dll"
           if (-not (Test-Path $dll)) { throw "dll not found: $dll" }
