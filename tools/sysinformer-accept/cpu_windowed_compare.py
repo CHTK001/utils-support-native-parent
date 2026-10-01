@@ -85,6 +85,10 @@ def sample_once():
     return float(total), sum(cores) / len(cores), cores
 
 
+# 最近一次的形状信息：(cores 数量, logical_count, (cpu.usage, cores, 每核均值))
+last_shape = None
+
+
 NCPU = ctypes.windll.kernel32.GetActiveProcessorCount(0xFFFF)
 print(f"  逻辑核数 = {NCPU}")
 
@@ -108,12 +112,17 @@ while time.time() < t_end:
         # 诊断：库内部汇总与每核均值是否同源。差应恒为 0；
         # 不为 0 说明某些核回退到了 sysinfo 口径（真缺陷，需单独立项）。
         mix_diffs.append(abs(total - cores_avg))
+        d = call("system.snapshot")["data"]
+        last_shape = (len(d["cpu_cores"]), (d.get("cpu") or {}).get("logical_count"),
+                      (total, cores, cores_avg))
     time.sleep(0.02)
 
 out, err = proc.communicate(timeout=DURATION + 90)
 print(f"  PDH: {out.strip()[:100]}")
 
 ref = []
+found_instances = []
+self_gaps = []
 with open(STREAM, encoding="utf-8") as f:
     for line in f:
         line = line.strip()
@@ -126,10 +135,23 @@ with open(STREAM, encoding="utf-8") as f:
             continue
         total = obj.get("_total")
         # _Total 是权威参考：任务管理器顶部那个数字就是它。
-        # 不再用「每核均值」当参考 —— 那要求 PDH 实例数与本库核数严格相等，
-        # 而 CI 的 4 核 runner 上实测会差 19pp（见文件头说明）。
+        # 不用「每核均值」当参考 —— 那要求 PDH 实例数与本库核数严格相等。
+        #
+        # 实例编号从 JSON 动态发现，不用 NCPU 假设：若 PDH 实际返回的实例数
+        # 与 GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) 不同（例如嵌套
+        # 虚拟化下 hypervisor 暴露更多处理器），按 NCPU 取会取错子集，
+        # 诊断输出能直接看出这个差异。
+        insts = sorted(k for k in obj if k != "_total")
+        if not found_instances:
+            found_instances.extend(insts)
+        # PDH 侧自洽性：_Total 应等于「本条 JSON 内各实例的均值」。
+        # pdh_stream.ps1 每轮新开 Get-Counter 查询，其首个 CookedValue 的基线
+        # 可能未稳定；这个检查能直接判定 ref 是否可信。
+        vals = [obj[k] for k in insts if isinstance(obj.get(k), (int, float))]
+        if total is not None and vals:
+            self_gaps.append(abs(float(total) - sum(vals) / len(vals)))
         if total is not None:
-            ref.append((int(ts_s), float(total)))
+            ref.append((int(ts_s), float(total), insts))
 
 ref.sort()
 print(f"\n  PDH 样本 = {len(ref)}   本库样本 = {len(mine)}")
@@ -147,7 +169,7 @@ print(f"  PDH 窗口（相邻样本间隔）: 中位 {sorted(gaps)[len(gaps)//2]
 mine_ts = [m[0] for m in mine]
 pairs, windows = [], []
 for i in range(len(ref) - 1):
-    ts, total = ref[i]
+    ts, total, _insts = ref[i]
     nxt = ref[i + 1][0]
     lo = bisect.bisect_left(mine_ts, ts)
     hi = bisect.bisect_left(mine_ts, nxt)
@@ -163,6 +185,35 @@ mean = sum(pairs) / n
 sd = math.sqrt(sum((v - mean) ** 2 for v in pairs) / (n - 1))
 se = sd / math.sqrt(n)
 lo_ci, hi_ci = mean - 1.96 * se, mean + 1.96 * se
+
+print("\n" + "=" * 74)
+print("核数一致性诊断（关键：三项不一致即为口径混用的入口）")
+print("=" * 74)
+print(f"  GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) = {NCPU}")
+print(f"  PDH \\Processor(*) 实际返回的实例 = {len(found_instances)} 个 "
+      f"-> {found_instances[:24]}{' ...' if len(found_instances) > 24 else ''}")
+print(f"  PDH 实例数 == NCPU ? {len(found_instances) == NCPU}")
+
+# ref 自身可信吗：_Total 与「同条 JSON 内实例均值」应相等。
+# pdh_stream.ps1 每轮新开查询，首个 CookedValue 的基线可能未稳定。
+if self_gaps:
+    sg_avg = sum(self_gaps) / len(self_gaps)
+    sg_max = max(self_gaps)
+    verdict = ("ref 可信（自洽）" if sg_max < 0.5 else
+               f"**ref 自身不自洽 -> 对照源不可信，不能据此判库**")
+    print(f"  PDH 自洽性（_Total vs 同条实例均值）: 平均 {sg_avg:.3f}pp  "
+          f"最大 {sg_max:.3f}pp  -> {verdict}")
+if last_shape:
+    n_cores, logical, sample = last_shape
+    print(f"  本库 cpu_cores 数量 = {n_cores}   cpu.logical_count = {logical}")
+    print(f"  本库核数 == NCPU ? {n_cores == NCPU}   "
+          f"logical_count == NCPU ? {logical == NCPU}")
+    print(f"  [样本] cpu.usage = {sample[0]:.3f}   每核 = "
+          f"{[round(x, 1) for x in sample[1][:16]]}")
+    print(f"          每核和/{len(sample[1])} = {sample[2]:.3f}   "
+          f"差 = {sample[0] - sample[2]:+.3f}pp")
+    if n_cores != NCPU or logical != NCPU or len(found_instances) != NCPU:
+        print("  **三者不一致 —— 本库必然存在回退分支（sysinfo 口径）混入**")
 
 print("\n" + "=" * 74)
 print("窗口对齐后的对照结果（本库 cpu.usage[=PDH _Total] - PDH _Total）")
