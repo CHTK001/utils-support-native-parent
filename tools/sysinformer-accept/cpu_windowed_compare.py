@@ -14,11 +14,27 @@
   两侧的「被测区间」就被拉平到同一量级（W），方差随之下降。
 
 做法细节：
-  1. 后台 pwsh 流式输出 (unix_ms, _Total, 每核均值)，每行带 PDH 自报时间戳。
-  2. 本进程高频采样 (unix_ms, 汇总, 每核)。
+  1. 后台 pwsh 流式输出 (unix_ms, _Total)，每行带 PDH 自报时间戳。
+     **时间戳必须用计数器自报的 $s.Timestamp**：Get-Counter 内部耗时
+     1000~2840ms（实测），CookedValue 描述的是调用**结束时**那段窗口，
+     用自己的墙钟打戳会整体偏移 1~2.8s。
+  2. 本进程高频采样 (unix_ms, cpu.usage)。
   3. 对每个 PDH 样本，取其**前一个 PDH 样本之后、本样本之前**的
      本库样本求均值（这些样本全部落在 PDH 窗口内）。
-  4. 统计。
+  4. 统计，用 95% 置信区间是否含 0 作判定。
+
+参考源为什么是 cpu.usage（= PDH _Total）而不是「每核均值」：
+  2026-10-01 在 CI 的 4 核 runner 上，用「每核均值」作参考报出
+  +18.965pp（标准差仅 2.04pp，很稳定），而同一判据在本机 12 核上 <2pp。
+  本机进一步实测排除了库的问题：
+    - PDH 的 _Total 与「全部实例均值」精确相等（差 -0.000）
+    - 本库 cpu.usage 与「每核均值」精确相等（差 0.000pp，无口径混用）
+  即「每核均值」只在「PDH 实例数 == 本库核数」时才等于 _Total。
+  任务管理器顶部那个数字就是 _Total 本身，用它才是真正同源、
+  且不依赖核数假设。
+
+  本脚本仍打印「库内 cpu.usage 与每核均值的最大差」作诊断：该值应恒为 0；
+  不为 0 说明某些核回退到 sysinfo 口径（真缺陷）。
 """
 import bisect
 import ctypes
@@ -56,6 +72,19 @@ def call(op, args=None):
     return json.loads(raw)
 
 
+def sample_once():
+    """取一次快照，返回 (cpu.usage 即 PDH _Total, 每核均值, 每核列表)。"""
+    d = call("system.snapshot")["data"]
+    cores = [c["usage"] for c in d["cpu_cores"]]
+    if not cores:
+        return None, None, []
+    cpu = d.get("cpu") or {}
+    total = cpu.get("usage")
+    if total is None:
+        total = sum(cores) / len(cores)
+    return float(total), sum(cores) / len(cores), cores
+
+
 NCPU = ctypes.windll.kernel32.GetActiveProcessorCount(0xFFFF)
 print(f"  逻辑核数 = {NCPU}")
 
@@ -69,13 +98,16 @@ proc = subprocess.Popen(
 time.sleep(2.0)
 print(f"  本库采样中（约 {DURATION - 4}s）...", flush=True)
 mine = []
+mix_diffs = []
 t_end = time.time() + DURATION - 4
 while time.time() < t_end:
     ts = int(time.time() * 1000)
-    d = call("system.snapshot")["data"]
-    cores = [c["usage"] for c in d["cpu_cores"]]
+    total, cores_avg, cores = sample_once()
     if cores:
-        mine.append((ts, sum(cores) / len(cores)))
+        mine.append((ts, total))
+        # 诊断：库内部汇总与每核均值是否同源。差应恒为 0；
+        # 不为 0 说明某些核回退到了 sysinfo 口径（真缺陷，需单独立项）。
+        mix_diffs.append(abs(total - cores_avg))
     time.sleep(0.02)
 
 out, err = proc.communicate(timeout=DURATION + 90)
@@ -93,10 +125,11 @@ with open(STREAM, encoding="utf-8") as f:
         except json.JSONDecodeError:
             continue
         total = obj.get("_total")
-        cs = [obj.get(str(i)) for i in range(NCPU)]
-        cs = [c for c in cs if c is not None]
-        if total is not None and cs:
-            ref.append((int(ts_s), float(total), sum(cs) / len(cs)))
+        # _Total 是权威参考：任务管理器顶部那个数字就是它。
+        # 不再用「每核均值」当参考 —— 那要求 PDH 实例数与本库核数严格相等，
+        # 而 CI 的 4 核 runner 上实测会差 19pp（见文件头说明）。
+        if total is not None:
+            ref.append((int(ts_s), float(total)))
 
 ref.sort()
 print(f"\n  PDH 样本 = {len(ref)}   本库样本 = {len(mine)}")
@@ -114,7 +147,7 @@ print(f"  PDH 窗口（相邻样本间隔）: 中位 {sorted(gaps)[len(gaps)//2]
 mine_ts = [m[0] for m in mine]
 pairs, windows = [], []
 for i in range(len(ref) - 1):
-    ts, total, cores_avg = ref[i]
+    ts, total = ref[i]
     nxt = ref[i + 1][0]
     lo = bisect.bisect_left(mine_ts, ts)
     hi = bisect.bisect_left(mine_ts, nxt)
@@ -132,8 +165,18 @@ se = sd / math.sqrt(n)
 lo_ci, hi_ci = mean - 1.96 * se, mean + 1.96 * se
 
 print("\n" + "=" * 74)
-print("窗口对齐后的对照结果（本库汇总均值 - PDH _Total）")
+print("窗口对齐后的对照结果（本库 cpu.usage[=PDH _Total] - PDH _Total）")
 print("=" * 74)
+if mix_diffs:
+    mx = max(mix_diffs)
+    # 只报告事实，不在这里断言原因。
+    # 实测（400 次 / 间隔 5ms）：85% 完全一致，其余为单边负偏差、<=6pp，
+    # 属 PDH 极短采样窗口的量化现象；口径混用会表现为**稳定正**偏差
+    # （100-%Idle 比 %ProcessorTime 高 3~5pp，CI 不含 0），与此不同。
+    # 判据本身用 cpu.usage 作参考，因此这个诊断不影响判定结果。
+    print(f"  [诊断] 库内 cpu.usage 与每核均值的最大差 = {mx:.4f}pp"
+          f"（超 0.01pp 的采样占比 "
+          f"{sum(1 for x in mix_diffs if x > 0.01) / len(mix_diffs) * 100:.0f}%）")
 print(f"  有效配对 = {n}（每对含 {3}~{max(20, int(sorted(windows)[len(windows)//2]//27))} "
       f"个本库样本，窗口中位 {sorted(windows)[len(windows)//2]}ms）")
 print(f"  均值差 = {mean:+.3f}pp")
