@@ -96,6 +96,76 @@ python cpu_windowed_compare.py <dll> 90
 
 反向对照已验证：把口径切回旧实现后，同一判据稳定 FAILED。
 
+## 对照源（PDH 流）自己的坑 —— 比被测代码更隐蔽
+
+`pdh_stream.ps1` 曾让 CI 上 4 核 runner 的 CPU 判据连续三轮报
++18.965 / +17.973 / +16.313pp，而本机 12 核一直 OK。
+**不是库的缺陷，是对照源的缺陷。**
+
+### 头号坑：每轮新开查询 = 每个值都是「首采样值」
+
+`Get-Counter` 每调用一次就新开一个 PDH 查询。而
+
+```
+CookedValue = (raw_now - raw_first) / (t_now - t_first)
+```
+
+`raw_first/t_first` 取自**该查询自己的**上一个采样点。新开查询时这个基线
+尚未稳定，于是每个输出都是首采样值，**系统性偏低**。
+
+原写法：
+
+```powershell
+while (...) {
+    $c = Get-Counter '\Processor(*)\% Processor Time'   # 每轮都新开查询！
+    ...
+}
+```
+
+正确写法（计数器只建一次 + 预热 + 读取时刻打戳）：
+
+```powershell
+$c = New-Object System.Diagnostics.PerformanceCounter(
+        'Processor', '% Processor Time', '_Total', $true)
+$c.NextValue() | Out-Null          # 建立基线，丢弃
+Start-Sleep -Milliseconds $IntervalMs
+# 循环内：先 sleep，再 NextValue()，然后才打时间戳
+```
+
+本机效果：标准差 8.96pp -> 6.56pp，四元组平均绝对差 6.34pp -> 3.25pp。
+
+### 构造器参数顺序
+
+`PerformanceCounter(categoryName, counterName, instanceName)` —— 第二个参数
+是**计数器名**不是实例名。传成 `('Processor', '_Total', '% Processor Time')`
+会报 `Could not locate Performance Counter`。
+
+### 时间戳要打在读取时刻
+
+`Get-Counter` 单次耗时 1000~2840ms（实测）。若在调用**之前**用自己的墙钟
+打戳，整个序列会偏移 1~2.8s。
+
+### 定位方法：四元组对照
+
+单看「本库 vs PDH 差 16pp」无法判断该怪谁。加上本库与 PDH 各自的内部拆分：
+
+```
+本库_Total | 本库每核均值 | PDH_Total | PDH实例均值
+    95.82  |      95.82    |   79.72   |    79.72
+[本库_T-PDH_T = +16.10    本库核-PDH核 = +16.10]
+```
+
+**两列差完全相等** -> 两侧各自自洽，差在「测的不是同一段时间」。
+若两列差不等，才可能是某一侧的计数器读错了。
+
+`cpu_windowed_compare.py` 现在会直接输出这张表。
+
+### 通则
+
+**对照脚本和被测代码一样会错，而且更隐蔽** —— 它不崩、不报错，
+只会让结论偏一个稳定的常数。本轮三次定位全部靠「加诊断看真实数字」推进，
+前两次都差点归错因。
+
 ## CI 接这些脚本时踩过的坑
 
 2026-10-01 接入 CI 时，这几个脚本**在 CI 上第一次全都没跑起来**，
