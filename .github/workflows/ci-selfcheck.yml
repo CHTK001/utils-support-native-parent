@@ -1,0 +1,43 @@
+name: ci-selfcheck
+
+# 用 tools/ci-lint 的门禁反过来检查 CI 配置自身。
+#
+# 为什么需要它：四类坑（见 AGENTS.md §5）本地校验发现不了，而它们恰恰只在
+# 「改了 CI 配置」时才会被引入——所以必须让「workflow 变更」本身触发一次校验，
+# 否则就是「改门禁不触发门禁」。
+#
+# 本文件同样受 C1~C5 约束，且 paths 必须覆盖「它会执行的一切」：
+#   - .github/workflows/**   任何 workflow 变更（含本文件自身）
+#   - tools/ci-lint/**       门禁脚本变更
+# 少列任何一项，就会出现「改了却不跑」的 0-job 空 run。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/**'
+      - 'tools/ci-lint/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'tools/ci-lint/**'
+
+concurrency:
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消。concurrency 对**所有**触发器生效、同组即互相取消。
+  group: ci-selfcheck-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  lint:
+    name: workflow lint (C1~C5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show runtime
+        run: python3 --version
+
+      - name: Check all workflows
+        # 只用标准库，无需 pip install；退出码非 0 即失败。
+        run: python3 tools/ci-lint/check_workflows.py
