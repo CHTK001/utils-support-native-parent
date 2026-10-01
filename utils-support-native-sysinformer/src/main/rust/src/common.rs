@@ -8,6 +8,12 @@
 //! `sysinfo` 的 CPU 使用率是"两次刷新之间的差值"。若每次采集都新建 `System`，
 //! Windows 侧 PDH 计数器永远没有基线，使用率会恒为 100。因此这里复用**同一个**
 //! 全局 `System` 实例，并且 `refresh_cpu_all` 与取频率放在同一次刷新内。
+//!
+//! **进程内第一次调用**同样没有基线：`System::new()` 的上次累计时间为 0，
+//! 首次 `refresh_cpu_all()` 会把"开机到现在"的整段间隔算成满载，导致**所有核
+//! 都报 100%**。所以首次刷新会连续做两次（见 [`refresh_cpu`]），第一次只用于
+//! 建立基线，第二次才用于取值。这是实测复现的：`/system/snapshot` 首次调用
+//! 返回 12 核全 100.0%，第二次起才正常。
 
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -32,10 +38,37 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// 进程内是否已经建立过 CPU 基线。
+///
+/// 必须**所有**刷新路径共用这一个标记：`refreshed_sys` 与 `refreshed_one`
+/// 若各用各的标记，就会出现"先查 `process.detail` 使标记置位，之后
+/// `system.snapshot` 直接跳过预热"的情况 —— 那时快照的基线其实是
+/// `process.detail` 留下的（刷新时刻不同），仍不可靠。
+static CPU_BASELINE_READY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 刷新 CPU，必要时为进程内首次调用建立基线。
+///
+/// # 参数
+/// * `sys` - 已加锁的 `System` 实例
+fn refresh_cpu(sys: &mut System) {
+    if CPU_BASELINE_READY.load(std::sync::atomic::Ordering::Relaxed) {
+        sys.refresh_cpu_all();
+        return;
+    }
+    // 第一次只为建立基线：此刻 usage 必然是 100%（上次累计为 0），丢弃。
+    sys.refresh_cpu_all();
+    // 隔一小段时间再刷一次，让第二次拿到的是真实的短间隔使用率。
+    // 间隔不能太短（差值会被取整放大），也不能太长（拖慢首次调用）。
+    std::thread::sleep(std::time::Duration::from_millis(120));
+    sys.refresh_cpu_all();
+    CPU_BASELINE_READY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// 刷新并返回全局 `System` 的锁。
 fn refreshed_sys() -> std::sync::MutexGuard<'static, System> {
     let mut sys = SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
-    sys.refresh_cpu_all();
+    refresh_cpu(&mut sys);
     sys.refresh_memory();
     sys
 }
@@ -64,7 +97,7 @@ fn refreshed() -> std::sync::MutexGuard<'static, System> {
 /// 刷新后的 System 锁
 fn refreshed_one(pid: i32) -> std::sync::MutexGuard<'static, System> {
     let mut sys = SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
-    sys.refresh_cpu_all();
+    refresh_cpu(&mut sys);
     sys.refresh_memory();
     let pids = [Pid::from_u32(pid as u32)];
     sys.refresh_processes(ProcessesToUpdate::Some(&pids), true);
@@ -77,6 +110,15 @@ fn refreshed_one(pid: i32) -> std::sync::MutexGuard<'static, System> {
 /// 背靠背的两次刷新会把 CPU 使用率的差值窗口压到微秒级，Windows 侧 PDH 会给出
 /// 退化值（本仓 metrics 模块记过这个坑，恒为 100）。需要两者时一律用本函数。
 ///
+/// # Windows 上的口径
+///
+/// Windows **不使用** `sysinfo` 的 `cpu_usage()`，改由 [`crate::cpu_windows`]
+/// 直接读 PDH `% Processor Time`，与任务管理器同源。原因：`sysinfo` 在 Windows
+/// 上只注册 `% Idle Time` 并用 `100 - idle`，而任务管理器用 `% Processor Time`
+/// （分母排除 idle），实测 `sysinfo` 口径**系统性偏高约 5pp**
+/// （20 组采样，95% CI `[+1.01, +9.33]pp`，不含 0）。
+/// PDH 不可用时回退到 `sysinfo`，并如实保留其口径差异。
+///
 /// # 返回值
 /// (每核列表, 汇总)
 pub fn cpu_all() -> (Vec<CpuCore>, CpuSummary) {
@@ -85,12 +127,29 @@ pub fn cpu_all() -> (Vec<CpuCore>, CpuSummary) {
     let sys = refreshed_sys();
     let cpus = sys.cpus();
     let logical = cpus.len() as u32;
+
+    // Windows：优先用任务管理器同源口径；不可用时回退 sysinfo。
+    #[cfg(target_os = "windows")]
+    let pdh_usage = {
+        let (total, per_core) = crate::cpu_windows::cpu_usage();
+        if per_core.is_empty() {
+            None
+        } else {
+            Some((total, per_core))
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let pdh_usage: Option<(f32, Vec<f32>)> = None;
+
     let cores: Vec<CpuCore> = cpus
         .iter()
         .enumerate()
         .map(|(i, c)| CpuCore {
             id: i as u32,
-            usage: c.cpu_usage(),
+            usage: match pdh_usage.as_ref().and_then(|(_, v)| v.get(i)) {
+                Some(v) => *v,
+                None => c.cpu_usage(),
+            },
             frequency_mhz: match c.frequency() {
                 0 => None,
                 f => Some(f),
@@ -98,10 +157,17 @@ pub fn cpu_all() -> (Vec<CpuCore>, CpuSummary) {
             brand: c.brand().to_string(),
         })
         .collect();
-    let usage = if cpus.is_empty() {
-        0.0
-    } else {
-        cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / logical as f32
+    // 汇总优先取 PDH 的 `_Total`（它本身就是任务管理器顶部那个数字）；
+    // 否则按「各核和 / 核数」推算。
+    let usage = match pdh_usage.as_ref().map(|(t, _)| *t) {
+        Some(t) => t,
+        None => {
+            if cores.is_empty() {
+                0.0
+            } else {
+                cores.iter().map(|c| c.usage).sum::<f32>() / cores.len() as f32
+            }
+        }
     };
     let summary = CpuSummary {
         logical_count: logical,
@@ -240,12 +306,17 @@ pub fn networks() -> Vec<NetworkInterface> {
         .collect()
 }
 
-/// A12 电池。
+/// A12 电池（委托平台实现）。
+///
+/// 三平台的电池来源完全不同（Windows 的 `GetSystemPowerStatus`、Linux 的
+/// `/sys/class/power_supply`、macOS 的 IOKit），没有可共用的跨平台库，
+/// 因此这里只做**转发**，不重复实现。
 ///
 /// # 返回值
-/// 本函数暂不实现，交由平台补充；返回空列表而非编造数据
+/// 电池列表；**无电池设备时返回空列表而不是错误** —— 台式机本来就没有电池，
+/// 空列表是正确结果，不是失败。
 pub fn batteries() -> Vec<crate::model::BatteryInfo> {
-    Vec::new()
+    serde_json::from_value(crate::platform_value("battery.list")).unwrap_or_default()
 }
 
 /// A13 系统时间线。
