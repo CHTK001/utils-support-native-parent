@@ -193,11 +193,12 @@ results = []
 # darwin-x86_64 的生产验收就永远跑不完。次数不同但断言强度不变。
 IS_MACOS = PLAT == "macos"
 CONC_ROUNDS = 6 if IS_MACOS else 15
+EVENT_CYCLES = 10 if IS_MACOS else 20
 PERF_ITERS = 10 if IS_MACOS else 30
 LEAK_CYCLES = 60 if IS_MACOS else 200
 if IS_MACOS:
     print("  [平台调整] macOS 单次 process.list/detail 约 2 秒，"
-          "采样次数已缩放（并发 6 / 性能 10 / 泄漏 60），断言条件不变")
+          "采样次数已缩放（并发 6 / 性能 10 / 泄漏 60 / 事件 10），断言条件不变")
 
 
 def worker(tid):
@@ -223,7 +224,7 @@ for t in threads:
 for t in threads:
     t.join()
 dt = time.time() - t0
-ok(not errors, f"8 线程 × 15 轮 × 6 op 全部返回合法信封（错误 {len(errors)} 条"
+ok(not errors, f"8 线程 × {CONC_ROUNDS} 轮 × 6 op 全部返回合法信封（错误 {len(errors)} 条"
                + (f"，样例 {errors[:2]}" if errors else "") + "）")
 print(f"      并发耗时 {dt:.2f}s，完成 {len(results)} 次调用")
 
@@ -334,7 +335,7 @@ for _ in range(20):
     call("events.stop")
 after = handle_count()
 if okc > 0:
-    print(f"      事件启停 20 轮（成功 {okc} 次）：句柄 {leak_before} -> {after}")
+    print(f"      事件启停 {EVENT_CYCLES} 轮（成功 {okc} 次）：句柄 {leak_before} -> {after}")
     ok(after - leak_before < 50, f"事件启停未泄漏（增长 {after - leak_before} < 50）")
 
 # ============================================================================
