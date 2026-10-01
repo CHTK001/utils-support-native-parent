@@ -309,12 +309,15 @@ pub fn networks() -> Vec<NetworkInterface> {
 /// A12 电池（委托平台实现）。
 ///
 /// 三平台的电池来源完全不同（Windows 的 `GetSystemPowerStatus`、Linux 的
-/// `/sys/class/power_supply`、macOS 的 IOKit），没有可共用的跨平台库，
+/// `/sys/class/power_supply`、macOS 的 `pmset -g batt`），没有可共用的跨平台库，
 /// 因此这里只做**转发**，不重复实现。
 ///
 /// # 返回值
 /// 电池列表；**无电池设备时返回空列表而不是错误** —— 台式机本来就没有电池，
 /// 空列表是正确结果，不是失败。
+///
+/// # 顺序
+/// 三平台均按 `name` 升序，调用方可依赖该顺序。
 pub fn batteries() -> Vec<crate::model::BatteryInfo> {
     serde_json::from_value(crate::platform_value("battery.list")).unwrap_or_default()
 }

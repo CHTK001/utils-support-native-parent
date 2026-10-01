@@ -229,6 +229,7 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | 4 | Linux | DMI 结构解析 off-by-one | 内存条永远读不到 | 无字符串时下一结构在 `+2`（双 NUL），写成 `+1` → 提前终止、尾部整段漏掉 |
 | 5 | Linux | `process.list` 缺 cmdline/cwd | 与 `process.detail` 不一致 | `fill_linux_fields` 依赖 sysinfo，而 sysinfo 的 `cmd()` 在此场景为空 |
 | 6 | Linux | **sysinfo 把线程当进程** | 进程数虚高 6 倍（1307 vs 202）| sysinfo 递归 `/proc/<pid>/task/` 并 push 进同一列表；须用 `thread_kind() == Userland` 过滤 |
+| 7 | Linux | **`battery.list` 未排序** | 多电池时返回顺序随文件系统而变（实测 `ls -U` = `USB AC BAT1 BAT0`，即 BAT1 排在 BAT0 前）| `std::fs::read_dir` 的返回顺序**由文件系统决定**（ext4 哈希序、tmpfs 插入序），Rust 明确不保证；重建目录或换文件系统后顺序即变。同文件其他列表（`services` 等）都已 `sort_by` 唯独它漏了 |
 | — | Linux | 我自己的错误修复（中间版本）| 过滤没生效且更慢（683ms）| 用「顶层 `/proc/<pid>` 存在」当判据 —— **线程也有顶层目录**（`/proc/1041` 存在，`Tgid=686`）|
 
 ### 性能修复
@@ -252,7 +253,7 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
-| 6 | **Linux / macOS 电池取值分支未验** | 测试环境无电池：Windows 本机是台式机（`BatteryFlag=128`）；Kali 是虚拟机，**无 `/sys/class/power_supply`** | 电池实现已从空壳改为三平台真实现，`battery.list` 在无电池设备上返回空列表（已验）。但**取值正确性**（电量百分比、剩余时间换算）需笔记本/真机才能确认 |
+| 6 | ~~Linux 电池取值分支未验~~ **已关闭（Linux）**；**Windows / macOS 取值仍未验** | 原以为测试环境无电池设备。Linux 侧改用 `mount --bind` 把可控目录覆盖到 `/sys/class/power_supply`，即可提供内容完全确定的 `type`/`capacity`/`status`/`energy_*`/`power_now`/`time_to_empty_now`，从而验证取值逻辑本身 | **Linux 取值已验**（夹具 `tools/sysinformer-accept/battery_value_linux.py`，3 用例全绿：字段齐全、缺 `power_now` 退回内核值、多电池+状态别名+非电池过滤）。Windows 是台式机（`BatteryFlag=128`）、macOS CI 报 `AC Power`，**这两平台的取值正确性仍需笔记本/真机** |
 | 7 | **CPU 判定的统计力有限** | 本机负载在 40%~97% 间剧烈波动，逐次差标准差约 14pp | 90s 采样得 85 个配对、标准误 1.2~1.6pp。判据是 **95% CI 含 0** 而非"逐点相等"——后者在这台机器上做不到。低负载或更长采样会显著收紧 |
 
 | 8 | **CI 4 核 runner 上 CPU 判据未通过（根因未定位）** | 本机 12 核通过（95% CI 含 0，标准差 6.56pp）；GitHub Actions 的 windows runner 是 4 核，稳定差 **+17.66pp**（CI `[+16.94, +18.37]`）| 已排除六项假设：参考源选错、核数不匹配、PDH 实例子集取错、库内口径混用、PDH 侧不自洽、PDH 流首采样值。四元组对照显示两侧各自内部自洽但整体差约 18pp。本机不复现，无法定位。**该判据已改为非阻断**（`continue-on-error` 语义），日志与判定标记照旧输出；同一产物在 `prod_accept`(33/33) 与 `taskmgr_compare`(12 项全绿) 均为绿 |
@@ -394,6 +395,14 @@ python tools/sysinformer-accept/cpu_windowed_compare.py <同一个 dll> 90
 
 # 4) Linux 生产验收（普通用户与 root 各跑一遍，权限相关行为不同）
 python tools/sysinformer-accept/prod_accept.py <libsysinformer.so> --platform linux
+
+# 5) Linux 电池取值验收（在 Linux 主机上跑，需 sudo + paramiko）
+#    用 mount --bind 把可控目录覆盖到 /sys/class/power_supply，
+#    因此不需要真笔记本也能验证取值分支
+export SI_SSH_PASSWORD='...'
+export SI_SO_PATH='<本地 libsysinformer.so 路径>'
+python tools/sysinformer-accept/battery_value_linux.py <host> <user> /tmp/sysinf/libsysinformer.so
+#   -> KALI_BATTERY_VALUE_OK（3 用例：字段齐全 / 缺 power_now 退回内核值 / 多电池+状态别名+非电池过滤）
 ```
 
 **验证必须打在入库产物上**（`src/main/resources/native/<平台>/`），

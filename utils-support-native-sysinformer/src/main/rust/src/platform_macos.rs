@@ -1676,6 +1676,10 @@ fn op_battery_list() -> String {
             time_to_full_sec: time_to("until charged"),
         });
     }
+    // 按名称排序，与 Linux / Windows 侧的 `battery.list` 顺序契约对齐：
+    // `pmset -g batt` 的输出顺序目前稳定，但那是 pmset 的实现细节而非契约，
+    // 调用方不应依赖「恰好也是按名字排」。
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     ok_json(out)
 }
 
