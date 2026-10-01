@@ -42,6 +42,9 @@
 | Runtime smoke (event driver, Linux netlink, needs root) | **sudo 下真收事件**：启动订阅 → 派生 `/bin/true` → **必须**收到 `ProcessStart`；另有非 root 对照（必须给明确原因而非崩溃）|
 | Runtime smoke (Windows 专属 op) | 6 个平台专属 op 各断言"至少 N 条且字段非空" + `process.env` 与 `os.environ` **交叉核对** + `process.mappings` + **ETW 真收 ProcessStart** + 内核栈必须被显式拒绝 |
 | Runtime smoke (JNA bridge, Java 8 module) | Java 8 侧 JNA 绑定端到端（先 `mvn package`，再用本腿刚编出的库）|
+| Production acceptance | 四平台都跑，五维 30~33 项（见下）|
+| **Battery value acceptance（仅 Linux）** | `mount --bind` 把可控目录覆盖到 `/sys/class/power_supply`，验证 `battery.list` 的**取值分支**（百分比、剩余时间换算、状态映射、非电池过滤、缺字段退化、**顺序契约**）。此前该分支在任何可用机器上都走不到，见未验项 #6 |
+| Compare with Task Manager（仅 Windows）| 与任务管理器同源数据逐项对照；**非阻断**（CPU 口径判据的 +18pp 根因未定位，见未验项 #8），日志与判定标记照旧输出 |
 
 `commit artifacts back`（`commit_back=true` 时）：把四平台产物回填到
 `build/sysinformer-native-artifacts`，由维护者合并回 main。该步骤**显式透传退出码**，
@@ -106,16 +109,42 @@ cpu_windowed_compare  85 配对，均值差 -1.400pp，CI [-3.797, +0.997]  OK
 泄漏：200 轮后 RSS -1.2MB、句柄 +8；事件启停 20 轮后句柄 +0
 ```
 
-### Linux（`libsysinformer.so`）
+### Linux（`libsysinformer.so` md5 `55b86574a75568e09efeb2803e04084d`，run 36877569961，2026-10-01）
 
-真实 Kali（`192.168.50.198`，普通用户 + root 各一遍）：
+真实 Kali（`192.168.50.198`，普通用户 + root 各一遍，用仓库当前版
+`prod_accept.py`，即含 3 条电池断言的那一版）：
+
 ```
-普通用户  通过 30 / 失败 0   PROD_ACCEPT_OK
-root      通过 30 / 失败 0   PROD_ACCEPT_OK
-进程数对照：api=206 vs ps=207
-并发 8 线程 × 15 轮 × 6 op：10.8s / 18.8s，无非法信封
-泄漏：200 轮后 RSS -4MB、句柄 -11；事件启停 20 轮后句柄 +0
+普通用户  通过 33 / 失败 0   PROD_ACCEPT_OK
+root      通过 33 / 失败 0   PROD_ACCEPT_OK
+进程数对照：api=220 vs 系统工具=221（差异 <25%）
+CPU 核数对照：api=8 vs os.cpu_count()=8
+内存总量对照：api=16.95GB vs 系统=16.95GB（差 0.0%）
+自身 RSS 对照：api=33.3MB vs python=33.3MB（差 0%）
+并发 8 线程 × 15 轮 × 6 op：6.45s，无非法信封
+泄漏：200 轮后 RSS +0.1MB、句柄 -1；事件启停 20 轮后句柄 +0
+battery.list 与 system.snapshot.batteries 一致（0 vs 0 条，Kali 无电池）
 ```
+
+**取值分支（Kali 上 bind mount 伪造 sysfs 实测，见未验项 #6）**：
+
+```
+battery_value_linux.py  case1 字段齐全 / case2 缺 power_now /
+                        case3 多电池+状态别名+非电池过滤
+                        KALI_BATTERY_VALUE_OK
+  capacity=87                -> percentage=87.0
+  status=Discharging         -> state=discharging
+  energy_now/power_now=18/10 -> time_to_empty_sec=6480
+  (energy_full-energy_now)/power_now=42/10 -> time_to_full_sec=15120
+  缺 power_now               -> 退回内核 time_to_empty_now=5400，不编造
+  Charging/Full             -> charging/full
+  type=Mains / type=USB      -> 被过滤（不计入电池）
+  无 energy_full             -> time_to_full_sec=null，不编造
+  顺序                       -> ['B0','B1'] 升序（修复前是 ['B1','B0']）
+```
+
+守卫敏感性对照：同一夹具在**修复前**的产物上，case1/case2 全绿而 case3 报
+`FAIL order: ['B1','B0'] sorted=False` —— 证明顺序断言不是恒真。
 
 ### macOS arm64（`libsysinformer.dylib`，CI `macos-14`）
 
@@ -249,7 +278,7 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | # | 未验项 | 原因 | 影响 |
 |---|---|---|---|
 | 1 | ~~macOS x86_64 无运行时冒烟~~ **已关闭** | 改用 `macos-15-intel`（原生 Intel x86_64，Actions 最后一个 x86_64 镜像，支持到 2027-08）| run 36708484394 该腿 `Runtime smoke` 真实执行：dlopen x86_64 dylib 成功、`process.list 返回 502 个进程`、`SYSINFORMER_SMOKE_OK` |
-| 2 | **Java 25 FFM 绑定不进 CI** | `SysInformerNative` 依赖 `utils-support-common-starter`，该构件位于 packages.aliyun.com **私有**仓库（匿名 401）。这是**全仓性**限制（任何 native 模块的 Java 编译都受此限）| 配置 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD` 后纳入 `native-java-compile.yml`；目前只有本地验证。**注**：Java 8 侧（`-java8` 模块）刻意不依赖 common-starter，**它已在 CI 里真跑** |
+| 2 | **Java 25 FFM 绑定不进 CI** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`），该构件**只有私有来源**。这是**全仓性**限制（任何 native 模块的 Java 编译都受此限）| 已逐条探测确认**无免凭据方案**：Maven Central 搜 `com.chua` 命中 **0** 个构件、直取 pom **404**；aliyun `public`/`central`/`jcenter` 全 **404**；aliyun 私有匿名 **401**；GitHub Packages 匿名 **401**；姐妹仓库 `CHTK001/utils-support-parent-starter` 是 **private** 且 tag 只到 `v4.0.0.35`（无 `.42`），`GITHUB_TOKEN` 无法跨仓。另 `common-starter` 并非零依赖（8 个，含 `com.chua.jdk:vector-api` 亦为私有 401），故「CI 从源码构建它」这条路**双重关闭**。配置 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD` 后纳入 `native-java-compile.yml`。**注**：Java 8 侧（`utils-support-native-sysinformer-java8`，用 JNA）刻意不依赖 common-starter，**它已在 CI 里真跑** |
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |

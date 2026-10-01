@@ -520,6 +520,21 @@ jobs:
           python3 -X utf8 tools/sysinformer-accept/prod_accept.py \
             "$(pwd)/$LIB_PATH" --platform "$PLAT"
 
+      - name: Battery value acceptance (Linux only, fake sysfs via bind mount)
+        # battery.list 的取值分支在无电池设备上永远走不到 —— 台式机、
+        # 容器、CI runner 全都直接返回空列表，所以四平台的「无电池 ->
+        # 空列表」都验了，取值正确性却一直是未验项。
+        # 办法：/sys/class/power_supply 是挂载点，sysfs 本身不可写但
+        # 挂载点能被覆盖，用 mount --bind 放进内容完全可控的电池条目。
+        # CI 的 Linux runner 本身就是 Linux 且 sudo 免密，不需要外部主机。
+        # 顺序也是断言的一部分：曾经漏了排序，read_dir 的顺序由文件系统
+        # 决定（实测 ls -U = USB AC BAT1 BAT0，即 BAT1 排在 BAT0 前）。
+        if: matrix.build_os == 'linux'
+        run: |
+          set -e
+          sudo -n python3 -X utf8 tools/sysinformer-accept/battery_value_linux.py \
+            --local "$(pwd)/$LIB_PATH"
+
       # 与任务管理器同源对照。只在 Windows 跑：这三个脚本依赖
       # PDH 性能计数器与 PowerShell。判定 CPU 时**必须**用
       # cpu_windowed_compare.py（窗口对齐）—— 本库 refresh 窗口 ~27ms，
