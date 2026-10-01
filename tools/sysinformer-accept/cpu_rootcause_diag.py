@@ -63,10 +63,21 @@ DLL = sys.argv[1] if len(sys.argv) > 1 else (
 SECS = int(sys.argv[2]) if len(sys.argv) > 2 else 40
 
 PWSH = r"C:\Program Files\PowerShell\7\pwsh.exe"
-PS = (r"D:\ch\project\utils-support-native-parent\tools\sysinformer-accept"
-      r"\pdh_stream.ps1")
+
+# 脚本所在目录 —— 不能用硬编码的本地绝对路径。
+# 2026-10-02 实测踩到：本脚本原先指向 D:\ch\project\...，在 CI runner 上
+# 不存在，参考流直接启动失败、`.NET` 那一列**静默变成「无样本」**，
+# 而整体仍然「跑完了」。少一个数据源的诊断比崩掉更危险。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+PS = os.path.join(_HERE, "pdh_stream.ps1")
+if not os.path.isfile(PS):
+    PS = os.path.join(_HERE, "..", "tools", "sysinformer-accept", "pdh_stream.ps1")
+
 STREAM = os.path.join(tempfile.gettempdir(), "pdh_diag.jsonl")
 TYPEPERF_TXT = os.path.join(tempfile.gettempdir(), "typeperf_diag.txt")
+
+# 与 cpu_windows.rs 的 MIN_COLLECT_INTERVAL_MS 保持一致
+MIN_COLLECT_MS = 100
 
 PDH_FMT_DOUBLE = 0x200
 
@@ -187,6 +198,8 @@ class RawPdh:
         self.warm_rcs.append(self.d.PdhCollectQueryData(self.q))
         time.sleep(0.12)
         self.warm_rcs.append(self.d.PdhCollectQueryData(self.q))
+        # sample_floored 的复用缓存：(时刻, 汇总, 每核)
+        self.last_ok = None
 
     def sample(self):
         """返回 (total, cores, collect_rc, [(cstatus, value)...])"""
@@ -202,6 +215,42 @@ class RawPdh:
         # 而一次偶发失败不该让整个诊断崩掉（要崩的话日志里就少了其它四个源）
         cores = [v for _, v in vals[1:] if v is not None]
         return total, cores, rc, vals
+
+    def sample_floored(self):
+        """复刻**修复后**的库逻辑：100ms 下限 + CStatus 检查 + 复用。
+
+        用来回答一个关键问题：残余偏差到底是「库的缺陷」还是
+        「该机器上这个窗口长度的固有测量特性」。若本列 ≈ A 本库，
+        而两者都远高于 typeperf/WMI，则偏差来自窗口而非实现。
+        """
+        now = time.perf_counter()
+        if self.last_ok is not None and \
+                (now - self.last_ok[0]) * 1000 < MIN_COLLECT_MS:
+            return self.last_ok[1], self.last_ok[2], "reuse"
+        rc = self.d.PdhCollectQueryData(self.q)
+        v = PDH_FMT_COUNTERVALUE()
+        r = self.d.PdhGetFormattedCounterValue(
+            self.counters[0], PDH_FMT_DOUBLE, None, ctypes.byref(v))
+        if rc != 0 or r != 0 or v.CStatus != CSTATUS_VALID:
+            if self.last_ok is not None:
+                return self.last_ok[1], self.last_ok[2], "stale-reuse"
+            return None, None, "no-value"
+        total = v.doubleValue
+        cores = []
+        for c in self.counters[1:]:
+            cv = PDH_FMT_COUNTERVALUE()
+            cr = self.d.PdhGetFormattedCounterValue(
+                c, PDH_FMT_DOUBLE, None, ctypes.byref(cv))
+            if cr != 0 or cv.CStatus != CSTATUS_VALID:
+                cores = None
+                break
+            cores.append(cv.doubleValue)
+        if cores is None:
+            if self.last_ok is not None:
+                return self.last_ok[1], self.last_ok[2], "stale-reuse"
+            return None, None, "partial-invalid"
+        self.last_ok = (time.perf_counter(), total, list(cores))
+        return total, cores, "collected"
 
     def close(self):
         self.d.PdhCloseQuery(self.q)
@@ -316,6 +365,9 @@ def main():
     # ---- 裸 PDH 建查询 ----
     print("\n[1] 裸 PDH 查询建立情况")
     pdh = RawPdh(ncpu)
+    # F 列用**独立**的查询，避免与 B 共用同一份 PDH 内部状态
+    # （共用会让两个列的时间基准互相干扰，失去对照意义）
+    pdh_floor = RawPdh(ncpu)
     print(f"  PdhOpenQueryW      rc=0x{pdh.open_rc:08X} {rcname(pdh.open_rc)}")
     bad = [(p, rc) for p, rc in pdh.add_rcs if rc != 0]
     print(f"  PdhAddEnglishCounter 成功 {len(pdh.counters)}/{len(pdh.add_rcs)}")
@@ -332,9 +384,11 @@ def main():
          "-Out", STREAM, "-DurationSec", str(SECS + 8)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-    a_tot, a_core, b_tot, b_core = [], [], [], []
+    a_tot, a_core, b_tot, b_core, f_tot = [], [], [], [], []
+    f_modes = {}
     collect_rcs, cstatus_hist = [], {}
     a_core_identical = 0
+    a_core_identical_active = 0      # 逐核相同**且**不是全 idle
     samples = 0
     loop_cost_ms = []
     loop_errors = 0
@@ -365,6 +419,17 @@ def main():
                     a_core.append(sum(ac) / len(ac))
                     if len(set(ac)) == 1 and len(ac) > 1:
                         a_core_identical += 1
+                        # 「四个核完全相同」只有在**不是全 idle** 时才说明问题。
+                        # 2026-10-02 CI 上误报：空闲的 4 核 VM 上四个核本来
+                        # 就都读 ~0，逐位相同是正常结果。原先的判据在这里
+                        # 报「没有真正读到 per-instance 计数器」，是假警报。
+                        if max(ac) > 1.0:
+                            a_core_identical_active += 1
+                # F 列：修复后逻辑的 Python 复刻
+                ft, fc, fmode = pdh_floor.sample_floored()
+                f_modes[fmode] = f_modes.get(fmode, 0) + 1
+                if ft is not None:
+                    f_tot.append(ft)
                 if bt is not None:
                     b_tot.append(bt)
                 if bc:
@@ -376,6 +441,7 @@ def main():
             time.sleep(max(0.02 - (time.perf_counter() - t1), 0))
     finally:
         pdh.close()
+        pdh_floor.close()
         t_wall1 = time.time()
         t_cpu1 = proc_cpu_seconds()
         out, err = ref.communicate(timeout=SECS + 120)
@@ -406,6 +472,7 @@ def main():
     print(f"  {'源':<10}{'中位数':>10}{'标准差':>10}{'最小':>10}{'最大':>10}{'样本':>8}")
     for label, xs in (("A 本库", a_tot), ("B 裸PDH", b_tot), ("C .NET", c_ref),
                       ("D typeperf", [x for x in tp if isinstance(x, float)]),
+                      ("F 修复后逻辑", f_tot),
                       ("E WMI", [])):
         if xs:
             print(f"  {label:<10}{med(xs):>10.2f}{sd(xs):>10.2f}"
@@ -427,7 +494,7 @@ def main():
         print(f"  {'E WMI':<10}{med(ewmi):>10.2f}{sd(ewmi):>10.2f}"
               f"{min(ewmi):>10.2f}{max(ewmi):>10.2f}{len(ewmi):>8}")
 
-    print("\n[3] 裸 PDH 的健康度（cpu_windows.rs 丢弃了 collect 返回码）")
+    print("\n[3] 裸 PDH 的健康度")
     rc_bad = sum(1 for x in collect_rcs if x != 0)
     print(f"  PdhCollectQueryData 失败次数 = {rc_bad}/{len(collect_rcs)}")
     if rc_bad:
@@ -443,22 +510,35 @@ def main():
         print("  !! 存在非 VALID 的 CStatus：读到的可能不是真实当前值")
 
     print("\n[4] 库内逐核")
-    if a_core_identical and samples:
-        print(f"  本库逐核**完全相同**的采样 = {a_core_identical}/{samples}"
+    if samples:
+        print(f"  逐核完全相同的采样 = {a_core_identical}/{samples}"
               f" ({a_core_identical * 100.0 / samples:.0f}%)")
-        if a_core_identical * 100.0 / samples > 80:
-            print("  !! 超过 80% 的采样逐核完全相同：真实 CPU 不可能如此，")
-            print("     说明库没有真正读到 per-instance 计数器")
+        print(f"  其中**非全 idle**（最大值 >1%）的 = {a_core_identical_active}"
+              f"/{samples} "
+              f"({a_core_identical_active * 100.0 / samples:.0f}%)")
+        print("  说明：空闲机器上四个核本来就都读 ~0，逐位相同是**正常**结果。")
+        print("  只有「相同且不 idle」才说明 per-instance 读取有问题 —— "
+              "2026-10-02 CI 上原判据在这里报了假警报。")
+        if a_core_identical_active * 100.0 / samples > 50:
+            print("  !! 多数采样逐核相同且不 idle：per-instance 读取可能有问题")
     else:
-        print(f"  本库逐核完全相同的采样 = {a_core_identical}/{samples}")
+        print("  (无有效采样)")
 
-    print("\n[5] 差值（相对 .NET 参考）")
-    for label, xs in (("A 本库", a_tot), ("B 裸PDH", b_tot)):
+    print("\n[5] 差值（相对各参照源）")
+    for label, xs in (("A 本库", a_tot), ("B 裸PDH", b_tot),
+                      ("F 修复后逻辑", f_tot)):
         if xs and c_ref:
-            print(f"  {label} - C = {med(xs) - med(c_ref):+.2f}pp")
+            print(f"  {label} - C .NET = {med(xs) - med(c_ref):+.2f}pp")
     if a_tot and b_tot:
         print(f"  A - B      = {med(a_tot) - med(b_tot):+.2f}pp"
-              f"  （>1pp 说明库与独立裸 PDH 查询也不一致）")
+              f"  （B 是修复前的读法；两者接近说明库仍像旧行为）")
+    if a_tot and f_tot:
+        print(f"  A - F      = {med(a_tot) - med(f_tot):+.2f}pp"
+              f"  （F 是修复后逻辑的 Python 复刻；≈0 说明库与修复实现一致）")
+    if f_modes:
+        print(f"  F 的行为分布 = {f_modes}")
+        print("  （reuse = 未到最小间隔未采集；collected = 真正采集；"
+              "stale-reuse = CStatus 无效、复用上一次）")
     ew = [x for x in tp if isinstance(x, float)]
     if ew and c_ref:
         print(f"  D - C      = {med(ew) - med(c_ref):+.2f}pp"
@@ -507,10 +587,12 @@ def main():
             print(f"  其中 PDH_CALC_NEGATIVE_DENOMINATOR 占 "
                   f"{cstatus_hist[CSTATUS_NEGATIVE_DENOM]} 次 —— "
                   f"两次采样时间戳没有正向推进，分母非正，doubleValue 无意义。")
-            print(f"  ** cpu_windows.rs 只检查 API 返回码、不检查 CStatus，"
-                  f"这类读数会被原样当成真值 **")
-            print(f"  若本机上该码占比高，CI 上很可能同理；"
-                  f"这能解释「数值稳定得反常」—— 冻结/陈旧读数的方差天然接近 0")
+            print(f"  这就是 2026-10-02 修复的根因：**修复前**的 cpu_windows.rs "
+                  f"只检查 API 返回码、不检查 CStatus，这类读数会被原样当真值。")
+            print(f"  现在库已检查 CStatus 并强制 {MIN_COLLECT_MS}ms 最小采集间隔。"
+                  f"请对照 A 本库 与 F 修复后逻辑 两列：")
+            print(f"    - A ≈ B（本脚本的裸查询，高速率）-> 库仍在按旧行为读")
+            print(f"    - A ≈ F（修复后逻辑的复刻）      -> 库行为与修复一致")
 
     if err and err.strip():
         print(f"\n  [参考流 stderr] {err.strip()[:300]}")
