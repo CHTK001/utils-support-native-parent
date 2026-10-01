@@ -377,14 +377,22 @@ def main():
           f"{['0x%08X' % x for x in pdh.warm_rcs]}")
 
     # ---- 并发跑参考流 ----
+    # 间隔取 100ms 而不是默认的 1000ms：**与库的最小采集窗口一致**。
+    # 2026-10-02 实测的残余 +1.6pp，两侧四元组差几乎相等（即各自自洽），
+    # 指向「测的不是同一段时间」。只有让两侧窗口**等长**，配对比较才能
+    # 判定这 1.6pp 是库的偏差还是窗口长度差。
+    # 用 1000ms 跑出来的差包含窗口失配，**不能**用来判库。
     if os.path.exists(STREAM):
         os.remove(STREAM)
     ref = subprocess.Popen(
         [PWSH, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", PS,
-         "-Out", STREAM, "-DurationSec", str(SECS + 8)],
+         "-Out", STREAM, "-DurationSec", str(SECS + 8),
+         "-IntervalMs", str(MIN_COLLECT_MS)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     a_tot, a_core, b_tot, b_core, f_tot = [], [], [], [], []
+    # 带时间戳的 A/F 样本，用于与同窗口的参考流配对
+    a_pts, f_pts = [], []
     f_modes = {}
     collect_rcs, cstatus_hist = [], {}
     a_core_identical = 0
@@ -415,6 +423,7 @@ def main():
                 samples += 1
                 if at is not None:
                     a_tot.append(at)
+                    a_pts.append((time.time(), at))   # 秒：与 read_ref 的单位一致
                 if ac:
                     a_core.append(sum(ac) / len(ac))
                     if len(set(ac)) == 1 and len(ac) > 1:
@@ -430,6 +439,7 @@ def main():
                 f_modes[fmode] = f_modes.get(fmode, 0) + 1
                 if ft is not None:
                     f_tot.append(ft)
+                    f_pts.append((time.time(), ft))   # 秒：与 read_ref 的单位一致
                 if bt is not None:
                     b_tot.append(bt)
                 if bc:
@@ -596,6 +606,53 @@ def main():
 
     if err and err.strip():
         print(f"\n  [参考流 stderr] {err.strip()[:300]}")
+
+    # ---- 同窗口配对比较（本脚本最有价值的一段）----
+    if rows and a_pts:
+        print(f"\n[8] 同窗口配对比较（参考流间隔 = "
+              f"{MIN_COLLECT_MS}ms，与库的最小窗口等长）")
+
+        def paired(pts, tol_ms):
+            out = []
+            rvals = [(t, v) for t, v, _ in rows]
+            rts = [t for t, _ in rvals]
+            for t, v in pts:
+                # 线性找最近邻即可，样本量不大
+                best, bestd = None, None
+                lo, hi = 0, len(rts) - 1
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    d = abs(rts[mid] - t)
+                    if bestd is None or d < bestd:
+                        best, bestd = mid, d
+                    if rts[mid] < t:
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                if best is not None and bestd is not None and bestd <= tol_ms:
+                    out.append(v - rvals[best][1])
+            return out
+
+        tol = max(MIN_COLLECT_MS // 2, 60)
+        for label, pts in (("A 本库", a_pts), ("F 修复后逻辑", f_pts)):
+            ds = paired(pts, tol)
+            if len(ds) < 5:
+                print(f"  {label}: 可配对样本仅 {len(ds)}，不足（需要 >=5）")
+                continue
+            m = sum(ds) / len(ds)
+            sd_ = (sum((x - m) ** 2 for x in ds) / (len(ds) - 1)) ** 0.5
+            se = sd_ / (len(ds) ** 0.5)
+            print(f"  {label:<12} 配对 {len(ds):>5}   均值差 = {m:+.3f}pp   "
+                  f"标准差 = {sd_:.3f}pp   95% CI = "
+                  f"[{m - 1.96 * se:+.3f}, {m + 1.96 * se:+.3f}]")
+            if m - 1.96 * se <= 0 <= m + 1.96 * se:
+                print(f"               -> 95% CI 含 0：**等长窗口下无系统性偏差**")
+            else:
+                print(f"               -> 95% CI 不含 0：等长窗口下仍有偏差")
+        print(f"  配对容差 = ±{tol}ms（时间戳单位：秒）。参考流与本库进程**不是**同一个采样时刻，")
+        print(f"  残余的毫秒级错配仍会带来几十 pp 的单点噪声，")
+        print(f"  所以这里看的是**均值与置信区间**，不是逐点相等。")
+
     print("\n  DIAG_DONE")
 
 
