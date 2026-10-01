@@ -8,7 +8,7 @@
 | 码 | 判据 | 不拦会怎样 |
 |---|---|---|
 | C1 | 注释行里出现双花括号 | GitHub 照样解析注释 → `An expression was expected` → run 秒失败（0 job）。**只能靠文本扫**，YAML 解析器会把注释丢掉 |
-| C2 | `pull_request.paths` 未包含 workflow 文件自身 | 只改 CI 定义的 PR 不触发任何 CI，配置未经检验就合入 |
+| C2 | `pull_request.paths` 未包含（或未以通配覆盖）workflow 文件自身 | 只改 CI 定义的 PR 不触发任何 CI，配置未经检验就合入。判据接受 `该文件全路径` 或覆盖它的 `前缀/**` |
 | C3 | `concurrency.group` 未含 `github.event_name` | push 与 `workflow_dispatch` 同组；concurrency 对**所有**触发器生效，后到的 push 会取消正在跑的 dispatch |
 | C4 | `cancel-in-progress` 不是表达式 | 手动触发也会被取消，两种语义分不开 |
 | C5 | `shell: pwsh` 步骤里用了 `$(pwd)` | PowerShell 的 `$(...)` 是子表达式运算符，路径被解析成目录名，Python 侧收到截断路径报 `FileNotFoundError` |
@@ -39,6 +39,13 @@ sh tools/ci-lint/install-hook.sh
 + 本次提交涉及 workflow 时的四坑校验。
 
 > `.git/hooks/` 不入版本库，所以换机器要重跑一次 `install-hook.sh`。
+
+## 接入 CI
+
+`.github/workflows/ci-selfcheck.yml` 在每次 workflow 变更或本目录变更时跑一次门禁。
+它的 `paths` 必须覆盖 `.github/workflows/**`（含它自己）与 `tools/ci-lint/**` ——
+少列任何一项就会出现「改了却不跑」的 0-job 空 run（即 C2 要防的事）。
+本文件自身也受 C1~C5 约束，门禁会一并检查它。
 
 ## 设计取舍
 
