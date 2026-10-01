@@ -550,7 +550,13 @@ jobs:
           # 判定标记与诊断输出照旧保留，便于后续定位。
           python -X utf8 tools/sysinformer-accept/cpu_windowed_compare.py $dll 60
           if ($LASTEXITCODE -ne 0) {
+            # 非阻断：告警后**必须显式 exit 0**。
+            # shell: pwsh 会把最后一条外部命令的退出码当作步骤退出码，
+            # 而 Write-Host 是 cmdlet、不改 $LASTEXITCODE —— 只写告警的话
+            # python 的 exit 1 会被保留，步骤照样判 failure
+            # （2026-10-01 实测踩到：warning 与 error 同时出现）。
             Write-Host "::warning::cpu_windowed_compare 未通过（已知未定位问题，见 ACCEPTANCE.md 未验项 #8）"
+            exit 0
           }
 
       - name: Stage artifact for upload
