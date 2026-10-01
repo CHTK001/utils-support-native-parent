@@ -95,3 +95,26 @@ python cpu_windowed_compare.py <dll> 90
 `cpu_windowed_compare.py` 为准**（方差小得多）。
 
 反向对照已验证：把口径切回旧实现后，同一判据稳定 FAILED。
+
+## CI 接这些脚本时踩过的坑
+
+2026-10-01 接入 CI 时，这几个脚本**在 CI 上第一次全都没跑起来**，
+但本地与 `yaml.safe_load` 全部通过：
+
+| 坑 | 表现 | 修法 |
+|---|---|---|
+| YAML 注释里写了 GitHub 表达式字面量 | run **秒失败且 0 job**（`total_count=0`、`created_at==updated_at`、`check-runs` 为空）| 注释改用文字描述。**报错只在 `workflow_dispatch` 的 422 里**，不主动调一次 dispatch 永远看不到 |
+| `push.paths` 漏了 `tools/` | 改 `prod_accept.py` 的提交产生 0-job 空 run，**全部验收被绕过** | `tools/sysinformer-accept/**` 进 paths |
+| `shell: pwsh` 里写 `$dll = "$(pwd)/$LIB_PATH"` | 路径被截断成目录名，`ctypes` 报看不懂的 `FileNotFoundError` | `Join-Path $PWD $env:LIB_PATH` + `Test-Path` 断言 |
+| `concurrency: cancel-in-progress` | 连推多次时后一次取消前一次，被取消的记为 `failure` | 短周期连推后要区分「被取消」与「真失败」，判据是 `created_at==updated_at` 且无 job |
+
+**判定「workflow 能不能被 GitHub 解析」的唯一可靠办法**是调一次 dispatch：
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOK" \
+  -H "Content-Type: application/json" \
+  --data-binary @dispatch.json \
+  https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>/dispatches
+```
+
+JSON body 必须落盘（内联传给 PowerShell 会被转义破坏）。
