@@ -378,6 +378,89 @@ if env and env.get("ok"):
     ok(diff < 0.05, f"内存总量对照：api={total_api / 1e9:.2f}GB vs 系统={total_os / 1e9:.2f}GB"
                     f"（差 {diff * 100:.1f}%）")
 
+    # ---------- A12 电池（2026-10-01 新增，此前无任何 CI 验证）----------
+    env_b, _ = call("battery.list")
+    ok(env_b is not None and env_b.get("ok") is True,
+       f"battery.list 返回合法信封（无电池设备是正常结果，不该是错误）："
+       f"ok={env_b.get('ok') if env_b else None}")
+    bats_b = (env_b.get("data") if env_b and env_b.get("ok") else None) or []
+    bats_s = d.get("batteries") or []
+    ok(bats_b == bats_s,
+       f"battery.list 与 system.snapshot.batteries 一致"
+       f"（{len(bats_b)} vs {len(bats_s)} 条）")
+
+    # 与系统原生接口对照：有电池就逐字段比，没有就确认返回空列表
+    if PLAT == "linux":
+        # 权威来源是 sysfs；只有 type=Battery 的条目才算电池
+        native = []
+        pdir = "/sys/class/power_supply"
+        if os.path.isdir(pdir):
+            for name in sorted(os.listdir(pdir)):
+                f = os.path.join(pdir, name, "type")
+                try:
+                    with open(f) as fh:
+                        if fh.read().strip() != "Battery":
+                            continue
+                except OSError:
+                    continue
+                entry = {"name": name}
+                for key, field in (("capacity", "percentage"),
+                                   ("status", "state")):
+                    try:
+                        with open(os.path.join(pdir, name, key)) as fh:
+                            entry[field] = fh.read().strip()
+                    except OSError:
+                        entry[field] = None
+                native.append(entry)
+        if native:
+            ok(len(bats_b) == len(native),
+               f"电池条数对照：api={len(bats_b)} vs sysfs={len(native)}")
+            for a, n in zip(bats_b, native):
+                cap_n = None
+                if n.get("percentage") is not None:
+                    try:
+                        cap_n = float(n["percentage"])
+                    except ValueError:
+                        cap_n = None
+                cap_a = a.get("percentage")
+                ok(cap_a is None or cap_n is None or abs(cap_a - cap_n) <= 2.0,
+                   f"电池 {a.get('name')} 电量：api={cap_a}% vs sysfs={cap_n}%")
+        else:
+            ok(bats_b == [],
+               "本机无 /sys/class/power_supply 电池条目 -> api 返回空列表（正确）")
+    elif PLAT == "windows":
+        import ctypes.wintypes as wt
+
+        class SPS(ctypes.Structure):
+            _fields_ = [("ac", ctypes.c_ubyte), ("flag", ctypes.c_ubyte),
+                        ("life", ctypes.c_ubyte),
+                        ("t1", wt.DWORD), ("t2", wt.DWORD)]
+
+        sps = SPS()
+        ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(sps))
+        has_batt = sps.flag not in (128, 255)   # 128 = 无系统电池
+        if has_batt:
+            ok(len(bats_b) > 0,
+               f"GetSystemPowerStatus 报告有电池（flag={sps.flag}）-> api 应有 {len(bats_b)} 条")
+            if bats_b and sps.life != 255:
+                cap_a = bats_b[0].get("percentage")
+                ok(cap_a is None or abs(cap_a - float(sps.life)) <= 1.0,
+                   f"电量对照：api={cap_a}% vs GetSystemPowerStatus={sps.life}%")
+        else:
+            ok(bats_b == [],
+               f"GetSystemPowerStatus BatteryFlag={sps.flag}（无系统电池）"
+               f"-> api 返回空列表（正确）")
+    else:  # macOS
+        out = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True)
+        native_n = len([l for l in out.stdout.splitlines()
+                        if l.strip().startswith("-") and "(id=" in l])
+        if native_n:
+            ok(len(bats_b) == native_n,
+               f"电池条数对照：api={len(bats_b)} vs pmset={native_n}")
+        else:
+            ok(bats_b == [],
+               f"pmset 未报告电池（{out.stdout.strip()[:60]}）-> api 返回空列表（正确）")
+
     host = d.get("host") or {}
     ok(bool(host.get("hostname")), f"hostname = {host.get('hostname')}")
 
