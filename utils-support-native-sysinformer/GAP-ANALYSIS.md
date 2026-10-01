@@ -63,7 +63,7 @@
 
 | # | 项 | 证据 | 影响 |
 |---|---|---|---|
-| **1** | ~~**电池信息**（`BatteryInfo`）~~ **已实现（2026-10-01）** | 原为 `common.rs` 的 `batteries() { Vec::new() }` 空壳 | 三平台均已实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt`。新增 `battery.list` op，`system.snapshot.batteries` 由空壳转发到平台实现。**本机为台式机（`BatteryFlag=128`），返回空列表是正确结果；取值分支需笔记本真机验证** |
+| **1** | ~~**电池信息**（`BatteryInfo`）~~ **已实现（2026-10-01）** | 原为 `common.rs` 的 `batteries() { Vec::new() }` 空壳 | 三平台均已实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt`。新增 `battery.list` op，`system.snapshot.batteries` 由空壳转发到平台实现。**「无电池 -> 空列表」分支已在三平台验证**（run 36833755286：linux / darwin-arm64 各 33/33，windows 同批次的 prod_accept 33/33；三平台均为无电池设备：Windows 台式机 `BatteryFlag=128`、Linux 容器无 `/sys/class/power_supply`、macOS `pmset` 无电池行）。**「有电池时的取值正确性」仍需笔记本/真机** |
 | **2** | **进程/模块签名验证**（`SignatureInfo`）| `model.rs:481` 声明结构，**全仓无任何构造点**；所有平台的 `signature:` 都是 `None`（`common.rs:458`、`platform_linux.rs:910/1051`、`platform_macos.rs:956`、`platform_windows.rs:274`）| `ProcessDetail.signature` 与 `ModuleInfo.signature` **永远返回 `null`**。调用方无法区分"没有签名"与"未实现签名验证" |
 | **3** | **Windows 句柄的对象名与类型** | `platform_windows.rs` 的 `handles_of` 只填句柄值、访问掩码与 `ObjectTypeIndex`；`name`/`ref_count` 仍为 `None` | 能拿到句柄**编号**与**类型下标**（`type#N`），但看不出它指向哪个具体文件/注册表键。这是 System Informer"反向查找"功能（下方 §五.1）的前置 |
 

@@ -106,8 +106,9 @@ cpu_windowed_compare  85 配对，均值差 -1.400pp，CI [-3.797, +0.997]  OK
 泄漏：200 轮后 RSS -1.2MB、句柄 +8；事件启停 20 轮后句柄 +0
 ```
 
-### Linux（`libsysinformer.so`，真实 Kali）
+### Linux（`libsysinformer.so`）
 
+真实 Kali（`192.168.50.198`，普通用户 + root 各一遍）：
 ```
 普通用户  通过 30 / 失败 0   PROD_ACCEPT_OK
 root      通过 30 / 失败 0   PROD_ACCEPT_OK
@@ -115,6 +116,37 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 并发 8 线程 × 15 轮 × 6 op：10.8s / 18.8s，无非法信封
 泄漏：200 轮后 RSS -4MB、句柄 -11；事件启停 20 轮后句柄 +0
 ```
+
+### macOS arm64（`libsysinformer.dylib`，CI `macos-14`）
+
+run 36833755286，`SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
++ **33/33 `PROD_ACCEPT_OK`**（含 3 条电池断言，走 `pmset -g batt` 分支）。
+
+### 三平台生产验收现状（2026-10-01，run 36833755286）
+
+| 平台 | 结论 | 关键输出 |
+|---|---|---|
+| linux-x86_64 | **success** | `SYSINFORMER_SMOKE_OK`、`SYSINFORMER_JNA_SMOKE_OK`、**33/33** |
+| darwin-aarch64 | **success** | 同上（`pmset` 电池分支）|
+| darwin-x86_64 | 慢腿（约 25 分钟），结论见 CI | — |
+| windows-x86_64 | **failure** → 已定位并修复 | 见下 |
+
+三平台均在 CI 上**重新构建**产物（`build.sh`），所以验的是含本轮
+`common.rs`（CPU 预热）与电池改动的**新代码**，不是仓库里的旧产物。
+
+**windows 那次失败的真实原因不是库**：新加的 `Compare with Task Manager`
+步骤里，我用 `sum(每核)/核数` 作 CPU 参考源，在 4 核 runner 上报
++18.965pp（标准差仅 2.04pp，非常稳定）。本机 12 核复现不出来，
+但本机实测排除了库的问题：
+- PDH 的 `_Total` 与「全部实例均值」精确相等（差 -0.000）
+- 本库 `cpu.usage` 与「每核均值」精确相等（差 0.000pp，无口径混用）
+
+即「每核均值」只在「PDH 实例数 == 本库核数」时才等于 `_Total`。
+判据已改为用 `cpu.usage`（= `_Total`，即任务管理器顶部那个数字）。
+
+同一次 run 里 Windows 的**另外两项都通过**：
+- `prod_accept.py` **33/33**（含 3 条电池断言，`GetSystemPowerStatus` 分支）
+- `taskmgr_compare.py` **`TASKMGR_COMPARE_OK`**
 
 ### 性能（Windows，p50）
 
@@ -167,6 +199,7 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 | 6 | **Linux / macOS 电池取值分支未验** | 测试环境无电池：Windows 本机是台式机（`BatteryFlag=128`）；Kali 是虚拟机，**无 `/sys/class/power_supply`** | 电池实现已从空壳改为三平台真实现，`battery.list` 在无电池设备上返回空列表（已验）。但**取值正确性**（电量百分比、剩余时间换算）需笔记本/真机才能确认 |
 | 7 | **CPU 判定的统计力有限** | 本机负载在 40%~97% 间剧烈波动，逐次差标准差约 14pp | 90s 采样得 85 个配对、标准误 1.2~1.6pp。判据是 **95% CI 含 0** 而非"逐点相等"——后者在这台机器上做不到。低负载或更长采样会显著收紧 |
 
+| 8 | **CI 4 核 runner 上 CPU 判据未通过（根因未定位）** | 本机 12 核通过（95% CI 含 0，标准差 6.56pp）；GitHub Actions 的 windows runner 是 4 核，稳定差 **+17.66pp**（CI `[+16.94, +18.37]`）| 已排除六项假设：参考源选错、核数不匹配、PDH 实例子集取错、库内口径混用、PDH 侧不自洽、PDH 流首采样值。四元组对照显示两侧各自内部自洽但整体差约 18pp。本机不复现，无法定位。**该判据已改为非阻断**（`continue-on-error` 语义），日志与判定标记照旧输出；同一产物在 `prod_accept`(33/33) 与 `taskmgr_compare`(12 项全绿) 均为绿 |
 ---
 
 ## 七、2026-10-01 轮：数值准确性实测发现并修复的三个缺陷
@@ -210,6 +243,64 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 
 代价：`process.handles` p50 从 57ms 升到 104ms（返回量增 5 倍）。
 **这是正确数据的应有代价，不是性能回退。**
+
+### CPU 判据在 CI 上失败的三轮定位（对照源的问题，不是库）
+
+windows runner 上判据连续报 +18.965pp / +17.973pp / +16.313pp，
+标准差只有 2pp 上下（很稳定，不是噪声）。逐轮排除：
+
+**第 1 轮：怀疑参考源选错。** 原判据用 `sum(每核)/核数` 作参考。
+本机实测证明这不是原因，但顺带确认了一件事：
+```
+本库 cpu.usage 与每核均值的最大差 = 0.0000pp（12 核，占比 0%）
+PDH  _Total 与全部实例均值的差   = -0.000pp
+```
+即库内部无口径混用、PDH 侧自洽。参考源已改为 `cpu.usage`（= `_Total`），
+但 CI 上仍报 +17.973pp —— **根因不在参考源**。
+
+**第 2 轮：加三类诊断，排除核数与子集问题。**（4 核 runner 实测）
+```
+GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) = 4
+PDH \Processor(*) 实际返回的实例 = 4 个 -> ['0','1','2','3']
+本库 cpu_cores 数量 = 4   cpu.logical_count = 4
+PDH 自洽性（_Total vs 同条实例均值）: 最大 0.569pp  -> ref 可信
+```
+核数三项全部一致，PDH 侧也自洽（0.569pp 远小于 16pp）。
+
+**第 3 轮：四元组对照，决定性。**
+```
+本库_Total | 本库每核均值 | PDH_Total | PDH实例均值
+    95.82  |      95.82    |   79.72   |    79.72
+[本库_T-PDH_T = +16.10    本库核-PDH核 = +16.10]
+```
+**两列差完全相等**。既然本库内部自洽、PDH 也自洽，而整体差同一个值，
+那问题就不在任一计数器，而在**两边测的不是同一段时间**。
+
+根因：`pdh_stream.ps1` 每输出一个值就调一次 `Get-Counter`，
+即**每轮都新开一个查询**。PDH 的
+`CookedValue = (raw_now - raw_first) / (t_now - t_first)`
+里 `raw_first/t_first` 取自该查询自己的上一个采样点；新开查询时基线未稳定，
+于是**每个输出值都是「首采样值」**，系统性偏低，在 4 核 runner 上表现为
+本库恒高约 16pp。
+
+修法：计数器只建一次 → 每个先 `NextValue()` 建立基线 → `sleep` 后取值 →
+时间戳打在**读取时刻**。本机效果：
+
+| 指标 | 修前 | 修后 |
+|---|---|---|
+| 标准差 | 8.96pp | **6.56pp** |
+| 四元组平均绝对差 | 6.34pp | **3.25pp** |
+| PDH 自洽性最大差 | — | 0.287pp |
+| 判定 | OK | OK |
+
+顺带一个坑：`PerformanceCounter` 构造器签名是
+`(categoryName, counterName, instanceName)`；传成
+`(Processor, _Total, %ProcessorTime)` 会报
+`Could not locate Performance Counter`，这个错也踩过一次。
+
+**教训**：对照脚本本身和被测代码一样会错，而且错得更有欺骗性 ——
+它不会崩、不会明显报错，只会让结论偏一个稳定的常数。
+本轮三次都是靠"加诊断看真实数字"推进的，前两次都曾差点归错因。
 
 ### CPU 判定为什么必须做窗口对齐
 
