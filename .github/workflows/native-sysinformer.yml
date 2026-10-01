@@ -509,6 +509,21 @@ jobs:
           python3 -X utf8 tools/sysinformer-accept/prod_accept.py \
             "$(pwd)/$LIB_PATH" --platform "$PLAT"
 
+      # 与任务管理器同源对照。只在 Windows 跑：这三个脚本依赖
+      # PDH 性能计数器与 PowerShell。判定 CPU 时**必须**用
+      # cpu_windowed_compare.py（窗口对齐）—— 本库 refresh 窗口 ~27ms，
+      # PDH CookedValue 窗口 ~1s，逐次差标准差约 14pp，瞬时或单点
+      # 比较只会随机红绿。
+      - name: Compare with Task Manager (Windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dll = "$(pwd)/$LIB_PATH"
+          python -X utf8 tools/sysinformer-accept/taskmgr_compare.py $dll
+          if ($LASTEXITCODE -ne 0) { throw "taskmgr_compare failed" }
+          python -X utf8 tools/sysinformer-accept/cpu_windowed_compare.py $dll 60
+          if ($LASTEXITCODE -ne 0) { throw "cpu_windowed_compare failed" }
+
       - name: Stage artifact for upload
         run: |
           rm -rf stage
