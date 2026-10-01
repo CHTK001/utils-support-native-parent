@@ -14,7 +14,8 @@
 | 维度 | 状态 |
 |---|---|
 | **op 层** | 21 个 op，**20 个三平台均已实现**；唯一缺口是 macOS 的 `events.*`（硬限制）|
-| **已声明但未实现（空壳）** | **3 项**：电池信息、签名验证、Windows 句柄的对象名与类型 |
+| **已声明但未实现（空壳）** | 原 **3 项**，现剩 **1 项**：签名验证（电池信息、Windows 句柄数值均已修）|
+| **数值准确性** | 与任务管理器同源对照 **15 项全绿**；过程中修掉 2 个此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%）—— 详见 §八 |
 | **平台不对称** | Linux 最强；Windows 中等；macOS 受 SIP 限制最弱（已在 README 记录）|
 | **事件类型** | 7 种中 **`NetworkConnect` 三平台都未实现**；Linux 缺 Thread\*/ImageUnload |
 | **System Informer 有、本模块完全没有** | 8 类（反向查找、关闭连接、启动项、IO 优先级、内存读字节、进程创建、服务增删改、Windows 对象类型）|
@@ -62,9 +63,9 @@
 
 | # | 项 | 证据 | 影响 |
 |---|---|---|---|
-| **1** | **电池信息**（`BatteryInfo`）| `common.rs:247` `pub fn batteries() -> Vec<BatteryInfo> { Vec::new() }` | 三平台都拿不到电量 / 充电状态 / 剩余时间。`BatteryInfo` 的 `percentage`、`time_to_empty_sec`、`time_to_full_sec` **从未被赋值** |
+| **1** | ~~**电池信息**（`BatteryInfo`）~~ **已实现（2026-10-01）** | 原为 `common.rs` 的 `batteries() { Vec::new() }` 空壳 | 三平台均已实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt`。新增 `battery.list` op，`system.snapshot.batteries` 由空壳转发到平台实现。**本机为台式机（`BatteryFlag=128`），返回空列表是正确结果；取值分支需笔记本真机验证** |
 | **2** | **进程/模块签名验证**（`SignatureInfo`）| `model.rs:481` 声明结构，**全仓无任何构造点**；所有平台的 `signature:` 都是 `None`（`common.rs:458`、`platform_linux.rs:910/1051`、`platform_macos.rs:956`、`platform_windows.rs:274`）| `ProcessDetail.signature` 与 `ModuleInfo.signature` **永远返回 `null`**。调用方无法区分"没有签名"与"未实现签名验证" |
-| **3** | **Windows 句柄的对象名与类型** | `platform_windows.rs` 的 `handles_of` 里写死 `kind: "unknown"`、`name: None`、`ref_count: None`，只填了句柄值与 access mask | 只能拿到句柄**编号**，看不出它指向什么（文件？事件？注册表键？）。句柄列表的价值主要在"这是什么对象"，此项缺失使其可用性大打折扣 |
+| **3** | **Windows 句柄的对象名与类型** | `platform_windows.rs` 的 `handles_of` 只填句柄值、访问掩码与 `ObjectTypeIndex`；`name`/`ref_count` 仍为 `None` | 能拿到句柄**编号**与**类型下标**（`type#N`），但看不出它指向哪个具体文件/注册表键。这是 System Informer"反向查找"功能（下方 §五.1）的前置 |
 
 ### 关于第 3 项的技术说明
 
@@ -147,15 +148,16 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 
 ### P0 —— 修正「声明了却永不产出」（最易误导调用方）
 
-| # | 项 | 建议 |
-|---|---|---|
-| 1 | `BatteryInfo` | **实现**（低难度：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS IOKit `IOPSCopyPowerSourcesInfo`）|
-| 2 | `SignatureInfo` | **实现**或**从模型移除**。实现：Windows `WinVerifyTrust`、macOS `SecStaticCodeCheckValidity`；Linux 无统一模型，可只标 `signed: null` |
-| 3 | `EventKind::NetworkConnect` | **实现**或**从枚举移除**（让它走 `unsupported` 而不是静默不产出）|
+| # | 项 | 建议 | 状态 |
+|---|---|---|---|
+| 1 | `BatteryInfo` | 实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt` | ✅ **已完成 2026-10-01** |
+| 2 | `SignatureInfo` | **实现**或**从模型移除**。实现：Windows `WinVerifyTrust`、macOS `SecStaticCodeCheckValidity`；Linux 无统一模型，可只标 `signed: null` | ⬜ 待决（**剩余唯一空壳**）|
+| 3 | `EventKind::NetworkConnect` | **实现**或**从枚举移除**（让它走 `unsupported` 而不是静默不产出）| ⬜ 待决 |
 
 ### P1 —— 补实质能力差距
 
-4. **Windows 句柄对象名/类型**（§二.3）— 需带超时的工作线程规避 `NtQueryObject` 挂死
+4. **Windows 句柄对象名/类型**（§二.3）— 需带超时的工作线程规避 `NtQueryObject` 挂死。
+   数值侧已修（改用 `SystemExtendedHandleInformation`，类型下标已给），只差对象名
 5. **Windows 栈帧符号名** — 引入 dbghelp
 6. **反向查找 op**（§五.1）— 依赖 4
 
@@ -170,7 +172,101 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 
 ---
 
-## 八、审计方法学的坑（同一份代码三次矛盾结论）
+## 八、数值准确性实测（与任务管理器同源对照）
+
+任务管理器的数字来自 **PDH 性能计数器**与 `GetPerformanceInfo`，因此这里用
+**同一批数据源**与本库比对 —— 而不是与"肉眼看到的任务管理器"比，后者无法量化。
+脚本 `tools/sysinformer-accept/taskmgr_compare.py`，Windows 实测 **15 项全绿
+（`TASKMGR_COMPARE_OK`）**。
+
+| 项 | 对照源 | 实测偏差 |
+|---|---|---|
+| 物理内存占用率 | `GetPerformanceInfo` | 0.02 pp |
+| 可用 / 已用内存 | `GetPerformanceInfo` | 0.20% / 0.03% |
+| 进程数 | `GetPerformanceInfo.ProcessCount` | 0.00% |
+| 线程总数 | 逐进程 `process.threads` 求和 | 0.15% |
+| **句柄总数** | 逐进程 `process.handles` 求和 | **0.91%** |
+| 磁盘总量 / 可用（C/D/E 三卷） | `GetDiskFreeSpaceExW` | 0.00% |
+| CPU 总占用率 | PDH `\Processor(_Total)\% Processor Time` | 均值差 +2.85 pp（16 组交替采样，正负各半）|
+
+**结论：与任务管理器同源口径一致，无系统性偏差。** 逐次 CPU 差值可达 ±21pp，
+来源是本机负载在 40%~97% 间剧烈波动 + 两侧采样窗口不完全重合；
+正负各半、均值仅 +2.85pp 证明这不是算法偏差。
+
+### CPU 口径偏差（第三轮修掉，此前一直在"解释"而不是"修"）
+
+**根因（源码级）**：`sysinfo` 0.33.1 在 Windows 上**只注册 `% Idle Time`**，
+用 `100.0 - idle` 推出使用率（其 `src/windows/system.rs`：
+`add_english_counter(r"\Processor(_Total)\% Idle Time", ...)` 与
+`set_cpu_usage(100.0 - total_idle_time)`）。而任务管理器用 **`% Processor Time`**，
+两者分母不同：
+
+| 计数器 | 分母 |
+|---|---|
+| `% Idle Time` | 全部时间（含 idle）|
+| `% Processor Time` | **非 idle** 时间 |
+
+有内核态活动（中断、DPC、系统调用）时二者必然不同。20 组采样实测
+`sysinfo` 口径相对任务管理器**系统性偏高 +5.17pp**，95% CI `[+1.01, +9.33]` 不含 0。
+
+**修法**：新增 `src/cpu_windows.rs`，Windows 直接读 PDH `% Processor Time`，
+`common::cpu_all()` 优先用它的 `_Total` 与每核值，PDH 不可用时才回退 `sysinfo`。
+
+### CPU 对照：为什么必须做窗口对齐
+
+前几轮的"无系统性偏差"结论都不可靠，原因是**采样窗口量级不同**：
+
+- 本库每次 refresh 的窗口只有 **27ms**（实测相邻调用时差 p50=27.2ms）
+- PDH 的 `CookedValue` 窗口约 **1s**（实测 `Get-Counter` 单次耗时 1000~2840ms）
+
+27ms 的窗口与 1s 的窗口，在负载于 40%~97% 剧烈波动的机器上，
+逐次差标准差约 **14pp**，远大于待测量的几个 pp 偏差。四轮均值在
+-2 ~ +4.3pp 间乱摆，无法定案。
+
+**最终判据**（`tools/sysinformer-accept/cpu_windowed_compare.py`）：把本库
+在 PDH 窗口内的多个样本取均值，使两侧被测区间拉平到同一量级。
+
+| 口径 | 均值差 | 95% CI | 判定 |
+|---|---|---|---|
+| 旧（`100 - %Idle`） | **+2.957pp** | `[+1.310, +4.604]` 不含 0 | **FAILED** |
+| 新（`% Processor Time`） | -1.607pp | `[-4.729, +1.514]` 含 0 | OK |
+| 新（独立复跑） | -0.039pp | `[-2.142, +2.065]` 含 0 | OK |
+
+**反向对照证明修复有效**：同一判据下旧口径稳定失败、新口径两轮通过。
+
+### 本轮修掉的三个真实数据缺陷（此前完全无人发现）
+
+这两项**编译、类型检查、30 项生产验收、冒烟测试全部发现不了**，
+只有拿独立数据源逐项对照才暴露：
+
+| # | 缺陷 | 影响 | 根因 |
+|---|---|---|---|
+| 1 | **Windows `process.handles` 系统性少报约 80%** | `OpenChamber.exe` 报 103 / 真实 514；`System` 报 1630 / 真实 7390；**47 个进程"有句柄却返回空"** | 用了已废弃的 `SystemHandleInformation`(类号 16)。Win10 2004+ 该类返回的记录**不再是** `SYSTEM_HANDLE_TABLE_ENTRY_INFO` —— 实测返回长度与记录数唯一吻合的 stride 是 **24 字节**（`8 + 150037×24 == 3600896`，精确匹配），而代码按 20 字节解析 → 偏移逐条错位 → pid 读错。已改用 `SystemExtendedHandleInformation`(类号 64，stride 40，pid 为 8 字节) |
+| 2 | **首次调用 CPU 报 100%** | 进程内第一次调 `system.snapshot`，**12 核全部 `100.0%`**。任何新接入方第一次读到的都是错的 | `System::new()` 的上次累计时间为 0，首次 `refresh_cpu_all()` 把"开机至今"整段算成满载。已加 `refresh_cpu()` 预热：首次连刷两次、间隔 120ms。修复后首调为 `39.81%`（正常值）|
+| 3 | **Windows CPU 口径与任务管理器不同** | 系统性偏高 +2.96 ~ +5.17pp（取决于判据） | `sysinfo` 只读 `% Idle Time` 并取 `100 - idle`，任务管理器用 `% Processor Time`，分母不同。详见上一节 |
+
+修复 1 后实测：失败进程 49/316 → **4/317**，且这 4 个的真实句柄数确为 0
+（`Registry` / `Secure System` / `Idle(pid=0)`，属正确行为）；
+抽查 39 个进程条数一致率 **0/38 → 39/39**；
+全系统句柄合计与 `GetPerformanceInfo.HandleCount` 偏差 **65.58% → 0.91%**。
+
+代价：`process.handles` p50 57ms → 104ms（返回量增 5 倍）。
+**这是正确数据的应有代价**，不是性能回退。
+
+### 对照方法学的坑（与下节同源，此处补记）
+
+| 坑 | 表现 | 教训 |
+|---|---|---|
+| 用 `GetSystemTimes` 当 CPU 基准 | 造出 **30+pp** 的假偏差，差点误判为"库有缺陷" | 它的 kernel 时间含 idle，与 PDH `% Processor Time` 口径不同。对照必须**同源** |
+| api 与 ref 之间隔着"遍历 300+ 进程" | 内存差 6.28%、磁盘差 3.8% | 期间值一直在变。必须**紧邻采样**或多次取均值 |
+| `Get-Counter` 逐核查 12 次 | 连 PDH 自身都不满足 `_Total ≈ 每核和/核数` | 每次调用是独立窗口，不在同一时刻，只能比"汇总 vs `_Total`" |
+| 单轮 CPU 差值判 FAIL | 同条件两轮分别 2.08pp / 11.96pp | 必须交替采样 + 统计均值与符号分布 |
+| `ctypes.wintypes.BYTE` 是有符号 | `BatteryFlag=128` 打成 `-128`，误判"本机有电池" | 显式用 `c_ubyte` |
+| PDH ctypes 结构体 | 给 128 / 512 字节均 `PDH_INVALID_DATA` | `PDH_H_QUERY` 是变长不透明结构；改用 PowerShell `Get-Counter` |
+
+---
+
+## 九、审计方法学的坑（同一份代码三次矛盾结论）
 
 本报告的所有结论都不是第一版审计的结果。审计脚本连续给出三批**互相矛盾**的数字：
 
@@ -188,7 +284,7 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 
 ---
 
-## 九、附：本模块已完成的能力（对照，避免误读为"缺口"）
+## 十、附：本模块已完成的能力（对照，避免误读为"缺口"）
 
 - **op**：21 个（`system.snapshot` 含 CPU 每核/汇总/负载、内存/swap、磁盘、网络、主机、
   时间线、磁盘 IO、GPU；进程级 list/tree/detail；按需 threads/env/handles/modules/

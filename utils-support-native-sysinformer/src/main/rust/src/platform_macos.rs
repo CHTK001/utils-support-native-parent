@@ -29,8 +29,8 @@
 
 use crate::common;
 use crate::model::{
-    unsupported, ActionKind, ActionResult, CredentialInfo, DiskIo, Envelope, EnvVar, GpuInfo,
-    HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo, ProcessDetail,
+    unsupported, ActionKind, ActionResult, BatteryInfo, CredentialInfo, DiskIo, Envelope, EnvVar,
+    GpuInfo, HandleInfo, KernelModuleInfo, MappingInfo, MemoryModule, ModuleInfo, ProcessDetail,
     ServiceInfo, SocketInfo, ThreadInfo,
 };
 use crate::PLATFORM;
@@ -1615,6 +1615,70 @@ fn op_gpu_list() -> String {
     }
 }
 
+/// A12 电池：解析 `pmset -g batt`。
+///
+/// 输出形如：
+/// ```text
+/// Now drawing from 'Battery Power'
+///  -InternalBattery-0 (id=1234567)\t87%; discharging; 3:21 remaining present: true
+/// ```
+/// 桌面 Mac（mini / iMac / Pro）该命令只输出 `Now drawing from 'AC Power'` 且无电池行。
+///
+/// # 返回值
+/// 电池列表；无电池设备时返回空列表（正确结果，不是失败）
+fn op_battery_list() -> String {
+    let text = match run_command("pmset", &["-g", "batt"]) {
+        Ok(t) => t,
+        Err(e) => return err_json(format!("pmset -g batt 失败: {}", e)),
+    };
+    let mut out: Vec<BatteryInfo> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        // 电池行特征：以 `-` 开头的电源名，且含 `(id=` 与 `;`
+        if !trimmed.starts_with('-') || !trimmed.contains("(id=") {
+            continue;
+        }
+        let name = trimmed
+            .split("(id=")
+            .next()
+            .map(|s| s.trim().trim_matches('-').trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "InternalBattery".to_string());
+        let parts: Vec<&str> = trimmed.split(';').map(|s| s.trim()).collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let percentage = parts[0]
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.trim_end_matches('%').parse::<f32>().ok())
+            .filter(|p| *p >= 0.0 && *p <= 100.0);
+        let state = match parts[1] {
+            s if s.starts_with("charging") => "charging",
+            s if s.starts_with("discharging") => "discharging",
+            "finished" | "charged" => "full",
+            _ => "unknown",
+        };
+        // `3:21 remaining` / `1:02 remaining until charged`
+        let time_to = |keyword: &str| -> Option<u64> {
+            let idx = parts.iter().position(|p| p.contains(keyword))?;
+            let hm = parts.get(idx.checked_sub(1)?)?;
+            let mut it = hm.split(':');
+            let h: u64 = it.next()?.trim().parse().ok()?;
+            let m: u64 = it.next().unwrap_or("0").trim().parse().unwrap_or(0);
+            Some(h * 3600 + m * 60)
+        };
+        out.push(BatteryInfo {
+            name,
+            percentage,
+            state: state.to_string(),
+            time_to_empty_sec: time_to("remaining"),
+            time_to_full_sec: time_to("until charged"),
+        });
+    }
+    ok_json(out)
+}
+
 /// `sensor.list`：硬件传感器。
 ///
 /// # 返回值
@@ -2283,6 +2347,7 @@ pub fn call(op: &str, args: &str) -> String {
         // ---------- 系统 ----------
         "disk.io" => op_disk_io(),
         "gpu.list" => op_gpu_list(),
+        "battery.list" => op_battery_list(),
         "sensor.list" => op_sensor_list(),
         "memory.modules" => op_memory_modules(),
         "kernel.modules" => op_kernel_modules(),

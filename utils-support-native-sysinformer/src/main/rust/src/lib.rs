@@ -26,6 +26,14 @@ mod model;
 /// 跨平台基线（sysinfo）。
 mod common;
 
+/// Windows 上按任务管理器同源口径（PDH `% Processor Time`）读 CPU 使用率。
+///
+/// 单独成文件是因为 `sysinfo` 在 Windows 上用 `100 - %Idle Time`，
+/// 与任务管理器的 `% Processor Time` 分母不同，实测系统性偏高约 5pp。
+/// 详见该文件顶部说明。
+#[cfg(target_os = "windows")]
+mod cpu_windows;
+
 /// 各平台实现。用 `#[path]` 指向扁平文件，避免为一个模块建一层目录。
 #[cfg(target_os = "windows")]
 #[path = "platform_windows.rs"]
