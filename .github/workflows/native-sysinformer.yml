@@ -574,6 +574,28 @@ jobs:
             exit 0
           }
 
+      # CPU +18pp 根因诊断（Windows only，临时脚本，定位后删除）。
+      # 为什么要单独一步而不是塞进上面的 compare：compare 只输出
+      # 「本库 vs .NET」两个数，而 CI 上的教训是**两个源都可能错**。
+      # 这里并置五个源，其中 typeperf 与 WMI 走的是与库/.NET 不同的栈：
+      #   A 本库 / B 裸PDH(Python 独立查询) / C .NET / D typeperf / E WMI
+      # 另外 B 会报告 PdhCollectQueryData 的返回码 —— 库侧
+      # cpu_windows.rs 丢弃了它，若它在 runner 上失败读到的是陈旧值，
+      # 而这一点用现有任何观测都看不出来。
+      # 非阻断：诊断失败不该让整条腿变红，但输出必须留在日志里。
+      - name: CPU root-cause diag (Windows only, non-blocking)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dll = Join-Path $PWD $env:LIB_PATH
+          Write-Host "dll = $dll"
+          python -X utf8 tools/sysinformer-accept/cpu_rootcause_diag.py $dll 45
+          # 同上：pwsh 取最后一条外部命令的退出码，必须显式 exit 0
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::cpu_rootcause_diag 未通过（诊断脚本本身出错，判据结论不受影响）"
+            exit 0
+          }
+
       - name: Stage artifact for upload
         run: |
           rm -rf stage
