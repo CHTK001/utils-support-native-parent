@@ -89,14 +89,21 @@ FFI 里崩溃会带走宿主 JVM，这是生产事故。
 
 ## 四、实测结果（最新入库产物）
 
-### Windows（`sysinformer.dll` md5 `269dbb0b…`）
+### Windows（`sysinformer.dll` md5 `76ef3d16aa92b98fa2c71466846849b6`，2026-10-01）
 
 ```
-通过 30 / 失败 0   PROD_ACCEPT_OK
-进程数对照：api=342 vs tasklist=343      逻辑核 12 vs os.cpu_count 12
-内存 34.22GB vs 系统 34.22GB（差 0.0%）   自身 RSS 差 2%
-并发 8 线程 × 15 轮 × 6 op：8.28s，无非法信封
-泄漏：200 轮后 RSS +0.4MB、句柄 +5；事件启停 20 轮后句柄 +0
+prod_accept.py        通过 30 / 失败 0   PROD_ACCEPT_OK
+taskmgr_compare.py    判定项 14 / 失败 0  TASKMGR_COMPARE_OK
+cpu_windowed_compare  85 配对，均值差 -1.400pp，CI [-3.797, +0.997]  OK
+
+与任务管理器同源数据对照：
+  物理内存占用率  差 0.00 pp        进程数        差 0.00%
+  可用内存        差 0.00%         已用内存      差 0.00%
+  线程总数        差 0.03%         句柄总数      差 0.06%
+  磁盘总量/可用（C/D/E 三卷）      全部 0.00%
+
+并发 8 线程 × 15 轮 × 6 op，无非法信封
+泄漏：200 轮后 RSS -1.2MB、句柄 +8；事件启停 20 轮后句柄 +0
 ```
 
 ### Linux（`libsysinformer.so`，真实 Kali）
@@ -157,35 +164,128 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
+| 6 | **Linux / macOS 电池取值分支未验** | 测试环境无电池：Windows 本机是台式机（`BatteryFlag=128`）；Kali 是虚拟机，**无 `/sys/class/power_supply`** | 电池实现已从空壳改为三平台真实现，`battery.list` 在无电池设备上返回空列表（已验）。但**取值正确性**（电量百分比、剩余时间换算）需笔记本/真机才能确认 |
+| 7 | **CPU 判定的统计力有限** | 本机负载在 40%~97% 间剧烈波动，逐次差标准差约 14pp | 90s 采样得 85 个配对、标准误 1.2~1.6pp。判据是 **95% CI 含 0** 而非"逐点相等"——后者在这台机器上做不到。低负载或更长采样会显著收紧 |
 
 ---
 
-## 七、可复现的验证命令
+## 七、2026-10-01 轮：数值准确性实测发现并修复的三个缺陷
+
+这一轮的起因是回答"数据准不准、比不比任务管理器准"。方法是**不用肉眼比对**，
+而是拿任务管理器的**同源数据源**（PDH 性能计数器与 `GetPerformanceInfo`）逐项比。
+
+工具（`tools/sysysinformer-accept/`）：
+
+| 脚本 | 作用 | 判定标记 |
+|---|---|---|
+| `taskmgr_compare.py` | 内存/进程/线程/句柄/磁盘/电池 与任务管理器同源数据对照 | `TASKMGR_COMPARE_OK` |
+| `cpu_windowed_compare.py` | **CPU 口径判定**（窗口对齐，权威）| `TASKMGR_CPU_WINDOWED_OK` |
+| `cpu_aligned_compare.py` | CPU 瞬时配对版本（参考，判定不用它）| `TASKMGR_CPU_ALIGNED_OK` |
+| `pdh_stream.ps1` | 供上面两个脚本使用的 PDH 时间戳流 | — |
+
+### 修掉的三个缺陷
+
+| # | 缺陷 | 影响 | 根因 |
+|---|---|---|---|
+| 1 | **Windows `process.handles` 少报约 80%** | `OpenChamber.exe` 报 103 / 真实 514；`System` 报 1630 / 真实 7390；**47 个进程"明明有句柄却返回空"** | 用了已废弃的 `SystemHandleInformation`(类号 16)。Win10 2004+ 该类返回的记录**不再是** `SYSTEM_HANDLE_TABLE_ENTRY_INFO` —— 实测返回长度与记录数唯一吻合的 stride 是 **24 字节**（`8 + 150037×24 == 3600896`，精确匹配），代码按 20 字节解析 → 偏移逐条错位 → pid 读错。已改用 `SystemExtendedHandleInformation`(类号 64，stride 40) |
+| 2 | **首次调用 CPU 报 100%** | 进程内第一次调 `system.snapshot`，**12 核全部 `100.0%`** | `System::new()` 上次累计为 0，首次 `refresh_cpu_all()` 把"开机至今"整段算成满载。已加 `refresh_cpu()` 预热（连刷两次、间隔 120ms）|
+| 3 | **Windows CPU 口径与任务管理器不同** | 系统性偏高 +2.96 ~ +5.17pp | `sysinfo` 0.33.1 在 Windows 上只注册 `% Idle Time` 并用 `100.0 - idle`（其 `src/windows/system.rs` 可查），而任务管理器用 `% Processor Time`。两者分母不同：前者分母含 idle，后者分母是非 idle 时间。已新增 `cpu_windows.rs` 直读 PDH `% Processor Time` |
+
+**这三个缺陷，`cargo check`、类型检查、30 项生产验收、冒烟测试全部发现不了。**
+
+### 修复效果（实测，全部打在入库产物上）
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 句柄失败进程 | 49 / 316 | **4 / 317**（这 4 个真实句柄数确为 0：`Registry`/`Secure System`/`Idle(pid=0)`）|
+| 有句柄却返回空 | **47** | **0** |
+| 抽查条数一致率 | 0 / 38 | **39 / 39** |
+| 句柄总数 vs `GetPerformanceInfo.HandleCount` | 偏差 65.58% | **偏差 0.91%**（复跑 0.06%）|
+| 首次 CPU | 12 核全 `100.0%` | `39.81%`（正常值）|
+| CPU 口径 | +2.957pp，CI 不含 0（FAILED）| 两轮独立：-1.607pp / -0.039pp，CI 均含 0（OK）|
+
+**CPU 修复的反向对照**：把口径切回旧实现（只读 `% Idle Time`）后重编译，
+同一判据下 `+2.957pp`、95% CI `[+1.310, +4.604]` 不含 0 → **FAILED**。
+这证明判据本身能抓住该缺陷，不是"怎么测都过"。
+
+代价：`process.handles` p50 从 57ms 升到 104ms（返回量增 5 倍）。
+**这是正确数据的应有代价，不是性能回退。**
+
+### CPU 判定为什么必须做窗口对齐
+
+这是本轮最费时也最要紧的一点：
+
+- 本库每次 refresh 的窗口只有 **27ms**（实测相邻调用时差 p50=27.2ms）
+- PDH 的 `CookedValue` 窗口约 **1s**（实测 `Get-Counter` 单次耗时 1000~2840ms）
+
+两侧量级差 50 倍时，逐次差标准差约 **14pp**，远大于待测量的几个 pp。
+开发中四轮均值在 **-2 ~ +4.3pp** 间乱摆，一度误判为"已修好"。
+最终判据改为「把本库在 PDH 窗口内的多样本取均值」，把两侧被测区间拉平。
+
+对照方法自身的坑（完整清单见 `tools/sysinformer-accept/README.md`）：
+用自己墙钟给 PDH 样本打时间戳会整体偏移 1~2.8s（必须用计数器自报的
+`Timestamp`）；分别 `Get-Counter` 取两个计数器再比较无效（窗口不同）；
+`GetSystemTimes` 不能当 CPU 基准（其 kernel 含 idle，会造出 30+pp 假偏差）。
+
+---
+
+## 八、可复现的验证命令
 
 ```bash
-# 编译（本机 Windows 可用 gnu toolchain；交叉目标做类型检查）
-cargo +stable-x86_64-pc-windows-gnu build --release
-cargo +stable-x86_64-pc-windows-gnu check --target x86_64-unknown-linux-gnu
-cargo +stable-x86_64-pc-windows-gnu check --target x86_64-apple-darwin
-cargo +stable-x86_64-pc-windows-gnu check --target aarch64-apple-darwin
+# 1) 生产级验收（边界/并发/性能/泄漏/数值，五维 30 项）
+python tools/sysinformer-accept/prod_accept.py \
+  utils-support-native-sysinformer/src/main/resources/native/windows-x86_64/sysinformer.dll
+#   -> PROD_ACCEPT_OK
 
-# 生产级验收（仓库入库的产物，不是本地重建）
-python prod_accept.py <入库动态库路径> --platform windows
-python prod_accept.py <入库动态库路径> --platform linux      # root 与非 root 各跑一遍
+# 2) 与任务管理器同源数据逐项对照（Windows）
+python tools/sysinformer-accept/taskmgr_compare.py <同一个 dll>
+#   -> TASKMGR_COMPARE_OK
 
-# Java 25 侧冒烟（需先 mvn compile）
-javac -encoding UTF-8 -cp "target/classes;<cp>" -d target/smoke src/smoke/java/FfmSmoke.java
-java --enable-native-access=ALL-UNNAMED -cp "target/smoke;target/classes;<cp>" FfmSmoke
+# 3) CPU 口径判定（Windows；判定必须用这个，见下）
+python tools/sysinformer-accept/cpu_windowed_compare.py <同一个 dll> 90
+#   -> TASKMGR_CPU_WINDOWED_OK
+
+# 4) Linux 生产验收（普通用户与 root 各跑一遍，权限相关行为不同）
+python tools/sysinformer-accept/prod_accept.py <libsysinformer.so> --platform linux
 ```
 
----
+**验证必须打在入库产物上**（`src/main/resources/native/<平台>/`），
+不要用本地 `target/release` 的重建产物 —— 后者可能与交付物不一致。
 
-## 八、结论
+**判定 CPU 口径必须用 `cpu_windowed_compare.py`。**
+本库每次 refresh 的窗口约 27ms，PDH 的 `CookedValue` 窗口约 1s；
+两侧量级差 50 倍时逐次差标准差约 14pp，逐点比较只会随机红绿。
+`cpu_aligned_compare.py` 是瞬时配对版本，保留作参考，**不用于判定**。
+
+对照方法自身的坑（都会造成假结论）完整清单见
+`tools/sysinformer-accept/README.md`，其中最容易踩的两条：
+用自己墙钟给 PDH 样本打时间戳会整体偏移 1~2.8s；
+`GetSystemTimes` 不能当 CPU 基准（其 kernel 含 idle，会造出 30+pp 假偏差）。
+
+## 九、结论
 
 - **"能用"口径：通过。** 四平台产物入库、架构与导出均已核验；**四平台全部有运行时验证**
   （Windows 本机、Linux 真实机器、macOS arm64 与 **Intel x86_64** 均 CI 真跑）；
   Java 8 与 Java 25 双基线都能跑通。
+- **数值正确性口径：Windows 已用任务管理器同源数据逐项对照，14/14 通过。**
+  本轮因此修掉三个此前无人发现的缺陷：Windows 句柄少报约 80%、首次调用 CPU 报 100%、
+  Windows CPU 口径与任务管理器差 +2.96 ~ +5.17pp。三者**编译、类型检查、
+  30 项生产验收、冒烟测试全部发现不了**。
 - **"生产级"口径：Windows 与 Linux 各 30/30 达标；四平台运行时已全覆盖。**
-  仍未落实的只有未验项 #2（**Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制**）；
+  仍未落实的未验项：**#2**（Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制）、
+  **#6**（Linux/macOS 电池取值分支需真机，测试环境无电池设备）、
+  **#7**（CPU 判定为统计性，95% CI 含 0 而非逐点相等）；
   #3 为硬限制且已豁免；#4 / #5 属独立立项。
-  **在 #2 落实或明确豁免之前，不宣告"生产级已全部验收"。**
+  **在 #2 与 #6 落实或明确豁免之前，不宣告"生产级已全部验收"。**
+
+### 一句话回答"数据准不准、比不比任务管理器准"
+
+**对齐口径后与任务管理器一致；对齐之前会系统性偏高。**
+
+对齐后（同一 PDH 数据源）实测偏差：内存 0.00%、进程数 0.00%、磁盘 0.00%、
+线程 0.03%、句柄 0.06%，CPU 在统计意义上无系统性偏差。
+
+但口径不对齐就会偏——本轮的 CPU 就是活例子：`sysinfo` 的 `100 - %Idle`
+比任务管理器的 `% Processor Time` 高约 3~5pp，20 组采样下 95% 置信区间
+不含 0，是真实缺陷而非噪声。所以"本模块数据与任务管理器一致"是
+**逐项对照后的结论，不是设计前提**。
