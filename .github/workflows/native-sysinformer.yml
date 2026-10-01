@@ -518,7 +518,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dll = "$(pwd)/$LIB_PATH"
+          # 不要写 $dll = "$(pwd)/$LIB_PATH"：PowerShell 里 $(...) 是子表达式
+          # 运算符，会把 $(pwd) 求值成当前目录，于是 $(pwd)/$LIB_PATH 变成
+          # "目录名/" + 相对路径的拼接 -> 传给 Python 的路径被截断，
+          # ctypes.CDLL 报 FileNotFoundError（2026-10-01 实际踩到）。
+          # GitHub 的 ${{ }} 才是表达式语法；用 $PWD 是 PowerShell 原生的。
+          $dll = Join-Path $PWD $env:LIB_PATH
+          Write-Host "dll = $dll"
+          if (-not (Test-Path $dll)) { throw "dll not found: $dll" }
           python -X utf8 tools/sysinformer-accept/taskmgr_compare.py $dll
           if ($LASTEXITCODE -ne 0) { throw "taskmgr_compare failed" }
           python -X utf8 tools/sysinformer-accept/cpu_windowed_compare.py $dll 60
