@@ -32,6 +32,21 @@ if ($Ncpu -le 0) {
     $Ncpu = [int]((Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors)
 }
 
+# ---- kernel-number probes (2026-10-01) --------------------------------
+# .NET scales "% Processor Time" cooked values by Environment.ProcessorCount,
+# while the library reads the raw counter through PDH_FMT_DOUBLE and does not
+# go through that step. If the runner's ProcessorCount differs from the real
+# logical count, the two sides differ by a fixed ratio -- which is exactly the
+# unexplained ~10x seen on the 4-core CI runner (the 12-core host agrees to
+# 0.000). Emit the numbers so one CI run decides it.
+# These are emitted on EVERY line (obj.get tolerates absence elsewhere).
+$PC_ENV = [System.Environment]::ProcessorCount
+try {
+    $PC_WMI = [int]((Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors)
+} catch {
+    $PC_WMI = -1
+}
+
 # PerformanceCounter ctor is (categoryName, counterName, instanceName).
 $counters = @{}
 $all = New-Object System.Collections.Generic.List[object]
@@ -58,6 +73,9 @@ while ($sw.Elapsed.TotalSeconds -lt $DurationSec) {
         if ([double]::IsNaN($v)) { $v = 0.0 }
         $parts += ('"{0}":{1}' -f $p[0], [math]::Round($v, 4))
     }
+    $parts += ('"_pc":{0}' -f $PC_ENV)
+    $parts += ('"_pdl":{0}' -f $Ncpu)
+    $parts += ('"_pcw":{0}' -f $PC_WMI)
     $lines.Add(('{0}{{{1}}}' -f $nowMs, ($parts -join ',')))
 }
 
@@ -65,3 +83,5 @@ while ($sw.Elapsed.TotalSeconds -lt $DurationSec) {
 Write-Output ('WROTE=' + $Out)
 Write-Output ('SAMPLES=' + $lines.Count)
 Write-Output ('NCPU=' + $Ncpu)
+Write-Output ('PROCCOUNT env=' + $PC_ENV + ' pdh_instances=' + $Ncpu +
+    ' wmi=' + $PC_WMI)
