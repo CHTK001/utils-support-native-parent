@@ -285,7 +285,41 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | 6 | ~~Linux 电池取值分支未验~~ **已关闭（Linux）**；**Windows / macOS 取值仍未验** | 原以为测试环境无电池设备。Linux 侧改用 `mount --bind` 把可控目录覆盖到 `/sys/class/power_supply`，即可提供内容完全确定的 `type`/`capacity`/`status`/`energy_*`/`power_now`/`time_to_empty_now`，从而验证取值逻辑本身 | **Linux 取值已验**（夹具 `tools/sysinformer-accept/battery_value_linux.py`，3 用例全绿：字段齐全、缺 `power_now` 退回内核值、多电池+状态别名+非电池过滤）。Windows 是台式机（`BatteryFlag=128`）、macOS CI 报 `AC Power`，**这两平台的取值正确性仍需笔记本/真机** |
 | 7 | **CPU 判定的统计力有限** | 本机负载在 40%~97% 间剧烈波动，逐次差标准差约 14pp | 90s 采样得 85 个配对、标准误 1.2~1.6pp。判据是 **95% CI 含 0** 而非"逐点相等"——后者在这台机器上做不到。低负载或更长采样会显著收紧 |
 
-| 8 | **CI 4 核 runner 上 CPU 判据未通过（根因未定位）** | 本机 12 核通过（95% CI 含 0，标准差 6.56pp）；GitHub Actions 的 windows runner 是 4 核，稳定差 **+17.66pp**（CI `[+16.94, +18.37]`）| 已排除六项假设：参考源选错、核数不匹配、PDH 实例子集取错、库内口径混用、PDH 侧不自洽、PDH 流首采样值。四元组对照显示两侧各自内部自洽但整体差约 18pp。本机不复现，无法定位。**该判据已改为非阻断**（`continue-on-error` 语义），日志与判定标记照旧输出；同一产物在 `prod_accept`(33/33) 与 `taskmgr_compare`(12 项全绿) 均为绿 |
+| 8 | **CI 4 核 runner 上 CPU 判据未通过（根因未定位）** | 本机 12 核通过（95% CI 含 0，标准差 6.56pp）；GitHub Actions 的 windows runner 是 4 核，稳定差 **+17.66 ~ +18.53pp**（CI `[+16.94, +18.37]`）。**关键条件是低负载**（CI 上真值约 2%，本机常年 92~100%）| 已排除**十项**假设，见下表「CPU 判据逐项排除记录」。**该判据为非阻断**（`continue-on-error` 语义 + 显式 `exit 0`），日志与判定标记照旧输出；同一产物在 `prod_accept`(33/33) 与 `taskmgr_compare`(14/14) 均为绿 |
+
+### CPU 判据逐项排除记录（2026-10-01 ~ 10-02）
+
+| # | 假设 | 排除依据 |
+|---|---|---|
+| 1 | 参考源选错 | 已改用 PDH `\Processor(_Total)\% Processor Time`（任务管理器同源） |
+| 2 | 核数不匹配 / `.NET ProcessorCount` 归一化 | CI 上 `.NET=4` `PDH=4` `WMI=4`，比值 **1.0000** |
+| 3 | PDH 实例子集取错 | 逐项对照过每实例值 |
+| 4 | 库内口径混用（部分核回退 sysinfo） | CI 日志「`cpu.usage` − 每核均值」平均 **−0.43pp**、超 0.01pp 占比 5%。若走 sysinfo 回退，该差值由构造保证**恒为 0**（`usage` 就是每核均值），故 CI 走的是 PDH 路径 |
+| 5 | 参考源自身不自洽 | 已用 `_Total` vs 同条实例均值交叉核对（CI 最大 1.241pp，**此项反而支持「参考侧有问题」**）|
+| 6 | PDH 流首采样值不可靠 | 已改为长驻查询 + `NextValue()` 预热 |
+| 7 | 逐核读数退化（per-instance 读取失效）| 我曾据「CI 四核读数完全相同」立此假设，**被自己的实验推翻**：本机原始浮点值显示 PDH 在短窗口下本就量化重复（`91.168022` 出现 3 次且位模式完全相同）。该假设作废，判据已删除 |
+| 8 | 采样窗口长度（库 ~23ms vs 参考 ~1s）| 本机扫描 P ∈ {20ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s}，库与参考的差在各档均 <3pp，不随时长单调变化 |
+| 9 | 库的 PDH 路径本身不忠实 | 本机用 Python **独立复刻** `cpu_windows.rs` 的裸 PDH 查询作对照：`A 本库 − B 裸PDH = −0.44pp / 0.00pp`（两次实测），即库读到的就是裸 PDH 的值 |
+| 10 | 采集失败导致读到陈旧值 | 本机 `PdhCollectQueryData` **0/101 失败**、`CStatus` 全为 `PDH_CSTATUS_VALID_DATA(0)`。**但 CI 上未验证** —— `cpu_windows.rs:97` 丢弃了 collect 的返回码，这是现有观测的盲区 |
+
+**本机为何无法复现**：造「真值 = k/核数 × 100%」的已知负载实验失败了 ——
+本机已被其它会话占满，起 1 个忙等进程时五个数据源全部读 ~100%（真值 8.33%），
+即新增负载挤不进已饱和的机器。因此**只能到出问题的 runner 上量**。
+
+**下一步**：新增 CI 步骤 `CPU root-cause diag`（Windows only，非阻断），
+用 `tools/sysinformer-accept/cpu_rootcause_diag.py` 在 runner 上并置五个源：
+
+```
+A 本库     system.snapshot 的 cpu.usage
+B 裸 PDH   Python 独立查询（复刻 cpu_windows.rs），并报告 collect 返回码与 CStatus
+C .NET     PerformanceCounter（既有参考流）
+D typeperf Windows 自带 CLI，另一条 PDH 代码路径
+E WMI      Win32_Processor LoadPercentage，完全不同的栈
+```
+
+判读表：`C ≈ D` 说明 .NET 与 typeperf 同源一致；若 `A ≈ B ≈ D` 而 `C/E` 都低，
+则问题在 `PdhGetFormattedCounterValue` 瞬时值与 cooked 值的口径差异。
+
 ---
 
 ## 七、2026-10-01 轮：数值准确性实测发现并修复的三个缺陷
