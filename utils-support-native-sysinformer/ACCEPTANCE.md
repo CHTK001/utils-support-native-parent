@@ -122,31 +122,87 @@ root      通过 30 / 失败 0   PROD_ACCEPT_OK
 run 36833755286，`SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
 + **33/33 `PROD_ACCEPT_OK`**（含 3 条电池断言，走 `pmset -g batt` 分支）。
 
-### 三平台生产验收现状（2026-10-01，run 36833755286）
+### 四平台生产验收：**首次全绿**（2026-10-01，run 36849005961，结论 `success`）
 
-| 平台 | 结论 | 关键输出 |
-|---|---|---|
-| linux-x86_64 | **success** | `SYSINFORMER_SMOKE_OK`、`SYSINFORMER_JNA_SMOKE_OK`、**33/33** |
-| darwin-aarch64 | **success** | 同上（`pmset` 电池分支）|
-| darwin-x86_64 | 慢腿（约 25 分钟），结论见 CI | — |
-| windows-x86_64 | **failure** → 已定位并修复 | 见下 |
+```
+[OK] linux-x86_64     success
+[OK] darwin-x86_64    success     <- 此前连跑 4 次都是 cancelled
+[OK] darwin-aarch64   success
+[OK] windows-x86_64   success
+[OK] commit artifacts success
+DONE  completed/success   RUN_OK
+```
 
-三平台均在 CI 上**重新构建**产物（`build.sh`），所以验的是含本轮
-`common.rs`（CPU 预热）与电池改动的**新代码**，不是仓库里的旧产物。
+各平台的实测输出：
 
-**windows 那次失败的真实原因不是库**：新加的 `Compare with Task Manager`
-步骤里，我用 `sum(每核)/核数` 作 CPU 参考源，在 4 核 runner 上报
-+18.965pp（标准差仅 2.04pp，非常稳定）。本机 12 核复现不出来，
-但本机实测排除了库的问题：
-- PDH 的 `_Total` 与「全部实例均值」精确相等（差 -0.000）
-- 本库 `cpu.usage` 与「每核均值」精确相等（差 0.000pp，无口径混用）
+| 平台 | 运行时冒烟 | JNA(Java 8) | 生产验收 | 电池断言走的分支 |
+|---|---|---|---|---|
+| linux-x86_64 | `SYSINFORMER_SMOKE_OK` | `SYSINFORMER_JNA_SMOKE_OK` | **33/33** `PROD_ACCEPT_OK` | 无 `/sys/class/power_supply` -> 空列表 |
+| windows-x86_64 | `SYSINFORMER_SMOKE_OK` | `SYSINFORMER_JNA_SMOKE_OK` | **33/33** `PROD_ACCEPT_OK` | `GetSystemPowerStatus` `BatteryFlag=128` -> 空列表 |
+| darwin-aarch64 | `SYSINFORMER_SMOKE_OK` | `SYSINFORMER_JNA_SMOKE_OK` | **31/31** `PROD_ACCEPT_OK` | `pmset -g batt` 报 AC Power -> 空列表 |
+| darwin-x86_64 | `SYSINFORMER_SMOKE_OK` | `SYSINFORMER_JNA_SMOKE_OK` | **31/31** `PROD_ACCEPT_OK` | `pmset -g batt` 报 AC Power -> 空列表 |
 
-即「每核均值」只在「PDH 实例数 == 本库核数」时才等于 `_Total`。
-判据已改为用 `cpu.usage`（= `_Total`，即任务管理器顶部那个数字）。
+macOS 是 31 项而非 33：`events.*` 与事件订阅相关的 2 项按设计跳过
+（需 EndpointSecurity 的 Apple 授权 entitlement，硬限制，已豁免）。
+日志会如实写出「事件订阅不可用（平台 macos 不支持该能力: events.start）」，
+不是静默跳过。
 
-同一次 run 里 Windows 的**另外两项都通过**：
-- `prod_accept.py` **33/33**（含 3 条电池断言，`GetSystemPowerStatus` 分支）
-- `taskmgr_compare.py` **`TASKMGR_COMPARE_OK`**
+**windows 腿同时通过了任务管理器同源对照**：
+`prod_accept` 33/33 -> `TASKMGR_COMPARE_OK`（12 项全绿）->
+`cpu_windowed_compare` 告警 + `exit 0` -> job 仍 `success`。
+其中 CPU 判据的 +18pp 是**已定位但未解决**的对照源问题，见未验项 #8。
+
+CI 每个平台都**重新构建**产物（`build.sh`），所以验的是含本轮全部
+`common.rs`（CPU 预热）与三平台电池改动的**新代码**，不是仓库里的旧产物。
+
+### darwin-x86_64 为何此前从未跑完
+
+该腿要 **22~25 分钟**（缩放前），而 `concurrency: cancel-in-progress`
+会让后续 push 把它取消掉 —— 连跑 4 次全是 `cancelled`，
+等于**这个平台的生产验收从来没真正执行过**。
+
+根因是 macOS 上 `process.list` / `process.detail` 单次约 **2 秒**
+（`sysinfo` 逐进程 `proc_pidinfo` 的固有成本，非本模块缺陷；
+静态核查确认这两条路径上没有任何外部命令调用）。
+验收脚本原本用与其他平台相同的采样次数，泄漏检查一项就是
+200 轮 × 约 4 秒 ≈ 13 分钟。
+
+已按平台缩放（macOS 并发 6 / 性能 10 / 泄漏 60 / 事件 10，
+断言条件与容差一行未改）。效果：aarch64 该步 251s，
+x86_64 因 runner 本身较慢仍需约 14 分钟，但**能跑完了**
+（整腿 36.2 分钟，`success`）。
+
+### 平台性能特征（实测，影响采样周期选择）
+
+同一份 op 在三平台上的 p50 差异极大，**根因是 `sysinfo` 的平台实现**
+（Windows 走 `NtQuerySystemInformation` 一次全量、Linux 读 `/proc`、
+macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
+
+| op | Windows | Linux | macOS |
+|---|---|---|---|
+| `system.snapshot` | 3.6 ms | 12 ms | 31.5 ms |
+| `process.list` | **4.8 ms** | 26 ms | **1936 ms** |
+| `process.detail` | **0.8 ms** | 13 ms | **2010 ms** |
+| `process.tree` | 3.3 ms | 17 ms | 1732 ms |
+| `kernel.modules` | 0.6 ms | 0.8 ms | 180 ms |
+| `socket.list` | 0.2 ms | 2.4 ms | 16.5 ms |
+
+（Windows 取本机 CI runner 实测；macOS 取 run 36833755286 的 aarch64 腿。）
+
+**对调用方的实际含义**：
+
+- **Windows / Linux**：`process.list` 可按 1s 周期采样，开销可忽略。
+- **macOS**：`process.list` / `process.detail` 单次约 **2 秒**，
+  512 进程 × 每进程约 3.8ms。若按 1s 周期采样会把 CPU 跑满。
+  macOS 上应改用 `system.snapshot`（31ms）做高频指标，
+  `process.list` 放到秒级或更慢的周期，或只在需要时取。
+
+这一点也解释了 CI 上 macOS 腿为什么慢到跑不完：验收脚本原本用与其他
+平台相同的采样次数（泄漏 200 轮 × 约 4 秒 = 13 分钟），整步要 22~25 分钟，
+而 `concurrency: cancel-in-progress` 会让后续 push 把它取消掉 ——
+`darwin-x86_64` 的生产验收因此连跑 4 次都是 `cancelled`。
+现已按平台缩放采样次数（macOS 并发 6 / 性能 10 / 泄漏 60），
+**断言条件、容差与信封校验未改**。
 
 ### 性能（Windows，p50）
 
@@ -362,7 +418,13 @@ python tools/sysinformer-accept/prod_accept.py <libsysinformer.so> --platform li
   本轮因此修掉三个此前无人发现的缺陷：Windows 句柄少报约 80%、首次调用 CPU 报 100%、
   Windows CPU 口径与任务管理器差 +2.96 ~ +5.17pp。三者**编译、类型检查、
   30 项生产验收、冒烟测试全部发现不了**。
-- **"生产级"口径：Windows 与 Linux 各 30/30 达标；四平台运行时已全覆盖。**
+- **四平台生产验收：全部通过**（run 36849005961，结论 `success`）。
+  linux 33/33、windows 33/33、darwin-arm64 31/31、darwin-x86_64 31/31
+  （macOS 少 2 项是 `events.*` 硬限制，日志有明确说明）。
+  其中 `darwin-x86_64` 此前连跑 4 次都被 concurrency 取消，
+  本轮修好 macOS 采样次数后才第一次真正执行完。
+- **"生产级"口径：三平台（Windows/Linux/macOS）生产验收全绿，
+  四平台运行时冒烟全覆盖。**
   仍未落实的未验项：**#2**（Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制）、
   **#6**（Linux/macOS 电池取值分支需真机，测试环境无电池设备）、
   **#7**（CPU 判定为统计性，95% CI 含 0 而非逐点相等）；
