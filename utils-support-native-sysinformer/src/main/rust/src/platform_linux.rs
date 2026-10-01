@@ -2259,6 +2259,12 @@ fn batteries() -> Vec<BatteryInfo> {
             time_to_full_sec: to_full,
         });
     }
+    // `read_dir` 的返回顺序由文件系统决定（ext4 是哈希序、tmpfs 是插入序，
+    // 重建目录后会变），Rust 明确不保证顺序。不排序会让同一台机器的
+    // 列表顺序在不同挂载/重启间漂移，调用方无法依赖下标，采集端做前后
+    // 快照比对时也会误报「电池变了」。与本文件其他列表（services 等）
+    // 的口径保持一致。
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     out
 }
 
