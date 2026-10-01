@@ -28,6 +28,46 @@ python taskmgr_compare.py <入库的 sysinformer.dll>
 **对照源必须是任务管理器的同源数据**（PDH `\Processor(_Total)\% Processor Time`
 与 `GetPerformanceInfo`），而不是肉眼比对。2026-10-01 实测 15 项全绿。
 
+## 电池取值验收（Linux）
+
+```bash
+# CI 用：runner 本身就是 Linux 且 sudo 免密
+sudo -n python battery_value_linux.py --local <libsysinformer.so>
+
+# 连远端 Linux 主机（密码只从环境变量读，不落盘、不设默认值）
+export SI_SSH_PASSWORD='...'
+export SI_SO_PATH='<本地 .so 路径>'
+python battery_value_linux.py <host> <user> /tmp/sysinf/libsysinformer.so
+```
+
+以 `BATTERY_VALUE_OK` / `KALI_BATTERY_VALUE_OK` 收尾。已接入 CI 的 Linux 腿。
+
+**为什么需要它**：`battery.list` 的取值分支在无电池设备上永远走不到 ——
+台式机、容器、CI runner 全都直接返回空列表，所以"无电池 -> 空列表"到处都验了，
+取值正确性（百分比、剩余时间换算、状态映射）却一直是未验项。
+
+**怎么绕开"没有电池"**：`/sys/class/power_supply` 是**挂载点**，sysfs 本身
+不可写但挂载点能被覆盖：
+
+```bash
+mount --bind <可控目录> /sys/class/power_supply
+```
+
+这样就能提供内容完全确定的 `type` / `capacity` / `status` / `energy_now` /
+`energy_full` / `power_now` / `time_to_empty_now`，从而验证取值逻辑本身。
+
+三个用例覆盖：字段齐全、缺 `power_now`（必须退回内核值而非编造）、
+多电池 + 状态别名 + 非电池条目过滤（`type=Mains` / `type=USB` 必须被剔除）。
+
+**顺序也是断言的一部分**：三平台约定按 `name` 升序。Linux 侧曾经漏了排序，
+而 `std::fs::read_dir` 的返回顺序由文件系统决定（ext4 哈希序、tmpfs 插入序），
+实测同一目录 `ls -U` 给的是 `USB AC BAT1 BAT0`，即 BAT1 排在 BAT0 之前。
+这类缺陷不崩不报错，只让列表顺序在重建目录/换文件系统/重启后漂移。
+
+> 夹具带**敏感性对照**的要求：修复前的产物上，case1/case2 全绿而 case3 报
+> `FAIL order: ['B1','B0'] sorted=False`。若哪天它恒绿，说明断言被放宽了。
+> 改断言容差前请先在未修复的产物上确认它仍然会红。
+
 ## 五个维度
 
 | 维度 | 内容 | 要求 |
