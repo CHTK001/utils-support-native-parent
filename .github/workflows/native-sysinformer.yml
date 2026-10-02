@@ -556,23 +556,20 @@ jobs:
           if (-not (Test-Path $dll)) { throw "dll not found: $dll" }
           python -X utf8 tools/sysinformer-accept/taskmgr_compare.py $dll
           if ($LASTEXITCODE -ne 0) { throw "taskmgr_compare failed" }
-          # CPU 判据目前**非阻断**（2026-10-01 起）。
-          # 本机 12 核通过（CI 含 0），CI 4 核 runner 上稳定差约 +18pp，
-          # 已排除核数不匹配 / PDH 实例子集 / 库内口径混用 / PDH 侧不自洽 /
-          # PDH 流首采样值六项假设，根因未定位且无法本地复现（12 核不复现）。
-          # 它只覆盖 CPU 一个维度；同一产物在 prod_accept（33/33）与
-          # taskmgr_compare（12 项全绿）都是绿的，不应因单个未定位维度卡红 CI。
-          # 判定标记与诊断输出照旧保留，便于后续定位。
+          # CPU 判据在 2026-10-02 起恢复为**阻断项**。
+          # 此前非阻断的原因是「根因未定位」，该理由已不成立：
+          # 真因是 cpu_windows.rs 不检查 val.CStatus，采集间隔短于系统定时器
+          # 节拍时 PDH 返回 CALC_NEGATIVE_DENOMINATOR 且不更新 doubleValue，
+          # 陈旧值被当成读数（+18.5pp）。已修：检查 CStatus + 100ms 最小
+          # 采集间隔，+18.5pp -> +1.05pp。
+          # 判据本身也改了：原先要求「95% CI 含 0」，实测**原理上不可达**
+          # ——同一套逻辑的 Python 独立复刻在同进程相邻采样下就差 1.3pp，
+          # 即两个正确实现之间本来就有约 1.3pp 的地板。现改为「均值差在
+          # 容差内」，TOL_PP=4.0（3 倍地板），目标缺陷 18.5pp 仍有 4.6 倍余量。
+          # 该门有效性由 `cpu_windowed_compare.py --selftest` 用合成均值差保证，
+          # 不依赖被测机器。详见 ACCEPTANCE.md 未验项 #8。
           python -X utf8 tools/sysinformer-accept/cpu_windowed_compare.py $dll 60
-          if ($LASTEXITCODE -ne 0) {
-            # 非阻断：告警后**必须显式 exit 0**。
-            # shell: pwsh 会把最后一条外部命令的退出码当作步骤退出码，
-            # 而 Write-Host 是 cmdlet、不改 $LASTEXITCODE —— 只写告警的话
-            # python 的 exit 1 会被保留，步骤照样判 failure
-            # （2026-10-01 实测踩到：warning 与 error 同时出现）。
-            Write-Host "::warning::cpu_windowed_compare 未通过（已知未定位问题，见 ACCEPTANCE.md 未验项 #8）"
-            exit 0
-          }
+          if ($LASTEXITCODE -ne 0) { throw "cpu_windowed_compare failed" }
 
       # CPU +18pp 根因诊断（Windows only，临时脚本，定位后删除）。
       # 为什么要单独一步而不是塞进上面的 compare：compare 只输出
