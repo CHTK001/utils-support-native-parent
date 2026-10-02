@@ -282,7 +282,7 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
-| 6 | ~~Linux 电池取值分支未验~~ **已关闭（Linux）**；**Windows / macOS 取值仍未验** | 原以为测试环境无电池设备。Linux 侧改用 `mount --bind` 把可控目录覆盖到 `/sys/class/power_supply`，即可提供内容完全确定的 `type`/`capacity`/`status`/`energy_*`/`power_now`/`time_to_empty_now`，从而验证取值逻辑本身 | **Linux 取值已验**（夹具 `tools/sysinformer-accept/battery_value_linux.py`，3 用例全绿：字段齐全、缺 `power_now` 退回内核值、多电池+状态别名+非电池过滤）。Windows 是台式机（`BatteryFlag=128`）、macOS CI 报 `AC Power`，**这两平台的取值正确性仍需笔记本/真机** |
+| 6 | **Linux 已关闭；Windows / macOS 需真硬件，但已备好一条命令** | 原以为测试环境无电池设备。Linux 侧改用 `mount --bind` 覆盖 `/sys/class/power_supply`，验证取值逻辑本身（3 用例全绿）。Windows 是台式机（`BatteryFlag=128`）、macOS CI 报 `AC Power`，这两个平台的**真机**对账没有设备跑不了 | **给常量映射写单元测试没有价值** —— 那只是复验读代码就能确认的东西；真正的未知是「`GetSystemPowerStatus` / `pmset` 在真笔记本上返回什么」，这没有硬件测不了。拿单元测试冒充「验过了」是自欺。因此改为交付**一条命令**：`tools/sysinformer-accept/battery_verify_device.py`，在任何 Windows 笔记本 / MacBook 上直接跑，用操作系统**另一套独立视图**（WMI `Win32_Battery` + `powercfg /batteryreport`；`ioreg -rc AppleSmartBattery`）逐项对账，对不上即真缺陷。无电池机器上会跑通「参考源采集通路」并明确输出 `BATTERY_DEVICE_SKIPPED_NO_BATTERY`（非静默跳过）|
 | 7 | **CPU 判定的统计力有限** | 本机负载在 40%~97% 间剧烈波动，逐次差标准差约 14pp | 90s 采样得 85 个配对、标准误 1.2~1.6pp。判据是 **95% CI 含 0** 而非"逐点相等"——后者在这台机器上做不到。低负载或更长采样会显著收紧 |
 
 | 8 | **CI 4 核 runner 上 CPU 判据未通过** —— 根因已定位并修复（2026-10-02）；**残余 ~1pp 判定为测量地板，非库缺陷** | 主因已修：库读到了**陈旧值**（`CStatus` 未检查），见下方根因一节。修复后 +18.5pp → **+1.05pp**。残余部分：已排除陈旧复用（0.5%）、自扰动（0.67%）、汇总与每核不一致（0.26pp），且**同一逻辑的 Python 复刻偏差更大（+2.14pp）**，故残余来自「两个独立进程时钟的 PDH 读数在突发负载机器上的比较地板」 | 判据仍为**非阻断**。理由不是「根因没找到」，而是：这条判据要求两个独立采样的进程差值统计上为 0，而实测该比较的地板就是 1~2pp（同一逻辑的独立实现之间就差 1.27pp），因此判据在原理上无法稳定通过 |
@@ -601,6 +601,17 @@ export SI_SSH_PASSWORD='...'
 export SI_SO_PATH='<本地 libsysinformer.so 路径>'
 python tools/sysinformer-accept/battery_value_linux.py <host> <user> /tmp/sysinf/libsysinformer.so
 #   -> KALI_BATTERY_VALUE_OK（3 用例：字段齐全 / 缺 power_now 退回内核值 / 多电池+状态别名+非电池过滤）
+
+# 6) Windows 笔记本 / MacBook 的**真机**对账（未验项 #6 的最后一步）
+#    在**有电池的设备**上跑；无电池机器会明确输出 SKIPPED 而非静默通过
+python tools/sysinformer-accept/battery_verify_device.py \
+  utils-support-native-sysinformer/src/main/resources/native/windows-x86_64/sysinformer.dll
+#   -> BATTERY_DEVICE_OK / BATTERY_DEVICE_FAILED
+#   （无电池时）-> BATTERY_DEVICE_SKIPPED_NO_BATTERY
+
+# 7) 真机对账脚本自身的参考源解析自测（本机非 macOS 时也该跑）
+python tools/sysinformer-accept/battery_verify_device.py --selftest
+#   -> SELFTEST_OK
 ```
 
 **验证必须打在入库产物上**（`src/main/resources/native/<平台>/`），

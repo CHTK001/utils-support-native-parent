@@ -68,6 +68,41 @@ mount --bind <可控目录> /sys/class/power_supply
 > `FAIL order: ['B1','B0'] sorted=False`。若哪天它恒绿，说明断言被放宽了。
 > 改断言容差前请先在未修复的产物上确认它仍然会红。
 
+## 真机电池对账（Windows 笔记本 / MacBook）
+
+```bash
+# 在有电池的设备上跑；平台由库自己报告，无需手工指定
+python battery_verify_device.py <入库的 sysinformer.dll>     # Windows
+python3 battery_verify_device.py <入库的 libsysinformer.dylib>  # macOS
+
+# 参考源解析自测（本机不是 macOS 时也该跑）
+python battery_verify_device.py --selftest
+```
+
+以 `BATTERY_DEVICE_OK` / `BATTERY_DEVICE_FAILED` 收尾；无电池设备上
+（台式机 / 虚拟机 / CI runner）收尾是 `BATTERY_DEVICE_SKIPPED_NO_BATTERY`。
+
+**它不去 mock，只做对账。** 参考源都与库的实现路径不同：
+
+| 库的取值 | Windows 对照源 | macOS 对照源 |
+|---|---|---|
+| `percentage` | CIM `Win32_Battery`、`powercfg /batteryreport` | `ioreg -rc AppleSmartBattery` 的 `CurrentCapacity/MaxCapacity` |
+| `state` | `Win32_Battery.BatteryStatus` | `ioreg` 的 `IsCharging`/`FullyCharged` |
+| `time_to_empty_sec` | `Win32_Battery.EstimatedRunTime` | `ioreg` 的 `AppleRawBatteryRemaining` |
+
+**为什么不给电池映射写单元测试**：那只复验读代码就能确认的常量映射；
+真正的未知是「`GetSystemPowerStatus` / `pmset` 在真笔记本上返回什么」，
+没有硬件测不了。拿单元测试冒充「验过了」是自欺。
+
+**无电池机器上也要跑**：脚本会先采集 OS 参考源再判断能否对账，所以
+「参考源采集通路可用」这件事在任何机器上都验过了，只有「两边对账」
+这一步需要真硬件。
+
+> `--selftest` 已经抓到过一次真 bug：真实 `ioreg` 输出的是
+> `"IsCharging" = No`（**Yes/No**），而当时的正则只匹配数字，
+> 结果在真 MacBook 上返回 `None`、state 对账被**静默跳过**。
+> 这类"参考源解析错 → 结论假"的问题只有自测能发现。
+
 ## 五个维度
 
 | 维度 | 内容 | 要求 |
