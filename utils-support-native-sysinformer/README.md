@@ -91,7 +91,16 @@ utils-support-native-sysinformer-java8/     Java 8 JNA 绑定（独立模块）
 `process.list` / `detail` 的字段：pid、ppid、名称、会话、用户、uid/gid、状态、优先级、
 调度类、启动时刻、运行时长、WOW64、是否提升、是否受保护、CPU%、RSS、虚拟内存、
 私有/共享字节、线程数、句柄数、**每进程 IO 读写字节与次数**、命令行与参数数组、
-可执行路径、工作目录、根目录、签名摘要。
+可执行路径、工作目录、根目录、`signature`。
+
+> ⚠️ **`signature` 目前恒为 `null`。** `SignatureInfo` 在模型里已声明
+> （`model.rs`），但**三平台都没有任何构造点**，签名验证属于**未实现**而非
+> 原理性限制（Windows 可用 `WinVerifyTrust`、macOS 可用
+> `SecStaticCodeCheckValidity`）。
+>
+> 这一点必须写明：调用方**无法**用「`signature == null`」判断「该进程没有
+> 签名」—— 分不清「无签名」与「没查」。要判断签名有效性请走操作系统自己的
+> 途径。详见 `GAP-ANALYSIS.md` 缺口 2。
 
 ### 按需深度内省
 
@@ -135,6 +144,10 @@ utils-support-native-sysinformer-java8/     Java 8 JNA 绑定（独立模块）
 | `ImageLoad` | 16 | ✅ | ✅ EXEC | ❌ |
 | `ImageUnload` | 32 | ✅ | — | ❌ |
 | `NetworkConnect` | 64 | — | — | ❌ |
+
+> ⚠️ **`NetworkConnect` 三平台都未实现**，属于「枚举里声明了、却永远不会有
+> 事件产出」。按该类型过滤事件只会得到空结果，**不要**据此判断「没有网络
+> 连接行为」。详见 `GAP-ANALYSIS.md` 缺口 3。
 
 ---
 
