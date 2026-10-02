@@ -15,7 +15,7 @@
 |---|---|
 | **op 层** | 21 个 op，**20 个三平台均已实现**；唯一缺口是 macOS 的 `events.*`（硬限制）|
 | **已声明但未实现（空壳）** | 原 **3 项**，现剩 **1 项**：签名验证（电池信息、Windows 句柄数值均已修）|
-| **数值准确性** | 与任务管理器同源对照 **14 项全绿**；生产验收累计修掉 **5 个**此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%、Windows CPU 口径差 5pp、Linux 电池列表未排序、Windows CPU 读数陈旧化 +18.5pp）—— 详见 §八。这五项**都不崩不报错、返回结构不变**，代码审查与类型检查完全看不出来 |
+| **数值准确性** | 与任务管理器同源对照 **12 项全绿**（CI 日志实测「判定项 = 12，失败 = 0」）；生产验收累计修掉 **5 个**此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%、Windows CPU 口径差 5pp、Linux 电池列表未排序、Windows CPU 使用 PDH 声明为无效的读数 +18.5pp）—— 详见 §八。这五项**都不崩不报错、返回结构不变**，代码审查与类型检查完全看不出来 |
 | **平台不对称** | Linux 最强；Windows 中等；macOS 受 SIP 限制最弱（已在 README 记录）|
 | **事件类型** | 7 种中 **`NetworkConnect` 三平台都未实现**；Linux 缺 Thread\*/ImageUnload |
 | **System Informer 有、本模块完全没有** | 8 类（反向查找、关闭连接、启动项、IO 优先级、内存读字节、进程创建、服务增删改、Windows 对象类型）|
@@ -176,7 +176,7 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 
 任务管理器的数字来自 **PDH 性能计数器**与 `GetPerformanceInfo`，因此这里用
 **同一批数据源**与本库比对 —— 而不是与"肉眼看到的任务管理器"比，后者无法量化。
-脚本 `tools/sysinformer-accept/taskmgr_compare.py`，Windows 实测 **15 项全绿
+脚本 `tools/sysinformer-accept/taskmgr_compare.py`，Windows 实测 **12 项全绿**（CI 日志「判定项 = 12，失败 = 0」）
 （`TASKMGR_COMPARE_OK`）**。
 
 | 项 | 对照源 | 实测偏差 |
@@ -245,10 +245,10 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 | 2 | **首次调用 CPU 报 100%** | 进程内第一次调 `system.snapshot`，**12 核全部 `100.0%`**。任何新接入方第一次读到的都是错的 | `System::new()` 的上次累计时间为 0，首次 `refresh_cpu_all()` 把"开机至今"整段算成满载。已加 `refresh_cpu()` 预热：首次连刷两次、间隔 120ms。修复后首调为 `39.81%`（正常值）|
 | 3 | **Windows CPU 口径与任务管理器不同** | 系统性偏高 +2.96 ~ +5.17pp（取决于判据） | `sysinfo` 只读 `% Idle Time` 并取 `100 - idle`，任务管理器用 `% Processor Time`，分母不同。详见上一节 |
 | 4 | **Linux `battery.list` 未排序** | 多电池时返回顺序随文件系统而变，调用方不能依赖下标；采集端做前后快照比对会误报「电池变了」 | `std::fs::read_dir` 的顺序由文件系统决定（ext4 哈希序、tmpfs 插入序），Rust 明确不保证。实测两台机器给出**不同**顺序（Kali `USB AC BAT1 BAT0`、CI `BAT1 USB AC BAT0`），即 BAT1 排在 BAT0 前 |
-| 5 | **Windows CPU 读数陈旧化** | CI 4 核 runner 上 `cpu.usage` **稳定在 ~20.2%**（sd 1.65pp）而真实值约 2%，与任务管理器差 **+18.5pp**；且读数稳定得不像在测量 | 采集间隔短于系统定时器节拍时 PDH 返回 `PDH_CALC_NEGATIVE_DENOMINATOR`(0x800007D6) 且**不更新** `doubleValue`，而代码只检查 API 返回码、**不检查 `val.CStatus`**，把陈旧值当读数。runner 上该状态码占 **27.7%**。已修：检查 `CStatus` + 100ms 最小采集间隔，+18.5pp → **+1.05pp** |
+| 5 | **Windows CPU 使用 PDH 声明为无效的读数** | CI 4 核 runner 上 `cpu.usage` **稳定在 ~20.2%**（sd 1.65pp）而真实值约 2%，与任务管理器差 **+18.5pp** | 采集间隔短于系统定时器节拍时 PDH 返回 `PDH_CALC_NEGATIVE_DENOMINATOR`(0x800007D6)，而代码只检查 API 返回码、**不检查 `val.CStatus`**，把 PDH 声明为无效的值当读数。runner 上该状态码占 **27.7%**。已修：检查 `CStatus` + 100ms 最小采集间隔，+18.5pp → **+1.0~2.5pp**。**注**：实测该状态下 PDH 写入的是 `0.0` 而非旧值，所以「为何稳定在 20%」的机制**尚未查明** |
 
 第 4、5 项有一个共同特征值得单独记：**两者都不崩、不报错、不改变任何返回结构**，
-只是让一个数字变成假的 —— #4 是「顺序不稳定」，#5 是「数值冻结」。
+只是让一个数字变成假的 —— #4 是「顺序不稳定」，#5 是「用了 PDH 声明为无效的值」。
 这类缺陷只能靠**独立数据源对照**发现；代码审查与类型检查完全看不出来，
 而任何「断言返回值合法」的冒烟测试都会通过。
 
