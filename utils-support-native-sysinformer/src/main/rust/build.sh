@@ -52,6 +52,23 @@ case "$OS_TYPE-$ARCH" in
 esac
 
 rustup target add "$TARGET" 2>/dev/null || true
+
+# Windows 的 PE 里带两处随链接时刻变化的字段：COFF TimeDateStamp 与
+# CodeView(RSDS) 调试 GUID。缺了下面这个开关，同一份源码**每次编出的 dll
+# 字节都不同**。
+#
+# 实测（2026-10-02）：852,480 字节里只有 24 字节不同 = 链接时间戳低位
+# 2 + 另三个时间戳字段各 2 + PDB GUID 16，**.text 代码段 605,184 字节差异为 0**。
+# 也就是说两次编出来功能等价，但 md5 不同，后果有二：
+#   1. main 里入库的产物每跑一次 CI 就「落后」一次，且是**静默**的；
+#   2. **无法用 md5 证明「交付的那份 == 验过的那份」**，而这正是验收报告
+#      绑定产物的唯一硬凭据（Linux/macOS 三平台可以，只有 Windows 不行）。
+# /Brepro 让链接器改用确定性算法生成校验和、时间戳与调试 GUID。
+# 只对 MSVC 目标加，unix 链接器不认这个开关。
+if [[ "$TARGET" == *"-pc-windows-msvc" ]]; then
+    export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=/Brepro"
+fi
+
 cargo build --release --target "$TARGET"
 
 # 产物名：windows 无 lib 前缀，unix 有
