@@ -278,7 +278,7 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 | # | 未验项 | 原因 | 影响 |
 |---|---|---|---|
 | 1 | ~~macOS x86_64 无运行时冒烟~~ **已关闭** | 改用 `macos-15-intel`（原生 Intel x86_64，Actions 最后一个 x86_64 镜像，支持到 2027-08）| run 36708484394 该腿 `Runtime smoke` 真实执行：dlopen x86_64 dylib 成功、`process.list 返回 502 个进程`、`SYSINFORMER_SMOKE_OK` |
-| 2 | **Java 25 FFM 绑定不进 CI** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`），该构件**只有私有来源**。这是**全仓性**限制（任何 native 模块的 Java 编译都受此限）| 已逐条探测确认**无免凭据方案**：Maven Central 搜 `com.chua` 命中 **0** 个构件、直取 pom **404**；aliyun `public`/`central`/`jcenter` 全 **404**；aliyun 私有匿名 **401**；GitHub Packages 匿名 **401**；姐妹仓库 `CHTK001/utils-support-parent-starter` 是 **private** 且 tag 只到 `v4.0.0.35`（无 `.42`），`GITHUB_TOKEN` 无法跨仓。另 `common-starter` 并非零依赖（8 个，含 `com.chua.jdk:vector-api` 亦为私有 401），故「CI 从源码构建它」这条路**双重关闭**。配置 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD` 后纳入 `native-java-compile.yml`。**注**：Java 8 侧（`utils-support-native-sysinformer-java8`，用 JNA）刻意不依赖 common-starter，**它已在 CI 里真跑** |
+| 2 | **Java 25 FFM 绑定：功能已验，缺 CI 自动化回归** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`）。模块的父 pom **只声明了两个仓库，都是 `packages.aliyun.com` 的私有 registry**，匿名 401；Maven Central 无 `com.chua`。这是**全仓性**限制 | 绑定的**正确性已验**：`mvn clean compile` exit 0（class major 69），且 `FfmSmoke` **端到端跑通 16 项断言**（真数据：279 个进程 / 25 个根），跑的是 **CI 产出的那份 dll**（847,360 字节，与 artifact 一致）。另已逐条确认**无免凭据方案**：Central 搜 `com.chua` 命中 0、aliyun `public`/`central`/`jcenter` 全 404、GitHub Packages 匿名 401、姐妹仓 private 且无 `.42` tag；且 `common-starter` 并非零依赖（含 `com.chua.jdk:vector-api` 亦私有 401），故「从源码构建」也走不通。**缺的是 CI 无法自动重复这一验证** —— 风险是「发现延迟」不是正确性。补法：配 `MAVEN_ALIYUN_USER`/`MAVEN_ALIYUN_PASSWORD` 后把 `FfmSmoke` 纳入 `native-java-compile.yml`。**注**：Java 8 侧（`SysInformerJnaSmoke`）已在 CI 里真跑，那条腿是自动的 |
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
@@ -403,7 +403,42 @@ runner 上 `CALC_NEGATIVE_DENOMINATOR` 占 **27.7%**，而修复后**陈旧复�
 **CPU 判据：+18.5pp → +1.05pp**（等长 100ms 窗口下配对 2196 次，
 `95% CI [+0.748, +1.348]`）。
 
-### 残余 ~1pp：判定为测量地板，不是库缺陷
+### Java 25 FFM 绑定：本地端到端已验证，缺的是 CI 自动重复（2026-10-02 实测）
+
+`src/smoke/java/FfmSmoke.java` 此前**从未在任何地方被执行过** ——
+CI 只跑 Java 8 的 JNA 绑定。2026-10-02 当场补跑（本地 JDK 25 Corretto 25.0.3，
+classpath 里的 dll 是 **CI 产出的那一份**，847,360 字节，与 artifact 一致）：
+
+```
+version = {"version":"0.1.0","platform":"windows","target":"x86_64"}
+ASSERT ok   platform() 非空
+ASSERT ok   system.snapshot 含 cpu/host/memory
+ASSERT ok   process.list -> 279 个进程
+ASSERT ok   process.tree -> 25 个根
+ASSERT ok   process.detail(自身) name = java.exe
+ASSERT ok   process.threads / handles / modules / credential 可调用
+ASSERT ok   kernel.modules / service.list / socket.list 可调用
+ASSERT ok   未知 op 被拒绝并取到原因
+ASSERT ok   events.start 可调用 / events.poll 返回数组
+JAVA25_FFM_SMOKE_OK     (exit 0，16 项断言全过)
+```
+
+**这条改变了未验项 #2 的性质**，必须说清区别：
+
+| | 状态 |
+|---|---|
+| 绑定能编译 | ✅ 已验（`mvn clean compile` exit 0，class major 69）|
+| 绑定能**正确运行** | ✅ **已验**（16 项断言，真数据：279 个进程 / 25 个根）|
+| CI 能**自动重复**这一验证 | ❌ 缺凭据 |
+
+所以它不再是"未验证的功能"，而是**一个已验证、但缺自动化回归网的功能**。
+风险是**发现延迟**（改了绑定、CI 仍绿、要等有凭据的人构建才发现），
+不是正确性风险。补法是一行：配 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD`
+后把 `FfmSmoke` 纳入 `native-java-compile.yml`。
+
+同一模块的 Java 8 侧（`SysInformerJnaSmoke`）**已在 CI 里真跑**，那条腿是自动的。
+
+---
 
 逐项排除：
 
