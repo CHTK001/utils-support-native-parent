@@ -92,24 +92,42 @@ FFI 里崩溃会带走宿主 JVM，这是生产事故。
 
 ## 四、实测结果（最新入库产物）
 
-### Windows（`sysinformer.dll` md5 `76ef3d16aa92b98fa2c71466846849b6`，2026-10-01）
+### Windows（`sysinformer.dll` md5 `07cfbee40e4f2e9ca19e16319d961b8f`，852,480 B，run 36995361316，2026-10-02）
 
 ```
-prod_accept.py        通过 30 / 失败 0   PROD_ACCEPT_OK
-taskmgr_compare.py    判定项 14 / 失败 0  TASKMGR_COMPARE_OK
-cpu_windowed_compare  85 配对，均值差 -1.400pp，CI [-3.797, +0.997]  OK
+prod_accept.py        通过 33 / 失败 0   PROD_ACCEPT_OK
+taskmgr_compare.py    判定项 12 / 失败 0  TASKMGR_COMPARE_OK
+cpu_windowed_compare  有效配对 55（每对含 3~37 个本库样本，窗口中位 1006ms）
+                      均值差 +0.795pp，容差 ±4.0pp -> TASKMGR_CPU_WINDOWED_OK
 
-与任务管理器同源数据对照：
-  物理内存占用率  差 0.00 pp        进程数        差 0.00%
-  可用内存        差 0.00%         已用内存      差 0.00%
-  线程总数        差 0.03%         句柄总数      差 0.06%
-  磁盘总量/可用（C/D/E 三卷）      全部 0.00%
+与任务管理器同源数据对照（GetPerformanceInfo，5 次紧邻采样取均值）：
+  物理内存占用率   差 0.00pp        进程数        差  0.00%
+  可用内存        差 0.00%         已用内存      差  0.00%
+  线程总数        差 0.12%         句柄总数      差  0.13%
+  磁盘 C:\ 总量/可用                全部 0.00%
+  磁盘 D:\ 总量/可用                全部 0.00%
 
-并发 8 线程 × 15 轮 × 6 op，无非法信封
-泄漏：200 轮后 RSS -1.2MB、句柄 +8；事件启停 20 轮后句柄 +0
+并发 8 线程 × 15 轮 × 6 op：120 次调用耗时 1.56s，错误 0 条
+并发后连续两次 process.list 数量一致（136 vs 136）
+事件订阅下 4 线程并发 poll：错误 0
+泄漏：200 轮 × 4 op 后 RSS 28.8MB -> 28.8MB、句柄 426 -> 426
+事件启停 20 轮（成功 20 次）：句柄 426 -> 426
 ```
 
-### Linux（`libsysinformer.so` md5 `55b86574a75568e09efeb2803e04084d`，run 36877569961，2026-10-01）
+> CPU 判据在同轮诊断里的原始数据（`cpu_rootcause_diag.py`，五源并置）：
+>
+> ```
+> PdhGetFormattedCounterValue 的 CStatus 分布 = {0x00000000: 7930, 0x800007D6: 3125}
+>   -> 非 VALID 3125/11055 = 28.27%（0x800007D6 = CALC_NEGATIVE_DENOMINATOR）
+> 修复后逻辑的行为分布 = {collected: 438, reuse: 1754, stale-reuse: 19}
+>
+> [8] 同窗口配对比较（参考流间隔 100ms，与库的最小窗口等长）
+>   A 本库        配对 2211  均值差 +0.934pp  sd 6.932  95% CI [+0.645, +1.223]
+>   F 修复后逻辑   配对 2211  均值差 +1.821pp  sd 7.955  95% CI [+1.489, +2.152]
+>   A − F 同迭代配对 2211      均值差 -0.887pp  sd 7.036  95% CI [-1.180, -0.594]
+> ```
+
+### Linux（`libsysinformer.so` md5 `55b86574a75568e09efeb2803e04084d`，run 36995361316，2026-10-02）
 
 真实 Kali（`192.168.50.198`，普通用户 + root 各一遍，用仓库当前版
 `prod_accept.py`，即含 3 条电池断言的那一版）：
@@ -146,16 +164,23 @@ battery_value_linux.py  case1 字段齐全 / case2 缺 power_now /
 守卫敏感性对照：同一夹具在**修复前**的产物上，case1/case2 全绿而 case3 报
 `FAIL order: ['B1','B0'] sorted=False` —— 证明顺序断言不是恒真。
 
-### macOS arm64（`libsysinformer.dylib`，CI `macos-14`）
+### macOS（两个 dylib，run 36995361316，2026-10-02）
 
-run 36833755286，`SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
-+ **33/33 `PROD_ACCEPT_OK`**（含 3 条电池断言，走 `pmset -g batt` 分支）。
+- `darwin-aarch64`：`libsysinformer.dylib` md5 `5b2c5a7e525427d9569e041055a2e859`，1,122,912 B
+- `darwin-x86_64`：`libsysinformer.dylib` md5 `3d4a30c3484f098d72309c4572bb8e00`，1,127,328 B
 
-### 四平台生产验收：**首次全绿**（2026-10-01，run 36849005961，结论 `success`）
+两腿均为 `SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
++ **31/31 `PROD_ACCEPT_OK`**（含电池断言，走 `pmset -g batt` 分支）。
+
+### 四平台生产验收：全绿（2026-10-02，run 36995361316，sha `2deb08a`，结论 `success`）
+
+> 这一轮产出的 `sysinformer.dll` 就是**当前入库的那一份**
+> （`07cfbee40e4f2e9ca19e16319d961b8f`），且该产物已被同 run 的 attempt-2
+> 独立复现（逐字节相同），见「九、交付物与被验收产物的一致性」。
 
 ```
 [OK] linux-x86_64     success
-[OK] darwin-x86_64    success     <- 此前连跑 4 次都是 cancelled
+[OK] darwin-x86_64    success
 [OK] darwin-aarch64   success
 [OK] windows-x86_64   success
 [OK] commit artifacts success
@@ -176,13 +201,11 @@ macOS 是 31 项而非 33：`events.*` 与事件订阅相关的 2 项按设计�
 日志会如实写出「事件订阅不可用（平台 macos 不支持该能力: events.start）」，
 不是静默跳过。
 
-**windows 腿同时通过了任务管理器同源对照**：
+**windows 腿同时通过了任务管理器同源对照与 CPU 判定**：
 `prod_accept` 33/33 -> `TASKMGR_COMPARE_OK`（12 项全绿）->
-`cpu_windowed_compare` 告警 + `exit 0` -> job 仍 `success`。
-其中 CPU 判据的 +18pp 是**已定位但未解决**的对照源问题，见未验项 #8。
-
-CI 每个平台都**重新构建**产物（`build.sh`），所以验的是含本轮全部
-`common.rs`（CPU 预热）与三平台电池改动的**新代码**，不是仓库里的旧产物。
+`TASKMGR_CPU_WINDOWED_OK`（均值差 +0.795pp ≤ 4.0pp）。
+CI 每个平台都**重新构建**产物（`build.sh`），所以验的是含本轮全部改动的
+**新代码**，不是仓库里的旧产物。
 
 ### darwin-x86_64 为何此前从未跑完
 
@@ -209,14 +232,16 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 
 | op | Windows | Linux | macOS |
 |---|---|---|---|
-| `system.snapshot` | 3.6 ms | 12 ms | 31.5 ms |
-| `process.list` | **4.8 ms** | 26 ms | **1936 ms** |
-| `process.detail` | **0.8 ms** | 13 ms | **2010 ms** |
-| `process.tree` | 3.3 ms | 17 ms | 1732 ms |
-| `kernel.modules` | 0.6 ms | 0.8 ms | 180 ms |
-| `socket.list` | 0.2 ms | 2.4 ms | 16.5 ms |
+| `system.snapshot` | 4.00 ms | 1.76 ms | 31.5 ms |
+| `process.list` | **6.46 ms** | 16.53 ms | **1936 ms** |
+| `process.detail` | **0.81 ms** | 1.44 ms | **2010 ms** |
+| `process.tree` | 4.24 ms | 3.72 ms | 1732 ms |
+| `kernel.modules` | 0.65 ms | 0.26 ms | 180 ms |
+| `socket.list` | 0.20 ms | 12.02 ms | 16.5 ms |
 
-（Windows 取本机 CI runner 实测；macOS 取 run 36833755286 的 aarch64 腿。）
+（Windows 与 Linux 取 run 36995361316 同一轮实测，可横向比；
+macOS 取 run 36833755286 的 aarch64 腿 —— macOS 腿在 10-02 那两轮未改动
+op 集合与采样次数，故沿用。）
 
 **对调用方的实际含义**：
 
@@ -233,18 +258,26 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 现已按平台缩放采样次数（macOS 并发 6 / 性能 10 / 泄漏 60），
 **断言条件、容差与信封校验未改**。
 
-### 性能（Windows，p50）
+### 性能（Windows / Linux p50，同一轮 run 36995361316 实测）
 
-| op | p50 | 说明 |
-|---|---|---|
-| system.snapshot | **29 ms** | 见下方"性能修复" |
-| process.list | 26 ms | |
-| process.detail | 13 ms | |
-| process.tree | 17 ms | |
-| kernel.modules | 0.8 ms | |
-| socket.list | 2.4 ms | |
-| process.env | 0.2 ms | |
-| process.modules | 0.7 ms | |
+| op | Windows p50 | Linux p50 | 说明 |
+|---|---|---|---|
+| system.snapshot | 4.00 ms | 1.76 ms | |
+| process.list | 6.46 ms | 16.53 ms | |
+| process.tree | 4.24 ms | 3.72 ms | |
+| process.detail | 0.81 ms | 1.44 ms | |
+| process.threads | 6.42 ms | 0.29 ms | |
+| process.handles | 7.21 ms | 5.09 ms | |
+| process.modules | 0.48 ms | 0.19 ms | |
+| process.mappings | 1.59 ms | 1.24 ms | |
+| process.env | 0.20 ms | 0.11 ms | |
+| process.credential | 1.04 ms | 0.07 ms | |
+| kernel.modules | 0.65 ms | 0.26 ms | |
+| socket.list | 0.20 ms | 12.02 ms | |
+
+（30 次采样，取 p50；两平台同 run、同口径，可直接横向比。
+`process.list` 覆盖数：Windows 136 个进程、Linux 163 个进程 —— 绝对耗时
+随进程数走，比较时要看这个量。）
 
 ---
 
@@ -754,7 +787,96 @@ python tools/sysinformer-accept/battery_verify_device.py --selftest
 用自己墙钟给 PDH 样本打时间戳会整体偏移 1~2.8s；
 `GetSystemTimes` 不能当 CPU 基准（其 kernel 含 idle，会造出 30+pp 假偏差）。
 
-## 九、结论
+## 九、交付物与被验收产物的一致性（2026-10-02 新增）
+
+前面所有验收证据都是针对 **CI 编出来的二进制**取得的。而调用方实际拿到
+的是**仓库里入库的那一份**。这两者相等，靠的不是「应该相等」，而是逐字节
+比对 —— 否则就可能出现「交了全绿报告、交付的却是回退版」。
+
+### 1) 曾发生的真实缺陷：四平台入库产物全部落后于源码
+
+自查时发现 `main` 上的四份产物停在提交 `10063a6`（2026-10-01），此后三个
+提交改了 Rust 源码（`c38dc54` 电池排序、`35e5b70` Windows CPU 修复），
+**产物没有重新入库**：
+
+| 平台 | 落后版本 | 缺少的修复 |
+|---|---|---|
+| windows-x86_64 | 847,360 `d4be17fa` | CPU `CStatus` 检查 + 100ms 最小采集间隔 |
+| linux-x86_64 | 1,569,840 `18f6af72` | `battery.list` 排序 |
+| darwin-x86_64 | 1,117,840 `fb3284ee` | `battery.list` 排序 |
+| darwin-aarch64 | 1,121,616 `76abd383` | `battery.list` 排序 |
+
+**为什么此前没被发现**：早期只对 Linux 的 `.so` 做过 md5 核对，
+**两个 dylib 一次都没核过**。所以「四平台入库产物已验证」这句话对 macOS
+当时并不成立。已从 artifacts 分支回填（提交 `3c72554`）。
+
+### 2) Windows 构建原本不可复现（已修）
+
+回填后做闭环核对，发现三平台逐字节相同、**只有 Windows 不同**。逐字节定位
+后确定：852,480 字节里只差 **24 字节**，且 `.text`（605,184 字节可执行代码）
+**差异为 0**；差异是 COFF `TimeDateStamp` 与 CodeView(RSDS) 调试 GUID，
+两者都随**链接时刻**变化（MSVC 未开 `/Brepro`）。
+
+后果是硬的：**无法用 md5 证明「交付的那份 == 验过的那份」**，而这是验收
+报告绑定产物的唯一硬凭据（Linux/macOS 三个平台当时可以，只有 Windows 不行）。
+
+已在 `build.sh` 对 MSVC 目标加 `-C link-arg=/Brepro`。
+
+### 3) 可复现性已被实测证明（不是推断）
+
+「一次构建相同」不能证明可复现，必须**两次独立构建**比对。用 GitHub 的
+re-run 触发同一 SHA（`2deb08a`）的第二次构建：
+
+| 来源 | run / attempt | md5 | 字节 |
+|---|---|---|---|
+| pre-`/Brepro` | 36990756125 a1 | `f5e6a8d81cdcdf22e9dbb1c00e7ff977` | 852,480 |
+| `/Brepro` 第 1 次 | 36995361316 a1 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 |
+| `/Brepro` 第 2 次 | 36995361316 a2 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 |
+
+- **同 SHA 两次构建：差异 0 / 852,480 字节。**
+- 敏感性对照：pre-`/Brepro` 那份与 `/Brepro` 那份差 **90,496 字节**，
+  证明比对方法能测出差异，所以上面那个「相同」是真结论而不是检测失灵。
+
+那 90,496 字节是什么（同一份 Rust 源码，只多了 `/Brepro`）：
+
+| 区域 | 大小 | 差异 |
+|---|---|---|
+| `.text` | 605,184 | **8 字节** |
+| `.rdata` | 212,992 | 86,374 字节 |
+| `.pdata` | 30,208 | 4,094 字节 |
+
+逐项查证：`.pdata` 是 2,517 个 `RUNTIME_FUNCTION`（每项 12 字节），
+其中 2,478 项变化，**全部只改 `UnwindInfoAddress`**，`Begin`/`End`
+**零变化**（函数起止地址一字节未动），且 2,478 项位移**全部恰为 `+0xa8`**。
+`.text` 那 8 字节是两条 `lea` 的 rip 相对位移操作数：
+
+```
+48 8d 1d ab 36 02 00    lea rbx,[rip+0x236ab]   (pre)
+48 8d 1d 53 37 02 00    lea rbx,[rip+0x23753]   (/Brepro)
+   操作码 48 8d 1d 完全相同，位移增量 +0xa8 与上面的展开信息平移量一致
+```
+
+即：`/Brepro` 改变的是**链接期生成的展开信息块在 `.rdata` 里的落位**，
+代码语义不变，且该落位现在是确定的。代价是它与 `/Brepro` 之前的产物
+**不再逐字节相同**，所以入库那份必须换成 `07cfbee4...`（提交 `1a0e4e2`）。
+
+### 4) 当前可绑定的四平台指纹
+
+| 平台 | md5 | 字节 |
+|---|---|---|
+| windows-x86_64 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 B |
+| linux-x86_64 | `55b86574a75568e09efeb2803e04084d` | 1,584,016 B |
+| darwin-x86_64 | `3d4a30c3484f098d72309c4572bb8e00` | 1,127,328 B |
+| darwin-aarch64 | `5b2c5a7e525427d9569e041055a2e859` | 1,122,912 B |
+
+**换包即失效**：上面任一产物被替换后，本文件的验收数据都不再适用，
+须重跑。核对用 `tools/sysinformer-accept/` 之外的
+`.tmp/sysinformer-check/verify_delivered.py <run_id>`（逐平台比对
+`HEAD` 的 blob 与该 run 的 artifact）。
+
+---
+
+## 十、结论
 
 - **"能用"口径：通过。** 四平台产物入库、架构与导出均已核验；**四平台全部有运行时验证**
   （Windows 本机、Linux 真实机器、macOS arm64 与 **Intel x86_64** 均 CI 真跑）；
@@ -763,15 +885,17 @@ python tools/sysinformer-accept/battery_verify_device.py --selftest
   本轮因此修掉三个此前无人发现的缺陷：Windows 句柄少报约 80%、首次调用 CPU 报 100%、
   Windows CPU 口径与任务管理器差 +2.96 ~ +5.17pp。三者**编译、类型检查、
   30 项生产验收、冒烟测试全部发现不了**。
-- **四平台生产验收：全部通过**（run 36849005961，结论 `success`）。
+- **四平台生产验收：全部通过**（run 36995361316，sha `2deb08a`，结论 `success`）。
   linux 33/33、windows 33/33、darwin-arm64 31/31、darwin-x86_64 31/31
   （macOS 少 2 项是 `events.*` 硬限制，日志有明确说明）。
-  其中 `darwin-x86_64` 此前连跑 4 次都被 concurrency 取消，
-  本轮修好 macOS 采样次数后才第一次真正执行完。
+  CPU 判据：有效配对 55，均值差 +0.795pp ≤ 4.0pp，`TASKMGR_CPU_WINDOWED_OK`。
+- **交付物与被验收产物一致：已用逐字节比对证明**（见第九节），
+  且 Windows 产物经两次独立构建复现，四个平台现在都能用 md5 绑定。
+  此前「四平台入库产物已验证」对 macOS 与 Windows 都不成立，已修正。
 - **"生产级"口径：三平台（Windows/Linux/macOS）生产验收全绿，
   四平台运行时冒烟全覆盖。**
   仍未落实的未验项：**#2**（Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制）、
-  **#6**（Linux/macOS 电池取值分支需真机，测试环境无电池设备）、
+  **#6**（Windows/macOS 电池取值分支需真机，测试环境无电池设备）、
   **#7**（CPU 判定为统计性，95% CI 含 0 而非逐点相等）；
   #3 为硬限制且已豁免；#4 / #5 属独立立项。
   **在 #2 与 #6 落实或明确豁免之前，不宣告"生产级已全部验收"。**
