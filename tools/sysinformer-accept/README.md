@@ -103,6 +103,36 @@ python battery_verify_device.py --selftest
 > 结果在真 MacBook 上返回 `None`、state 对账被**静默跳过**。
 > 这类"参考源解析错 → 结论假"的问题只有自测能发现。
 
+## 交付物一致性核对（交付前必跑）
+
+```bash
+# run_id 必须是结论为 success 的那一轮
+python verify_delivered.py <run_id>
+python verify_delivered.py <run_id> --repo CHTK001/utils-support-native-parent
+```
+
+以 `DELIVERED_VERIFIED` 收尾；不一致时打印 `DELIVERED_MISMATCH` 并退出码 1。
+
+**它回答的是所有其它脚本都答不了的那一个问题**：
+
+> 上面所有验收证据都是针对 **CI 编出来的二进制**取得的，
+> 而调用方实际拿到的是**仓库里入库的那一份**。这两者相等吗？
+
+对四个平台逐一 `md5(git cat-file blob HEAD:<入库路径>)` 与该 run 的
+artifact 比对，并直读 PE/ELF/Mach-O 头确认架构。
+
+**为什么这道检查不是形式主义**：2026-10-02 审计发现 `main` 上的四份产物
+停在提交 `10063a6`，此后三个提交改了 Rust 源码（电池排序、Windows CPU
+修复）而产物**没有重新入库**。当时「四平台入库产物已验证」这句话对
+macOS 与 Windows 都不成立 —— 因为早期只核过 Linux 的 `.so`，两个 dylib
+一次都没核过。
+
+这类缺陷**编译、单测、冒烟、生产验收全都发现不了**：产物本身是好的，
+只是仓库里存的那份是旧的。只能靠逐字节比对。
+
+拿修复前那轮 run 跑一遍就是敏感性对照：Windows 会被标出不一致
+（`07cfbee4...` vs `f5e6a8d8...`），另三个平台判为一致。
+
 ## 五个维度
 
 | 维度 | 内容 | 要求 |
