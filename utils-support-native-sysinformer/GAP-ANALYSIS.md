@@ -15,7 +15,7 @@
 |---|---|
 | **op 层** | 21 个 op，**20 个三平台均已实现**；唯一缺口是 macOS 的 `events.*`（硬限制）|
 | **已声明但未实现（空壳）** | 原 **3 项**，现剩 **1 项**：签名验证（电池信息、Windows 句柄数值均已修）|
-| **数值准确性** | 与任务管理器同源对照 **15 项全绿**；过程中修掉 2 个此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%）—— 详见 §八 |
+| **数值准确性** | 与任务管理器同源对照 **14 项全绿**；生产验收累计修掉 **5 个**此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%、Windows CPU 口径差 5pp、Linux 电池列表未排序、Windows CPU 读数陈旧化 +18.5pp）—— 详见 §八。这五项**都不崩不报错、返回结构不变**，代码审查与类型检查完全看不出来 |
 | **平台不对称** | Linux 最强；Windows 中等；macOS 受 SIP 限制最弱（已在 README 记录）|
 | **事件类型** | 7 种中 **`NetworkConnect` 三平台都未实现**；Linux 缺 Thread\*/ImageUnload |
 | **System Informer 有、本模块完全没有** | 8 类（反向查找、关闭连接、启动项、IO 优先级、内存读字节、进程创建、服务增删改、Windows 对象类型）|
@@ -63,7 +63,7 @@
 
 | # | 项 | 证据 | 影响 |
 |---|---|---|---|
-| **1** | ~~**电池信息**（`BatteryInfo`）~~ **已实现（2026-10-01）** | 原为 `common.rs` 的 `batteries() { Vec::new() }` 空壳 | 三平台均已实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt`。新增 `battery.list` op，`system.snapshot.batteries` 由空壳转发到平台实现。**「无电池 -> 空列表」分支已在三平台验证**（run 36833755286：linux / darwin-arm64 各 33/33，windows 同批次的 prod_accept 33/33；三平台均为无电池设备：Windows 台式机 `BatteryFlag=128`、Linux 容器无 `/sys/class/power_supply`、macOS `pmset` 无电池行）。**「有电池时的取值正确性」仍需笔记本/真机** |
+| **1** | ~~**电池信息**（`BatteryInfo`）~~ **已实现（2026-10-01）** | 原为 `common.rs` 的 `batteries() { Vec::new() }` 空壳 | 三平台均已实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt`。新增 `battery.list` op，`system.snapshot.batteries` 由空壳转发到平台实现。**「无电池 -> 空列表」分支已在三平台验证**（run 36833755286：linux / darwin-arm64 各 33/33，windows 同批次的 prod_accept 33/33；三平台均为无电池设备：Windows 台式机 `BatteryFlag=128`、Linux 容器无 `/sys/class/power_supply`、macOS `pmset` 无电池行）。**取值分支在 Linux 上也已验证** —— 用 `mount --bind` 覆盖 `/sys/class/power_supply` 伪造可控电池条目（`tools/sysinformer-accept/battery_value_linux.py`，3 用例全绿，已接入 CI 的 Linux 腿）。**Windows / macOS 的真机取值仍需笔记本**，但已备好一条命令：`tools/sysinformer-accept/battery_verify_device.py` 会用操作系统**另一套独立视图**（WMI `Win32_Battery` + `powercfg /batteryreport`；`ioreg -rc AppleSmartBattery`）逐项对账 |
 | **2** | **进程/模块签名验证**（`SignatureInfo`）| `model.rs:481` 声明结构，**全仓无任何构造点**；所有平台的 `signature:` 都是 `None`（`common.rs:458`、`platform_linux.rs:910/1051`、`platform_macos.rs:956`、`platform_windows.rs:274`）| `ProcessDetail.signature` 与 `ModuleInfo.signature` **永远返回 `null`**。调用方无法区分"没有签名"与"未实现签名验证" |
 | **3** | **Windows 句柄的对象名与类型** | `platform_windows.rs` 的 `handles_of` 只填句柄值、访问掩码与 `ObjectTypeIndex`；`name`/`ref_count` 仍为 `None` | 能拿到句柄**编号**与**类型下标**（`type#N`），但看不出它指向哪个具体文件/注册表键。这是 System Informer"反向查找"功能（下方 §五.1）的前置 |
 
@@ -234,16 +234,23 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 
 **反向对照证明修复有效**：同一判据下旧口径稳定失败、新口径两轮通过。
 
-### 本轮修掉的三个真实数据缺陷（此前完全无人发现）
+### 生产验收找出的五个真实数据缺陷（此前完全无人发现）
 
-这两项**编译、类型检查、30 项生产验收、冒烟测试全部发现不了**，
-只有拿独立数据源逐项对照才暴露：
+这五项**编译、类型检查、生产验收的其余项、冒烟测试全部发现不了**，
+只有拿独立数据源逐项对照、或让对照方与被测方分处不同实现时才暴露：
 
 | # | 缺陷 | 影响 | 根因 |
 |---|---|---|---|
 | 1 | **Windows `process.handles` 系统性少报约 80%** | `OpenChamber.exe` 报 103 / 真实 514；`System` 报 1630 / 真实 7390；**47 个进程"有句柄却返回空"** | 用了已废弃的 `SystemHandleInformation`(类号 16)。Win10 2004+ 该类返回的记录**不再是** `SYSTEM_HANDLE_TABLE_ENTRY_INFO` —— 实测返回长度与记录数唯一吻合的 stride 是 **24 字节**（`8 + 150037×24 == 3600896`，精确匹配），而代码按 20 字节解析 → 偏移逐条错位 → pid 读错。已改用 `SystemExtendedHandleInformation`(类号 64，stride 40，pid 为 8 字节) |
 | 2 | **首次调用 CPU 报 100%** | 进程内第一次调 `system.snapshot`，**12 核全部 `100.0%`**。任何新接入方第一次读到的都是错的 | `System::new()` 的上次累计时间为 0，首次 `refresh_cpu_all()` 把"开机至今"整段算成满载。已加 `refresh_cpu()` 预热：首次连刷两次、间隔 120ms。修复后首调为 `39.81%`（正常值）|
 | 3 | **Windows CPU 口径与任务管理器不同** | 系统性偏高 +2.96 ~ +5.17pp（取决于判据） | `sysinfo` 只读 `% Idle Time` 并取 `100 - idle`，任务管理器用 `% Processor Time`，分母不同。详见上一节 |
+| 4 | **Linux `battery.list` 未排序** | 多电池时返回顺序随文件系统而变，调用方不能依赖下标；采集端做前后快照比对会误报「电池变了」 | `std::fs::read_dir` 的顺序由文件系统决定（ext4 哈希序、tmpfs 插入序），Rust 明确不保证。实测两台机器给出**不同**顺序（Kali `USB AC BAT1 BAT0`、CI `BAT1 USB AC BAT0`），即 BAT1 排在 BAT0 前 |
+| 5 | **Windows CPU 读数陈旧化** | CI 4 核 runner 上 `cpu.usage` **稳定在 ~20.2%**（sd 1.65pp）而真实值约 2%，与任务管理器差 **+18.5pp**；且读数稳定得不像在测量 | 采集间隔短于系统定时器节拍时 PDH 返回 `PDH_CALC_NEGATIVE_DENOMINATOR`(0x800007D6) 且**不更新** `doubleValue`，而代码只检查 API 返回码、**不检查 `val.CStatus`**，把陈旧值当读数。runner 上该状态码占 **27.7%**。已修：检查 `CStatus` + 100ms 最小采集间隔，+18.5pp → **+1.05pp** |
+
+第 4、5 项有一个共同特征值得单独记：**两者都不崩、不报错、不改变任何返回结构**，
+只是让一个数字变成假的 —— #4 是「顺序不稳定」，#5 是「数值冻结」。
+这类缺陷只能靠**独立数据源对照**发现；代码审查与类型检查完全看不出来，
+而任何「断言返回值合法」的冒烟测试都会通过。
 
 修复 1 后实测：失败进程 49/316 → **4/317**，且这 4 个的真实句柄数确为 0
 （`Registry` / `Secure System` / `Idle(pid=0)`，属正确行为）；
