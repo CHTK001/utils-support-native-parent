@@ -213,11 +213,13 @@ CI 每个平台都**重新构建**产物（`build.sh`），所以验的是含本
 会让后续 push 把它取消掉 —— 连跑 4 次全是 `cancelled`，
 等于**这个平台的生产验收从来没真正执行过**。
 
-根因是 macOS 上 `process.list` / `process.detail` 单次约 **2 秒**
+根因是 macOS 上 `process.list` / `process.detail` 单次很慢
 （`sysinfo` 逐进程 `proc_pidinfo` 的固有成本，非本模块缺陷；
 静态核查确认这两条路径上没有任何外部命令调用）。
-验收脚本原本用与其他平台相同的采样次数，泄漏检查一项就是
-200 轮 × 约 4 秒 ≈ 13 分钟。
+**实测（run 36995361316）arm64 约 1.8~2.2 秒、x86_64 约 5.4~5.5 秒**，
+而验收脚本原本用与其他平台相同的采样次数 —— 泄漏检查一项在
+x86_64 上就是 200 轮 × 约 5.5 秒 ≈ **18 分钟**，加上并发与性能段
+整步远超 `concurrency: cancel-in-progress` 能容忍的窗口。
 
 已按平台缩放（macOS 并发 6 / 性能 10 / 泄漏 60 / 事件 10，
 断言条件与容差一行未改）。效果：aarch64 该步 251s，
@@ -230,26 +232,40 @@ x86_64 因 runner 本身较慢仍需约 14 分钟，但**能跑完了**
 （Windows 走 `NtQuerySystemInformation` 一次全量、Linux 读 `/proc`、
 macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 
-| op | Windows | Linux | macOS |
-|---|---|---|---|
-| `system.snapshot` | 4.00 ms | 1.76 ms | 31.5 ms |
-| `process.list` | **6.46 ms** | 16.53 ms | **1936 ms** |
-| `process.detail` | **0.81 ms** | 1.44 ms | **2010 ms** |
-| `process.tree` | 4.24 ms | 3.72 ms | 1732 ms |
-| `kernel.modules` | 0.65 ms | 0.26 ms | 180 ms |
-| `socket.list` | 0.20 ms | 12.02 ms | 16.5 ms |
+| op | Windows | Linux | macOS arm64 | macOS x86_64 |
+|---|---|---|---|---|
+| `system.snapshot` | 4.00 ms | 1.76 ms | 42.44 ms | 65.11 ms |
+| `process.list` | **6.46 ms** | 16.53 ms | **1848.95 ms** | **5434.81 ms** |
+| `process.detail` | **0.81 ms** | 1.44 ms | **2172.32 ms** | **5548.85 ms** |
+| `process.tree` | 4.24 ms | 3.72 ms | 1986.15 ms | 4861.41 ms |
+| `process.threads` | 6.42 ms | 0.29 ms | 0.01 ms | 0.03 ms |
+| `process.handles` | 7.21 ms | 5.09 ms | 0.01 ms | 0.05 ms |
+| `process.mappings` | 1.59 ms | 1.24 ms | 0.40 ms | 1.11 ms |
+| `process.modules` | 0.48 ms | 0.19 ms | 0.66 ms | 1.65 ms |
+| `process.env` | 0.20 ms | 0.11 ms | 0.11 ms | 0.29 ms |
+| `process.credential` | 1.04 ms | 0.07 ms | 8.28 ms | 20.42 ms |
+| `kernel.modules` | 0.65 ms | 0.26 ms | 246.94 ms | 361.98 ms |
+| `socket.list` | 0.20 ms | 12.02 ms | 17.40 ms | 34.84 ms |
 
-（Windows 与 Linux 取 run 36995361316 同一轮实测，可横向比；
-macOS 取 run 36833755286 的 aarch64 腿 —— macOS 腿在 10-02 那两轮未改动
-op 集合与采样次数，故沿用。）
+四个平台**全部取自 run 36995361316 同一轮**，p50，同口径。
+`process.list` 覆盖进程数：Windows 136、Linux 163、macOS arm64 485、
+macOS x86_64 494 —— 绝对耗时随进程数走，比较时必须看这个量。
+
+> ⚠️ **此前这张表只写了一个 macOS 数（约 2 秒），那是 arm64 的值。**
+> 实测 Intel macOS 上 `process.list` 是 **5434.81 ms**、`process.detail`
+> 是 **5548.85 ms**，比 arm64 慢约 **2.9 倍**。原来那句「单次约 2 秒」
+> 对 Intel 用户是**低报了一倍有余**，据此定采样周期会直接翻车。
 
 **对调用方的实际含义**：
 
-- **Windows / Linux**：`process.list` 可按 1s 周期采样，开销可忽略。
-- **macOS**：`process.list` / `process.detail` 单次约 **2 秒**，
-  512 进程 × 每进程约 3.8ms。若按 1s 周期采样会把 CPU 跑满。
-  macOS 上应改用 `system.snapshot`（31ms）做高频指标，
-  `process.list` 放到秒级或更慢的周期，或只在需要时取。
+- **Windows / Linux**：`process.list` 可按 1s 周期采样，开销可忽略
+  （Windows 6.46ms、Linux 16.53ms）。
+- **macOS arm64**：`process.list` / `process.detail` 单次约 **1.8~2.2 秒**。
+- **macOS x86_64**：单次约 **5.4~5.5 秒**。
+  按 1s 周期采样不只是「把 CPU 跑满」，而是**根本追不上** —— 每次调用
+  自己就耗时 5 秒以上，永远处于上一轮还没结束的状态。
+  macOS 上应改用 `system.snapshot`（arm64 42ms / x86_64 65ms）做高频指标，
+  `process.list` / `detail` 只在需要时取，或放到 10s 量级的周期。
 
 这一点也解释了 CI 上 macOS 腿为什么慢到跑不完：验收脚本原本用与其他
 平台相同的采样次数（泄漏 200 轮 × 约 4 秒 = 13 分钟），整步要 22~25 分钟，
@@ -870,9 +886,15 @@ re-run 触发同一 SHA（`2deb08a`）的第二次构建：
 | darwin-aarch64 | `5b2c5a7e525427d9569e041055a2e859` | 1,122,912 B |
 
 **换包即失效**：上面任一产物被替换后，本文件的验收数据都不再适用，
-须重跑。核对用 `tools/sysinformer-accept/` 之外的
-`.tmp/sysinformer-check/verify_delivered.py <run_id>`（逐平台比对
-`HEAD` 的 blob 与该 run 的 artifact）。
+须重跑。核对用：
+
+```bash
+python tools/sysinformer-accept/verify_delivered.py <run_id>
+#   -> DELIVERED_VERIFIED        （四平台逐字节与该 run 的 artifact 一致）
+#   -> DELIVERED_MISMATCH        （退出码 1，至少一个平台不一致）
+```
+
+`run_id` 必须是结论为 `success` 的那一轮；脚本会拒绝用失败的 run 比对。
 
 ---
 
