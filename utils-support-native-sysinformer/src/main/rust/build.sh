@@ -53,6 +53,15 @@ esac
 
 rustup target add "$TARGET" 2>/dev/null || true
 
+# 把实际使用的工具链版本打进日志。
+#
+# 为什么放在这里而不是 workflow 里单独一步：build.sh 是四平台**共用**的
+# 构建入口，本地跑也走它。放在这里意味着**每一次**构建的日志都自带版本，
+# 事后判断「产物为什么变了」时有据可查 —— 2026-10-03 那次漂移就是因为
+# 日志里没有版本记录，只能靠事后加打印再去猜。
+echo "rustc: $(rustc --version 2>&1)"
+echo "cargo: $(cargo --version 2>&1)"
+
 # Windows 的 PE 里带两处随链接时刻变化的字段：COFF TimeDateStamp 与
 # CodeView(RSDS) 调试 GUID。缺了下面这个开关，同一份源码**每次编出的 dll
 # 字节都不同**。
@@ -69,7 +78,12 @@ if [[ "$TARGET" == *"-pc-windows-msvc" ]]; then
     export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=/Brepro"
 fi
 
-cargo build --release --target "$TARGET"
+# --locked 是必需的，缺了它「入库 Cargo.lock」这件事等于白做：
+# 不加这个开关，cargo 仍然会按 `Cargo.toml` 的开放版本范围**静默更新**
+# 锁文件（`serde = "1.0"`、`libc = "0.2"` 这类范围随时可能解析到新版本），
+# 于是同一份源码在不同时间构建出的产物不同，而且没有任何提示。
+# 加了它，一旦锁文件与 Cargo.toml 不一致就直接失败 —— 那是应该被看见的。
+cargo build --locked --release --target "$TARGET"
 
 # 产物名：windows 无 lib 前缀，unix 有
 if [ "$OS_TYPE" = "windows" ]; then
