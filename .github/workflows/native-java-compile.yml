@@ -206,8 +206,11 @@ jobs:
           CHUA=$(grep -c 'com\.chua' /tmp/err-real.txt || true)
           echo "  剔除样板行后：实质错误 $ERR / 其中依赖解析类 $DEPR / 提及 com.chua $CHUA"
           if [ "$ERR" -gt 0 ] && [ "$ERR" -eq "$DEPR" ] && [ "$CHUA" -gt 0 ]; then
-            echo "::warning title=Java 侧无法验证（环境阻塞）::编译失败的**全部**错误都是 com.chua 构件无法从远端解析。实测：com\\chua 下 420 个坐标中 386 个 jar 的 _remote.repositories 仓库 id 为空，即由本机 mvn install 装入 D:\\maven-repo，从未发布到任何远端；且 utils-support-common-starter:4.0.0.42 本地 jar sha1=8d2d6db0… 与远端 GitHub Packages 的 05fa2221… **不是同一份字节**。因此本机验证与 CI 解析到的不是同一个东西。代码本身未被验证。"
+            echo "::warning title=Java 侧无法验证（环境阻塞）::编译失败的**全部**错误都是 com.chua 构件无法从远端解析。"
             echo "MVN_COMPILE_BLOCKED_BY_MISSING_ARTIFACTS"
+            # 同上：阻塞时必须打出实际报错，而不是只给计数
+            echo "---- /tmp/err-real.txt 全文 ----"
+            cat /tmp/err-real.txt
             exit 0
           fi
 
@@ -240,10 +243,30 @@ jobs:
           GAV=utils-support-common-starter-4.0.0.42
           for f in "$GAV.jar" "$GAV.pom"; do
             [ -f "$FX/$f" ] || { echo "缺少夹具 $FX/$f"; exit 1; }
-            echo "  $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
+            echo "  夹具 $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
           done
+          # 先把本地仓库里该坐标**已有的任何东西**清掉。
+          #
+          # 为什么必须清：全反应堆编译那一步现在能连上 github-resource 了，
+          # 它会**下载远端那份** jar（1,843,758 字节，且缺 NativeLoader）。
+          # 若不清，后续 install-file 虽然会覆盖 jar，但 `.lastUpdated` /
+          # `resolver-status.properties` 这些**负解析缓存**会留在原地，
+          # 行为就取决于那一步跑没跑过 —— 这正是本地能过、CI 不过的
+          # 唯一已知差异。宁可显式清掉，不依赖覆盖顺序。
+          REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42"
+          if [ -d "$REP" ]; then
+            echo "  安装前该坐标已有内容：$(ls "$REP" | tr '\n' ' ')"
+            echo "  jar 大小=$(wc -c < "$REP/$GAV.jar" 2>/dev/null || echo '无')"
+            rm -rf "$REP"
+            echo "  已清空 $REP"
+          fi
           mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
             "-Dfile=$FX/$GAV.jar" "-DpomFile=$FX/$GAV.pom"
+          # 装完立刻核对：必须是夹具那份（4,558,874 字节），不是远端那份
+          GOT=$(wc -c < "$REP/$GAV.jar")
+          echo "  安装后 jar 大小 = $GOT"
+          [ "$GOT" = "4558874" ] || {
+            echo "::error title=装入的夹具不是预期那份::实际 $GOT 字节，期望 4558874"; exit 1; }
           echo "FIXTURE_INSTALLED"
 
       - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
@@ -288,8 +311,19 @@ jobs:
             c=$(grep -c 'com\.chua' /tmp/ffmerr.txt || true)
             echo "  FfmSmoke 前置编译：实质错误 $n / 依赖解析类 $d / com.chua $c"
             if [ "$n" -gt 0 ] && [ "$n" -eq "$d" ] && [ "$c" -gt 0 ]; then
-              echo "::warning title=FfmSmoke 未能执行（同一个环境阻塞）::依赖的 com.chua 构件远端不存在，与全反应堆编译是同一个原因。"
+              echo "::warning title=FfmSmoke 未能执行（依赖解析失败）::依赖的 com.chua 构件远端不存在。"
               echo "FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS"
+              # **必须把实际报错打出来**。
+              #
+              # 2026-10-03 踩过：这一步阻塞时只打了分类计数、没打错误本身，
+              # 于是「本地空仓库能过、CI 过不了」只能靠猜 —— 先猜仓库声明
+              # （对了）、再猜负解析缓存（猜错了，顺序实验证明无关），
+              # 白花两轮。一个只说「失败了」而不说「为什么」的步骤，
+              # 等于把排查成本转嫁给下一个读日志的人。
+              echo "---- /tmp/ffmerr.txt 全文 ----"
+              cat /tmp/ffmerr.txt
+              echo "---- 该坐标在本地仓库的现状 ----"
+              ls -l "${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42" 2>&1 || true
               exit 0
             fi
             echo "::error title=FfmSmoke 前置编译失败（非依赖解析问题）::"
