@@ -313,17 +313,27 @@ jobs:
             if [ "$n" -gt 0 ] && [ "$n" -eq "$d" ] && [ "$c" -gt 0 ]; then
               echo "::warning title=FfmSmoke 未能执行（依赖解析失败）::依赖的 com.chua 构件远端不存在。"
               echo "FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS"
-              # **必须把实际报错打出来**。
+              # **必须把完整 mvn 输出打出来**，不只是过滤后的 [ERROR]。
               #
-              # 2026-10-03 踩过：这一步阻塞时只打了分类计数、没打错误本身，
-              # 于是「本地空仓库能过、CI 过不了」只能靠猜 —— 先猜仓库声明
-              # （对了）、再猜负解析缓存（猜错了，顺序实验证明无关），
-              # 白花两轮。一个只说「失败了」而不说「为什么」的步骤，
-              # 等于把排查成本转嫁给下一个读日志的人。
-              echo "---- /tmp/ffmerr.txt 全文 ----"
+              # 2026-10-03 踩过两次：
+              #  1) 最初只打分类计数 -> 「本地能过、CI 不过」无从下手，
+              #     先后猜了「仓库声明」「负解析缓存」「403 中止解析」三个假设，
+              #     一对一错（第三次被同类对照实验证伪）。
+              #  2) 改成只打过滤后的 [ERROR] 行 -> 只有 3 行，看不到
+              #     Maven 究竟访问了哪些仓库、跳过哪些、以及为什么。
+              # 而「构件明明在本地仓库里却被判 absent」这类线索，
+              # 恰恰只出现在**未过滤**的传输层日志里。
+              echo "---- /tmp/ffmerr.txt（过滤后的实质错误）----"
               cat /tmp/ffmerr.txt
+              echo "---- /tmp/ffmmvn.log 里与传输/仓库有关的原始行 ----"
+              grep -nE 'Downloading|Downloaded|from/to|Repositories|repository|Transfer|Could not|absent|Resolving' \
+                /tmp/ffmmvn.log | head -80 || true
+              echo "---- /tmp/ffmmvn.log 末尾 40 行 ----"
+              tail -40 /tmp/ffmmvn.log
               echo "---- 该坐标在本地仓库的现状 ----"
               ls -l "${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42" 2>&1 || true
+              echo "---- 该坐标的 _remote.repositories 内容 ----"
+              cat "${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42/_remote.repositories" 2>&1 || true
               exit 0
             fi
             echo "::error title=FfmSmoke 前置编译失败（非依赖解析问题）::"
