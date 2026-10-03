@@ -9,6 +9,16 @@ target/
 
 # Rust
 **/Cargo.lock
+# 例外：sysinformer 的 Cargo.lock **必须入库**。
+# 该模块交付的是编好的动态库（cdylib），不是库源码。`Cargo.toml` 里
+# sysinfo/serde/once_cell/libc/windows/wmi 全是开放版本范围，锁文件不入库
+# 就意味着 CI 每次构建都重新解析 —— 实测 2026-10-03，同一份源码在源码与
+# build.sh 均未改动的情况下，四平台产物全部与上一次不同：
+#   .text 差异 22,939 字节（Windows）、__TEXT 差异 41,396 字节（macOS x86_64）
+#   linux .so 1,584,016 -> 1,584,048；macOS arm64 1,122,912 -> 1,122,928
+# 即体积与 codegen 都变了 —— 依赖解析漂移，不是链接期元数据。
+# 详见 ACCEPTANCE.md 第十一节。
+!utils-support-native-sysinformer/src/main/rust/Cargo.lock
 **/*.log
 **/target/
 
