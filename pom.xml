@@ -48,6 +48,29 @@
             <releases><enabled>true</enabled></releases>
             <snapshots><enabled>true</enabled></snapshots>
         </repository>
+        <!--
+          GitHub Packages：`utils-support-common-starter` 等 com.chua 构件的**真实来源**。
+
+          为什么必须显式声明在这里：本 pom 原来只声明了上面两个 aliyun 仓库，
+          于是解析 `com.chua:*` 时 Maven **只去 aliyun**，而 aliyun 对
+          `utils-support-common-starter:4.0.0.42` 返回 **404**（带凭据也是 404，
+          不是 401 —— 说明凭据被接受、路径不存在）。
+
+          那个构件声明在 `utils-support-parent-starter-4.0.0.42.pom` 里，
+          但 repository 声明**不会**经由「依赖的依赖」传递到本项目，
+          所以本项目自己必须声明一次。
+
+          **只配 server 凭据而不声明 repository 是无效的** —— server 只提供
+          认证信息，不告诉 Maven 去哪里找。2026-10-03 在 CI 上正是踩了这个：
+          secrets 配齐了、凭据也正确，但构建仍报「找不到构件」。
+        -->
+        <repository>
+            <id>github-resource</id>
+            <name>GitHub Packages (utils-support-resource-parent)</name>
+            <url>https://maven.pkg.github.com/CHTK001/utils-support-resource-parent</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
     </repositories>
 
     <distributionManagement>
