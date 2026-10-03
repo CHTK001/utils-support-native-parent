@@ -165,15 +165,35 @@ jobs:
           #  (B) 其他失败（编译错误、测试失败、插件缺失等）
           #      这是**代码问题**，必须让 job 变红，否则这个门禁形同虚设。
           #
-          # 判据：所有 [ERROR] 行都必须落在依赖解析的几种模式里，
-          #      且至少有一条提到 com.chua。不满足就是 (B)。
-          ERR=$(grep -c '^\[ERROR\]' /tmp/mvn.log || true)
-          DEPR=$(grep '^\[ERROR\]' /tmp/mvn.log | grep -cE \
-            'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable' \
-            || true)
-          CHUA=$(grep '^\[ERROR\]' /tmp/mvn.log | grep -c 'com\.chua' || true)
-          echo "  错误行 $ERR / 其中依赖解析类 $DEPR / 提及 com.chua $CHUA"
-
+          # **必须先剔除 Maven 的样板行**再判断。首版把 ERR（全部 [ERROR] 行）
+          # 直接和「依赖解析类行数」比大小，结果这些样板行让两者永远不相等：
+          #   [ERROR] -> [Help 1]
+          #   [ERROR] [Help 1] http://cwiki.apache.org/...DependencyResolutionException
+          #   [ERROR] To see the full stack trace of the errors, re-run Maven with -e
+          #   [ERROR] Re-run Maven using the -X switch to enable full debug logging.
+          #   [ERROR] For more information about the errors ...
+          #   [ERROR]   mvn <args> -rf :utils-support-native-ffmpeg
+          #   [ERROR] （空行）
+          # 于是「全是依赖问题」也判成了 FAIL —— 分类规则本身的缺陷，
+          # 表现却像环境问题，很容易误判方向。
+          #
+          # 样板行清单是拿 run 37096882431 的**真实**日志反推出来的，
+          # 不是凭想象列的 —— 第二版就是因为漏了 `[Help 1]`（无 `->` 前缀）
+          # 与 `mvn <args> -rf` 而再次误判。用合成日志测不出这类缺口，
+          # 因为合成日志里根本没有这些行。
+          grep '^\[ERROR\]' /tmp/mvn.log \
+            | grep -vE '^\[ERROR\][[:space:]]*$' \
+            | grep -vE '\[Help [0-9]+\]' \
+            | grep -vE 'To see the full stack trace' \
+            | grep -vE 'Re-run Maven using' \
+            | grep -vE 'For more information about the errors' \
+            | grep -vE 'After correcting the problems' \
+            | grep -vE 'mvn <args> -rf' \
+            > /tmp/err-real.txt || true
+          ERR=$(wc -l < /tmp/err-real.txt | tr -d ' ')
+          DEPR=$(grep -cE 'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable|Could not collect dependencies|DependencyResolutionException' /tmp/err-real.txt || true)
+          CHUA=$(grep -c 'com\.chua' /tmp/err-real.txt || true)
+          echo "  剔除样板行后：实质错误 $ERR / 其中依赖解析类 $DEPR / 提及 com.chua $CHUA"
           if [ "$ERR" -gt 0 ] && [ "$ERR" -eq "$DEPR" ] && [ "$CHUA" -gt 0 ]; then
             echo "::warning title=Java 侧无法验证（环境阻塞）::编译失败的**全部**错误都是 com.chua 构件无法从远端解析。实测：com\\chua 下 420 个坐标中 386 个 jar 的 _remote.repositories 仓库 id 为空，即由本机 mvn install 装入 D:\\maven-repo，从未发布到任何远端；且 utils-support-common-starter:4.0.0.42 本地 jar sha1=8d2d6db0… 与远端 GitHub Packages 的 05fa2221… **不是同一份字节**。因此本机验证与 CI 解析到的不是同一个东西。代码本身未被验证。"
             echo "MVN_COMPILE_BLOCKED_BY_MISSING_ARTIFACTS"
