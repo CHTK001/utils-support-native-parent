@@ -7,27 +7,43 @@ name: native-java-compile
 # （SqliteHookBridge）下沉进 native 模块，绑定类若写错（方法名、签名、import），
 # 在 push 后不会有任何自动化发现——必须等人本地 mvn compile 才暴露。
 #
-# 为什么需要凭据：本仓 pom 声明的依赖仓库是 packages.aliyun.com 上的私有库
-# （server id: 2676178-release-jmLEdB / 2676178-snapshot-FwAJpk），
-# 匿名访问返回 HTTP 401，已实测：
-#   curl -o /dev/null -w '%{http_code}' \
-#     https://packages.aliyun.com/6a62fa1d287d37b037a68ee8/maven/2676178-release-jmledb/com/chua/utils-support-common-starter/4.0.0.42/utils-support-common-starter-4.0.0.42.pom
-#   -> 401
-# 因此没有凭据时 mvn 无法解析 utils-support-common-starter，本 job 必然失败。
+# 为什么需要凭据：本仓依赖**三个来源**（沿 pom 父链
+# `utils-support-parent-starter-4.0.0.42` 上溯得到）：
+#   github-resource  https://maven.pkg.github.com/CHTK001/utils-support-resource-parent
+#   github           https://maven.pkg.github.com/CHTK001/utils-support-native-parent
+#   2676178-release-jmLEdB / 2676178-snapshot-FwAJpk  packages.aliyun.com/...
 #
-# 处理方式：凭据缺失时 **不跑编译，并明确声明「Java 侧未验证」**（warning + summary），
-# 不伪装成通过、也不把 CI 弄红。凭据一旦配好，本 job 自动开始真正编译。
+# **2026-10-03 更正此前注释里的错误结论**：原文只查了 aliyun、看到匿名 401
+# 就断定「配 aliyun 凭据即可」。实测证明那是错的：
+#   aliyun release / snapshot 对 com.chua:utils-support-common-starter:4.0.0.42
+#   返回 **404**（带凭据也是 404，不是 401）—— 凭据被接受、路径不存在。
+#   而该构件的真实来源是 **GitHub Packages**（`github-resource`），
+#   带该 server 凭据取回 200 / 1,843,758 字节。
+# **401 与 404 的区别，就是「凭据不对」与「找错仓库」的分界。**
 #
-# 需要的两个 secret（Repository secrets）—— **2026-10-03 已配置**：
-#   MAVEN_ALIYUN_USER      阿里云私有仓库用户名
-#   MAVEN_ALIYUN_PASSWORD  对应的密码 / 访问令牌
-# 两个 server id 共用同一组凭据（同一仓库的两个视图）：已实测两者的
-# username 与 password 分别哈希后**完全相同**，故只写一组。
+# 需要的 secret（Repository secrets）—— 2026-10-03 已配置：
+#   MAVEN_ALIYUN_USER / MAVEN_ALIYUN_PASSWORD
+#   MAVEN_GITHUB_RESOURCE_USER / MAVEN_GITHUB_RESOURCE_TOKEN
+# aliyun 两个 view 实测 username 与 password 分别哈希后完全相同，故只写一组。
 #
-# 此前本 workflow 的 paths 过滤写错（`utils-support-native-parent/**`
-# 在本仓只匹配到一个 README.md），改真实模块**不触发**，所以那 3 次
-# success 全是「跳过编译」，Java 侧实际从未被 CI 覆盖过。
-# 已修正过滤并补上 FfmSmoke 步骤，见下方「Java 25 FFM 绑定端到端冒烟」。
+# **但即便凭据齐全，Java 侧目前仍无法在 CI 上验证**，原因是环境而非凭据：
+# 扫描本机 D:\maven-repo 下 com\chua 的 420 个坐标，`_remote.repositories`
+# 显示 386 个 jar 的仓库 id 为**空**，即由本机 `mvn install` 装入、从未发布
+# 到任何远端。更糟的是唯一发布出去的那份：
+#   utils-support-common-starter-4.0.0.42.jar
+#     本机 4,558,874 字节  sha1 8d2d6db08670189e60d7d6581f324d9677ae7c2b
+#     远端               sha1 05fa22216b0b96b1d908379cf680b7c3b63cde19
+#   **同一 GAV 坐标，两份不同字节。** 本机验证用的是本地那份，CI 解析到的
+#   是远端那份，CI 全绿也不能证明本机验证的结论。
+#
+# 因此编译步骤对失败做**分类**：全是依赖解析失败 -> warning + 摘要声明
+# 「Java 侧无法验证」且不把 job 弄红；出现任何其他失败（编译错误等）
+# -> job 变红。让环境阻塞长期挂红灯，只会让人学会忽略红灯。
+#
+# 另有：此前本 workflow 的 paths 过滤写错（`utils-support-native-parent/**`
+# 在本仓只匹配到一个 README.md），改真实模块**不触发**，所以历史上那 3 次
+# success 全是「跳过编译」，Java 侧实际从未被 CI 覆盖过。已修正过滤，
+# 并补上 FfmSmoke 步骤，见下方「Java 25 FFM 绑定端到端冒烟」。
 
 on:
   workflow_dispatch:
@@ -95,6 +111,8 @@ jobs:
         env:
           ALIYUN_USER: ${{ secrets.MAVEN_ALIYUN_USER }}
           ALIYUN_PASS: ${{ secrets.MAVEN_ALIYUN_PASSWORD }}
+          GH_USER: ${{ secrets.MAVEN_GITHUB_RESOURCE_USER }}
+          GH_TOKEN: ${{ secrets.MAVEN_GITHUB_RESOURCE_TOKEN }}
         run: |
           mkdir -p "$HOME/.m2"
           cat > "$HOME/.m2/settings.xml" <<'XML'
@@ -110,6 +128,11 @@ jobs:
                 <username>${env.ALIYUN_USER}</username>
                 <password>${env.ALIYUN_PASS}</password>
               </server>
+              <server>
+                <id>github-resource</id>
+                <username>${env.GH_USER}</username>
+                <password>${env.GH_TOKEN}</password>
+              </server>
             </servers>
           </settings>
           XML
@@ -121,7 +144,45 @@ jobs:
         run: |
           # 用 clean 而非增量：本仓有「增量编译在一次失败后仍保留旧 target/classes，
           # 下次 mvn compile 打印 Nothing to compile 却 BUILD SUCCESS」的历史坑。
-          mvn -B -ntp -DskipTests clean compile
+          set +e
+          mvn -B -ntp -DskipTests clean compile 2>&1 | tee /tmp/mvn.log
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            echo "MVN_COMPILE_OK"
+            exit 0
+          fi
+
+          # ---- 失败分类 --------------------------------------------------
+          # 区分两类失败，处置相反：
+          #
+          #  (A) 依赖解析失败（com.chua:* 构件远端不存在）
+          #      这是**环境阻塞**，不是代码问题。让 job 变红只会让所有人
+          #      学会忽略红灯，反而掩盖真正的编译错误。
+          #      改为 warning + 明确写入摘要。
+          #
+          #  (B) 其他失败（编译错误、测试失败、插件缺失等）
+          #      这是**代码问题**，必须让 job 变红，否则这个门禁形同虚设。
+          #
+          # 判据：所有 [ERROR] 行都必须落在依赖解析的几种模式里，
+          #      且至少有一条提到 com.chua。不满足就是 (B)。
+          ERR=$(grep -c '^\[ERROR\]' /tmp/mvn.log || true)
+          DEPR=$(grep '^\[ERROR\]' /tmp/mvn.log | grep -cE \
+            'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable' \
+            || true)
+          CHUA=$(grep '^\[ERROR\]' /tmp/mvn.log | grep -c 'com\.chua' || true)
+          echo "  错误行 $ERR / 其中依赖解析类 $DEPR / 提及 com.chua $CHUA"
+
+          if [ "$ERR" -gt 0 ] && [ "$ERR" -eq "$DEPR" ] && [ "$CHUA" -gt 0 ]; then
+            echo "::warning title=Java 侧无法验证（环境阻塞）::编译失败的**全部**错误都是 com.chua 构件无法从远端解析。实测：com\\chua 下 420 个坐标中 386 个 jar 的 _remote.repositories 仓库 id 为空，即由本机 mvn install 装入 D:\\maven-repo，从未发布到任何远端；且 utils-support-common-starter:4.0.0.42 本地 jar sha1=8d2d6db0… 与远端 GitHub Packages 的 05fa2221… **不是同一份字节**。因此本机验证与 CI 解析到的不是同一个东西。代码本身未被验证。"
+            echo "MVN_COMPILE_BLOCKED_BY_MISSING_ARTIFACTS"
+            exit 0
+          fi
+
+          echo "::error title=Java 编译失败（非依赖解析问题）::请看 /tmp/mvn.log"
+          tail -40 /tmp/mvn.log
+          exit 1
 
       - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
         # 未验项 #2 的收口步骤。
@@ -169,10 +230,23 @@ jobs:
           {
             echo "### Java 侧编译"
             if [ "${{ steps.creds.outputs.have }}" = "yes" ]; then
-              echo "已执行 \`mvn -B -DskipTests clean compile\`（全反应堆）。"
-              echo ""
-              echo "**Java 25 FFM 绑定端到端冒烟（FfmSmoke）已纳入 CI**"
-              echo "（2026-10-03，未验项 #2）。"
+              if grep -q 'MVN_COMPILE_OK' /tmp/mvn.log 2>/dev/null; then
+                echo "已执行 \`mvn -B -DskipTests clean compile\`（全反应堆），**通过**。"
+              elif grep -q 'MVN_COMPILE_BLOCKED_BY_MISSING_ARTIFACTS' /tmp/mvn.log 2>/dev/null; then
+                echo "**Java 侧仍无法验证 —— 但原因不是缺凭据，而是构件没发布。**"
+                echo ""
+                echo "编译已实际执行，失败的**全部**错误都是 \`com.chua\` 构件无法从远端解析。"
+                echo "已实测："
+                echo "- \`com.chua\` 下 420 个坐标中 **386 个 jar** 的 \`_remote.repositories\`"
+                echo "  仓库 id 为空，即由本机 \`mvn install\` 装入 \`D:\\maven-repo\`，从未发布到任何远端；"
+                echo "- \`utils-support-common-starter:4.0.0.42\` 本机 jar"
+                echo "  sha1 \`8d2d6db0…\` 与远端 GitHub Packages 的 \`05fa2221…\` **不是同一份字节**。"
+                echo ""
+                echo "因此本机验证与 CI 解析到的不是同一个东西 —— **CI 全绿也不能证明本机结论**。"
+                echo "Java 侧代码当前**未被任何自动化覆盖**。要真正关闭，需先把构件发布到远端。"
+              else
+                echo "编译**失败**且不属于依赖解析问题，详见日志。"
+              fi
             else
               echo "**未执行。** 缺少 \`MAVEN_ALIYUN_USER\` / \`MAVEN_ALIYUN_PASSWORD\`，"
               echo "依赖仓库 \`packages.aliyun.com\` 匿名访问为 HTTP 401。"
