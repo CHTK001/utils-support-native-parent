@@ -217,12 +217,44 @@ jobs:
         # 所以无需手工指定库路径。
         if: steps.creds.outputs.have == 'yes'
         run: |
-          set -euo pipefail
+          set -uo pipefail
           MOD=utils-support-native-sysinformer
           LIB=$MOD/src/main/resources/native/linux-x86_64/libsysinformer.so
           [ -f "$LIB" ] || { echo "找不到入库产物 $LIB"; exit 1; }
 
-          mvn -B -ntp -q -f "$MOD/pom.xml" -DskipTests compile
+          # 模块编译。与全反应堆那一步一样要做**失败分类**：
+          # 本步骤依赖的 com.chua 构件有 386 个只存在于本机 D:\maven-repo，
+          # 所以它必然与全反应堆编译撞上同一个环境阻塞。
+          # 不做分类的话，这一步会把 job 弄红，掩盖上面那个「已如实声明未验证」
+          # 的结论 —— 出现两个互相矛盾的信号，没人会知道该信哪个。
+          set +e
+          mvn -B -ntp -f "$MOD/pom.xml" -DskipTests compile > /tmp/ffmmvn.log 2>&1
+          mrc=$?
+          set -e
+          if [ "$mrc" -ne 0 ]; then
+            grep '^\[ERROR\]' /tmp/ffmmvn.log \
+              | grep -vE '^\[ERROR\][[:space:]]*$' \
+              | grep -vE '\[Help [0-9]+\]' \
+              | grep -vE 'To see the full stack trace' \
+              | grep -vE 'Re-run Maven using' \
+              | grep -vE 'For more information about the errors' \
+              | grep -vE 'After correcting the problems' \
+              | grep -vE 'mvn <args> -rf' \
+              > /tmp/ffmerr.txt || true
+            n=$(wc -l < /tmp/ffmerr.txt | tr -d ' ')
+            d=$(grep -cE 'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable|Could not collect dependencies|DependencyResolutionException' /tmp/ffmerr.txt || true)
+            c=$(grep -c 'com\.chua' /tmp/ffmerr.txt || true)
+            echo "  FfmSmoke 前置编译：实质错误 $n / 依赖解析类 $d / com.chua $c"
+            if [ "$n" -gt 0 ] && [ "$n" -eq "$d" ] && [ "$c" -gt 0 ]; then
+              echo "::warning title=FfmSmoke 未能执行（同一个环境阻塞）::依赖的 com.chua 构件远端不存在，与全反应堆编译是同一个原因。"
+              echo "FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS"
+              exit 0
+            fi
+            echo "::error title=FfmSmoke 前置编译失败（非依赖解析问题）::"
+            tail -40 /tmp/ffmerr.txt
+            exit 1
+          fi
+
           mvn -B -ntp -q -f "$MOD/pom.xml" dependency:build-classpath \
             -Dmdep.outputFile=target/cp.txt
 
@@ -266,6 +298,18 @@ jobs:
                 echo "Java 侧代码当前**未被任何自动化覆盖**。要真正关闭，需先把构件发布到远端。"
               else
                 echo "编译**失败**且不属于依赖解析问题，详见日志。"
+              fi
+              echo ""
+              if grep -q 'JAVA25_FFM_SMOKE_OK' /tmp/ffm.log 2>/dev/null; then
+                echo "### Java 25 FFM 绑定端到端冒烟"
+                echo "**已执行并通过**（\`JAVA25_FFM_SMOKE_OK\`）—— 未验项 #2 关闭。"
+              elif grep -q 'FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS' /tmp/ffmmvn.log 2>/dev/null; then
+                echo "### Java 25 FFM 绑定端到端冒烟"
+                echo "**已纳入 CI，但因同一个环境阻塞未能执行**（依赖的 com.chua 构件远端不存在）。"
+                echo "步骤本身已就位：一旦构件发布到远端，无需再改 workflow 即可自动开始运行。"
+              else
+                echo "### Java 25 FFM 绑定端到端冒烟"
+                echo "未完成，详见日志。"
               fi
             else
               echo "**未执行。** 缺少 \`MAVEN_ALIYUN_USER\` / \`MAVEN_ALIYUN_PASSWORD\`，"
