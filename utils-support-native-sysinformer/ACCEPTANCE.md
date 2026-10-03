@@ -327,7 +327,7 @@ macOS x86_64 494 —— 绝对耗时随进程数走，比较时必须看这个�
 | # | 未验项 | 原因 | 影响 |
 |---|---|---|---|
 | 1 | ~~macOS x86_64 无运行时冒烟~~ **已关闭** | 改用 `macos-15-intel`（原生 Intel x86_64，Actions 最后一个 x86_64 镜像，支持到 2027-08）| run 36708484394 该腿 `Runtime smoke` 真实执行：dlopen x86_64 dylib 成功、`process.list 返回 502 个进程`、`SYSINFORMER_SMOKE_OK` |
-| 2 | **Java 25 FFM 绑定：功能已验，缺 CI 自动化回归** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`）。模块的父 pom **只声明了两个仓库，都是 `packages.aliyun.com` 的私有 registry**，匿名 401；Maven Central 无 `com.chua`。这是**全仓性**限制 | 绑定的**正确性已验**：`mvn clean compile` exit 0（class major 69），且 `FfmSmoke` **端到端跑通 16 项断言**（真数据：279 个进程 / 25 个根），跑的是 **CI 产出的那份 dll**（847,360 字节，与 artifact 一致）。另已逐条确认**无免凭据方案**：Central 搜 `com.chua` 命中 0、aliyun `public`/`central`/`jcenter` 全 404、GitHub Packages 匿名 401、姐妹仓 private 且无 `.42` tag；且 `common-starter` 并非零依赖（含 `com.chua.jdk:vector-api` 亦私有 401），故「从源码构建」也走不通。**缺的是 CI 无法自动重复这一验证** —— 风险是「发现延迟」不是正确性。补法：配 `MAVEN_ALIYUN_USER`/`MAVEN_ALIYUN_PASSWORD` 后把 `FfmSmoke` 纳入 `native-java-compile.yml`。**注**：Java 8 侧（`SysInformerJnaSmoke`）已在 CI 里真跑，那条腿是自动的 |
+| 2 | **Java 25 FFM 绑定：功能已验，CI 步骤已就位但被环境阻塞** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`）。**2026-10-03 实测更正**：该构件**不在** `packages.aliyun.com`（带凭据仍 404），真实来源是 GitHub Packages `maven.pkg.github.com/CHTK001/utils-support-resource-parent`。而 `com.chua` 下 420 个坐标里 **386 个 jar 的 `_remote.repositories` 仓库 id 为空**，即本机 `mvn install` 装入、从未发布；已发布的那份与本机**不是同一份字节**（sha1 `8d2d6db0…` vs `05fa2221…`）| 绑定的**正确性已验**：`mvn clean compile` exit 0（class major 69），且 `FfmSmoke` **端到端跑通 16 项断言**（真数据：279 个进程 / 25 个根）。`native-java-compile.yml` 的 paths 过滤已修（原写法只匹配到一个 README.md，门禁从未执行）、`FfmSmoke` 步骤已加入、失败分类已加（环境阻塞不弄红、真实编译错误仍变红）。**但 CI 侧仍无法真正编译** —— 凭据已配齐（aliyun ×2 + GitHub Packages ×2），卡在构件未发布。**未验项仍未关闭**，需独立决策是否 deploy 本地产物到远端 |
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
@@ -505,12 +505,59 @@ JAVA25_FFM_SMOKE_OK     (exit 0，16 项断言全过)
 |---|---|
 | 绑定能编译 | ✅ 已验（`mvn clean compile` exit 0，class major 69）|
 | 绑定能**正确运行** | ✅ **已验**（16 项断言，真数据：279 个进程 / 25 个根）|
-| CI 能**自动重复**这一验证 | ❌ 缺凭据 |
+| CI 能**自动重复**这一验证 | ⚠️ 步骤已就位，但**被环境阻塞**，见下 |
 
-所以它不再是"未验证的功能"，而是**一个已验证、但缺自动化回归网的功能**。
-风险是**发现延迟**（改了绑定、CI 仍绿、要等有凭据的人构建才发现），
-不是正确性风险。补法是一行：配 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD`
-后把 `FfmSmoke` 纳入 `native-java-compile.yml`。
+### 2026-10-03：阻塞原因从「缺凭据」更正为「构件未发布」
+
+此前这里写的是「补法是一行：配 `MAVEN_ALIYUN_USER` / `MAVEN_ALIYUN_PASSWORD`」。
+**实测证明那是错的**，已按事实更正：
+
+| 仓库 | 匿名 | 带凭据 |
+|---|---|---|
+| aliyun release / snapshot | 401 | **404** |
+| GitHub Packages（`github-resource`） | 401 | **200** |
+
+**401 与 404 的区别是「凭据不对」与「找错仓库」的分界。** 该构件的真实来源是
+GitHub Packages（`maven.pkg.github.com/CHTK001/utils-support-resource-parent`，
+由 `utils-support-parent-starter-4.0.0.42.pom` 声明），与 aliyun 是不同主体。
+已补配 GitHub Packages 的 secret，settings.xml 也已生成对应 server。
+
+**但即便凭据齐全，Java 侧仍无法验证**，原因是环境：
+
+```
+扫描 D:\maven-repo 下 com\chua 的 420 个坐标（_remote.repositories）：
+  jar 来源分布  (本地 install) 386 | aliyun release 6 | github-resource 1
+```
+
+**386 个 jar 的仓库 id 为空**，即由本机 `mvn install` 装入、从未发布到任何远端。
+更关键的是唯一发布出去的那份 —— **同一 GAV 坐标，两份不同字节**：
+
+```
+utils-support-common-starter-4.0.0.42.jar
+  本机 4,558,874 字节  sha1 8d2d6db08670189e60d7d6581f324d9677ae7c2b
+  远端               sha1 05fa22216b0b96b1d908379cf680b7c3b63cde19
+```
+
+所以本机验证（FfmSmoke 跑通）用的是**本地那份**，CI 解析到的是**远端那份**，
+不是同一个东西 —— **CI 全绿也不能证明本机验证的结论**。
+
+### 已做的处置
+
+`native-java-compile.yml`（run 37097495730 起生效）：
+
+1. **paths 过滤修正**为 `utils-support-native-*/**`。原写法
+   `utils-support-native-parent/**` 在本仓只匹配到一个 README.md，
+   改真实模块**不触发** —— 该门禁历史上一次都没真正执行过。
+2. `FfmSmoke` 步骤已加入，编译 + classpath + 运行 + 断言
+   `JAVA25_FFM_SMOKE_OK`。
+3. **失败分类**：全是 `com.chua` 依赖解析失败 -> warning + 摘要声明
+   「Java 侧无法验证（环境阻塞）」且**不弄红**；出现其他失败 -> 变红。
+   FfmSmoke 步骤同样分类，否则会与「已声明未验证」形成两个矛盾信号。
+
+**一旦构件发布到远端，无需再改 workflow，FfmSmoke 会自动开始运行。**
+
+未验项 #2 **仍未关闭**，但阻塞已从「缺凭据」更正为「构件未发布 / 同坐标不同字节」。
+这是环境性阻塞，需独立决策是否把本机 `mvn install` 的产物 deploy 到远端。
 
 同一模块的 Java 8 侧（`SysInformerJnaSmoke`）**已在 CI 里真跑**，那条腿是自动的。
 
