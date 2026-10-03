@@ -18,20 +18,45 @@ name: native-java-compile
 # 处理方式：凭据缺失时 **不跑编译，并明确声明「Java 侧未验证」**（warning + summary），
 # 不伪装成通过、也不把 CI 弄红。凭据一旦配好，本 job 自动开始真正编译。
 #
-# 需要配置的两个 secret（Repository secrets）：
+# 需要的两个 secret（Repository secrets）—— **2026-10-03 已配置**：
 #   MAVEN_ALIYUN_USER      阿里云私有仓库用户名
 #   MAVEN_ALIYUN_PASSWORD  对应的密码 / 访问令牌
-# 两个 server id 共用同一组凭据（同一仓库的两个视图）。
+# 两个 server id 共用同一组凭据（同一仓库的两个视图）：已实测两者的
+# username 与 password 分别哈希后**完全相同**，故只写一组。
+#
+# 此前本 workflow 的 paths 过滤写错（`utils-support-native-parent/**`
+# 在本仓只匹配到一个 README.md），改真实模块**不触发**，所以那 3 次
+# success 全是「跳过编译」，Java 侧实际从未被 CI 覆盖过。
+# 已修正过滤并补上 FfmSmoke 步骤，见下方「Java 25 FFM 绑定端到端冒烟」。
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'utils-support-native-parent/**'
+      # 2026-10-03 修正：原来写的是 `utils-support-native-parent/**`。
+      #
+      # 本仓的仓名就叫 `utils-support-native-parent`，所以**仓内并不存在**
+      # 一层同名目录 —— 只有 `utils-support-native-parent/README.md`
+      # 这一个文件（418 字节，无 pom、无源码）。
+      #
+      # 结果是这个过滤项**能匹配但匹配不到任何真实模块**：改
+      # `utils-support-native-sysinformer/**`、`utils-support-native-java8/**`
+      # 都不会触发本 workflow。它历史上只跑过 3 次（total_count=3），
+      # 而那 3 次的 success 是「凭据缺失 → 跳过编译 → 如实声明未验证」，
+      # 不是编译通过。
+      #
+      # 这与 AGENTS.md 记的「paths 白名单漏掉 = 改门禁不触发门禁」同类：
+      # 门禁看起来在，实际从不执行。
+      - 'utils-support-native-*/**'
+      # 验收脚本本身也是门禁，改它同样要重新编译验证
+      - 'tools/sysinformer-accept/**'
       - '.github/workflows/native-java-compile.yml'
   pull_request:
     paths:
-      - 'utils-support-native-parent/**'
+      - 'utils-support-native-*/**'
+      - 'tools/sysinformer-accept/**'
+      # workflow 文件自身也要在 paths 里：只改 CI 定义的 PR 若不触发 CI，
+      # 这份配置就会未经检验被合入（判据与 push 侧一致）
       - '.github/workflows/native-java-compile.yml'
 
 concurrency:
@@ -98,6 +123,46 @@ jobs:
           # 下次 mvn compile 打印 Nothing to compile 却 BUILD SUCCESS」的历史坑。
           mvn -B -ntp -DskipTests clean compile
 
+      - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
+        # 未验项 #2 的收口步骤。
+        #
+        # 在此之前，FfmSmoke 只在本机跑过一次（16 项断言 + 真数据），
+        # **CI 从不执行** —— 绑定类写错、方法名改掉、返回结构变形，
+        # push 后没有任何自动化能发现。本步骤把它纳入 CI。
+        #
+        # 依赖已就位：NativeLoader 从 classpath 资源
+        # `native/<平台>/libsysinformer.so` 解包到临时目录再加载，
+        # 而该 so 是**已跟踪的资源**，mvn compile 会拷进 target/classes，
+        # 所以无需手工指定库路径。
+        if: steps.creds.outputs.have == 'yes'
+        run: |
+          set -euo pipefail
+          MOD=utils-support-native-sysinformer
+          LIB=$MOD/src/main/resources/native/linux-x86_64/libsysinformer.so
+          [ -f "$LIB" ] || { echo "找不到入库产物 $LIB"; exit 1; }
+
+          mvn -B -ntp -q -f "$MOD/pom.xml" -DskipTests compile
+          mvn -B -ntp -q -f "$MOD/pom.xml" dependency:build-classpath \
+            -Dmdep.outputFile=target/cp.txt
+
+          # Linux 上 classpath 分隔符是 ':'（Windows 才用 ';'）
+          CP="$MOD/target/classes:$(cat $MOD/target/cp.txt)"
+          rm -rf "$MOD/target/smoke-ffm"
+          mkdir -p "$MOD/target/smoke-ffm"
+          javac -encoding UTF-8 -nowarn -cp "$CP" \
+            -d "$MOD/target/smoke-ffm" "$MOD/src/smoke/java/FfmSmoke.java"
+
+          # --enable-native-access=ALL-UNNAMED 是 JEP 472 起对
+          # restricted method 的必需开关（java.lang.foreign）。
+          set +e
+          java --enable-native-access=ALL-UNNAMED \
+               -cp "$MOD/target/smoke-ffm:$CP" FfmSmoke 2>&1 | tee /tmp/ffm.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          grep -q 'JAVA25_FFM_SMOKE_OK' /tmp/ffm.log \
+            || { echo 'FfmSmoke 未打印 JAVA25_FFM_SMOKE_OK'; exit 1; }
+          echo "FfmSmoke 退出码 = $rc"
+
       - name: 结果写入摘要
         if: always()
         run: |
@@ -105,6 +170,9 @@ jobs:
             echo "### Java 侧编译"
             if [ "${{ steps.creds.outputs.have }}" = "yes" ]; then
               echo "已执行 \`mvn -B -DskipTests clean compile\`（全反应堆）。"
+              echo ""
+              echo "**Java 25 FFM 绑定端到端冒烟（FfmSmoke）已纳入 CI**"
+              echo "（2026-10-03，未验项 #2）。"
             else
               echo "**未执行。** 缺少 \`MAVEN_ALIYUN_USER\` / \`MAVEN_ALIYUN_PASSWORD\`，"
               echo "依赖仓库 \`packages.aliyun.com\` 匿名访问为 HTTP 401。"
