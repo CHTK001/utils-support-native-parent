@@ -92,42 +92,44 @@ FFI 里崩溃会带走宿主 JVM，这是生产事故。
 
 ## 四、实测结果（最新入库产物）
 
-### Windows（`sysinformer.dll` md5 `07cfbee40e4f2e9ca19e16319d961b8f`，852,480 B，run 36995361316，2026-10-02）
+### Windows（`sysinformer.dll` md5 `e43ee1b42542e02cc33f5c53a3bb3429`，850,944 B，run 37124428590，2026-10-03）
 
 ```
 prod_accept.py        通过 33 / 失败 0   PROD_ACCEPT_OK
 taskmgr_compare.py    判定项 12 / 失败 0  TASKMGR_COMPARE_OK
-cpu_windowed_compare  有效配对 55（每对含 3~37 个本库样本，窗口中位 1006ms）
-                      均值差 +0.795pp，容差 ±4.0pp -> TASKMGR_CPU_WINDOWED_OK
+cpu_windowed_compare  有效配对 53（每对含 3~37 个本库样本，窗口中位 1002ms）
+                      均值差 +2.051pp，容差 ±4.0pp -> TASKMGR_CPU_WINDOWED_OK
 
 与任务管理器同源数据对照（GetPerformanceInfo，5 次紧邻采样取均值）：
   物理内存占用率   差 0.00pp        进程数        差  0.00%
   可用内存        差 0.00%         已用内存      差  0.00%
-  线程总数        差 0.12%         句柄总数      差  0.13%
+  线程总数        差 0.00%         句柄总数      差  0.15%
   磁盘 C:\ 总量/可用                全部 0.00%
   磁盘 D:\ 总量/可用                全部 0.00%
 
-并发 8 线程 × 15 轮 × 6 op：120 次调用耗时 1.56s，错误 0 条
-并发后连续两次 process.list 数量一致（136 vs 136）
+并发 8 线程 × 15 轮 × 6 op：120 次调用耗时 1.78s，错误 0 条
+并发后连续两次 process.list 数量一致（134 vs 134）
 事件订阅下 4 线程并发 poll：错误 0
-泄漏：200 轮 × 4 op 后 RSS 28.8MB -> 28.8MB、句柄 426 -> 426
-事件启停 20 轮（成功 20 次）：句柄 426 -> 426
+泄漏：200 轮 × 4 op 后 RSS 29.0MB -> 29.7MB、句柄 424 -> 425
+事件启停 20 轮（成功 20 次）：句柄 425 -> 425
 ```
 
 > CPU 判据在同轮诊断里的原始数据（`cpu_rootcause_diag.py`，五源并置）：
 >
 > ```
-> PdhGetFormattedCounterValue 的 CStatus 分布 = {0x00000000: 7930, 0x800007D6: 3125}
->   -> 非 VALID 3125/11055 = 28.27%（0x800007D6 = CALC_NEGATIVE_DENOMINATOR）
-> 修复后逻辑的行为分布 = {collected: 438, reuse: 1754, stale-reuse: 19}
+> 有效配对 53（窗口中位 1002ms）  均值差 +2.051pp  容差 ±4.0pp -> OK
 >
 > [8] 同窗口配对比较（参考流间隔 100ms，与库的最小窗口等长）
->   A 本库        配对 2211  均值差 +0.934pp  sd 6.932  95% CI [+0.645, +1.223]
->   F 修复后逻辑   配对 2211  均值差 +1.821pp  sd 7.955  95% CI [+1.489, +2.152]
->   A − F 同迭代配对 2211      均值差 -0.887pp  sd 7.036  95% CI [-1.180, -0.594]
+>   A 本库        配对 2216  均值差 +1.343pp  sd 6.984  95% CI [+1.052, +1.634]
+>   F 修复后逻辑   配对 2216  均值差 +2.525pp  sd 8.326  95% CI [+2.178, +2.872]
+>   A − F 同迭代配对 2216      均值差 -1.182pp  sd 7.396  95% CI [-1.490, -0.874]
 > ```
+>
+> **注意**：`cpu_rootcause_diag.py` 报告的「非 VALID 的 CStatus 占比」这一项
+> 本轮日志未采集（旧脚本已随第 9 节一并更正），所以这里不列该数字 ——
+> **宁可少写一项，也不引用无法在当前代码上复现的数字**。
 
-### Linux（`libsysinformer.so` md5 `55b86574a75568e09efeb2803e04084d`，run 36995361316，2026-10-02）
+### Linux（`libsysinformer.so` md5 `8502df90fe3a221f18fe11fc4dee3301`，1,569,176 B，run 37124428590，2026-10-03）
 
 真实 Kali（`192.168.50.198`，普通用户 + root 各一遍，用仓库当前版
 `prod_accept.py`，即含 3 条电池断言的那一版）：
@@ -164,19 +166,23 @@ battery_value_linux.py  case1 字段齐全 / case2 缺 power_now /
 守卫敏感性对照：同一夹具在**修复前**的产物上，case1/case2 全绿而 case3 报
 `FAIL order: ['B1','B0'] sorted=False` —— 证明顺序断言不是恒真。
 
-### macOS（两个 dylib，run 36995361316，2026-10-02）
+### macOS（run 37124428590，2026-10-03）
 
-- `darwin-aarch64`：`libsysinformer.dylib` md5 `5b2c5a7e525427d9569e041055a2e859`，1,122,912 B
-- `darwin-x86_64`：`libsysinformer.dylib` md5 `3d4a30c3484f098d72309c4572bb8e00`，1,127,328 B
+- `darwin-aarch64`：`libsysinformer.dylib` md5 `b6653cd845d7ce52b531015bf1cade9d`，1,119,664 B
+- `darwin-x86_64`：`libsysinformer.dylib` md5 `f280d6d5b432514dabefb56147442fa5`，1,124,380 B
 
 两腿均为 `SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
 + **31/31 `PROD_ACCEPT_OK`**（含电池断言，走 `pmset -g batt` 分支）。
+泄漏检查（按平台缩放为 60 轮）：arm64 RSS 41.0MB→41.0MB 句柄 8→8；
+x86_64 RSS 32.5MB→33.0MB 句柄 8→8。
 
-### 四平台生产验收：全绿（2026-10-02，run 36995361316，sha `2deb08a`，结论 `success`）
+### 四平台生产验收：全绿（2026-10-03，run 37124428590，sha `43de392`，结论 `success`）
 
-> 这一轮产出的 `sysinformer.dll` 就是**当前入库的那一份**
-> （`07cfbee40e4f2e9ca19e16319d961b8f`），且该产物已被同 run 的 attempt-2
-> 独立复现（逐字节相同），见「九、交付物与被验收产物的一致性」。
+> 这一轮编出的四份产物就是**当前入库的那一份**，且已被同 run 的
+> attempt-2 独立复现（**四平台各 0 字节差异**），见第九节 5)。
+>
+> 注意这是**换了工具链与依赖锁定之后**的新基线，与 10-02 那批不可比 ——
+> 那批产物的字节已被这次改动取代。
 
 ```
 [OK] linux-x86_64     success
@@ -234,37 +240,37 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 
 | op | Windows | Linux | macOS arm64 | macOS x86_64 |
 |---|---|---|---|---|
-| `system.snapshot` | 4.00 ms | 1.76 ms | 42.44 ms | 65.11 ms |
-| `process.list` | **6.46 ms** | 16.53 ms | **1848.95 ms** | **5434.81 ms** |
-| `process.detail` | **0.81 ms** | 1.44 ms | **2172.32 ms** | **5548.85 ms** |
-| `process.tree` | 4.24 ms | 3.72 ms | 1986.15 ms | 4861.41 ms |
-| `process.threads` | 6.42 ms | 0.29 ms | 0.01 ms | 0.03 ms |
-| `process.handles` | 7.21 ms | 5.09 ms | 0.01 ms | 0.05 ms |
-| `process.mappings` | 1.59 ms | 1.24 ms | 0.40 ms | 1.11 ms |
-| `process.modules` | 0.48 ms | 0.19 ms | 0.66 ms | 1.65 ms |
-| `process.env` | 0.20 ms | 0.11 ms | 0.11 ms | 0.29 ms |
-| `process.credential` | 1.04 ms | 0.07 ms | 8.28 ms | 20.42 ms |
-| `kernel.modules` | 0.65 ms | 0.26 ms | 246.94 ms | 361.98 ms |
-| `socket.list` | 0.20 ms | 12.02 ms | 17.40 ms | 34.84 ms |
+| `system.snapshot` | 4.27 ms | 1.90 ms | 48.48 ms | 57.40 ms |
+| `process.list` | **6.01 ms** | 16.14 ms | **1891.24 ms** | **4462.90 ms** |
+| `process.detail` | **0.93 ms** | 1.39 ms | **2150.32 ms** | **4590.43 ms** |
+| `process.tree` | 4.14 ms | 3.53 ms | 1963.82 ms | 4436.89 ms |
+| `process.threads` | 6.84 ms | 0.30 ms | 0.01 ms | 0.02 ms |
+| `process.handles` | 4.18 ms | 4.90 ms | 0.01 ms | 0.04 ms |
+| `process.mappings` | 1.96 ms | 1.32 ms | 0.38 ms | 0.96 ms |
+| `process.modules` | 0.58 ms | 0.20 ms | 0.49 ms | 1.03 ms |
+| `process.env` | 0.49 ms | 0.12 ms | 0.09 ms | 0.20 ms |
+| `process.credential` | 1.76 ms | 0.07 ms | 8.08 ms | 16.55 ms |
+| `kernel.modules` | 0.69 ms | 0.14 ms | 200.11 ms | 273.01 ms |
+| `socket.list` | 0.33 ms | 11.99 ms | 19.52 ms | 25.12 ms |
 
-四个平台**全部取自 run 36995361316 同一轮**，p50，同口径。
-`process.list` 覆盖进程数：Windows 136、Linux 163、macOS arm64 485、
-macOS x86_64 494 —— 绝对耗时随进程数走，比较时必须看这个量。
+四个平台**全部取自 run 37124428590 同一轮**，p50，同口径。
+`process.list` 覆盖进程数：Windows 134、Linux 153、macOS arm64 496、
+macOS x86_64 495 —— 绝对耗时随进程数走，比较时必须看这个量。
 
 > ⚠️ **此前这张表只写了一个 macOS 数（约 2 秒），那是 arm64 的值。**
-> 实测 Intel macOS 上 `process.list` 是 **5434.81 ms**、`process.detail`
-> 是 **5548.85 ms**，比 arm64 慢约 **2.9 倍**。原来那句「单次约 2 秒」
+> 实测 Intel macOS 上 `process.list` 是 **4462.90 ms**、`process.detail`
+> 是 **4590.43 ms**，比 arm64 慢约 **2.2 倍**。原来那句「单次约 2 秒」
 > 对 Intel 用户是**低报了一倍有余**，据此定采样周期会直接翻车。
 
 **对调用方的实际含义**：
 
 - **Windows / Linux**：`process.list` 可按 1s 周期采样，开销可忽略
-  （Windows 6.46ms、Linux 16.53ms）。
-- **macOS arm64**：`process.list` / `process.detail` 单次约 **1.8~2.2 秒**。
-- **macOS x86_64**：单次约 **5.4~5.5 秒**。
+  （Windows 6.01ms、Linux 16.14ms）。
+- **macOS arm64**：`process.list` / `process.detail` 单次约 **1.9~2.2 秒**。
+- **macOS x86_64**：单次约 **4.5~4.6 秒**。
   按 1s 周期采样不只是「把 CPU 跑满」，而是**根本追不上** —— 每次调用
-  自己就耗时 5 秒以上，永远处于上一轮还没结束的状态。
-  macOS 上应改用 `system.snapshot`（arm64 42ms / x86_64 65ms）做高频指标，
+  自己就耗时 4.5 秒以上，永远处于上一轮还没结束的状态。
+  macOS 上应改用 `system.snapshot`（arm64 48ms / x86_64 57ms）做高频指标，
   `process.list` / `detail` 只在需要时取，或放到 10s 量级的周期。
 
 这一点也解释了 CI 上 macOS 腿为什么慢到跑不完：验收脚本原本用与其他
@@ -278,22 +284,22 @@ macOS x86_64 494 —— 绝对耗时随进程数走，比较时必须看这个�
 
 | op | Windows p50 | Linux p50 | 说明 |
 |---|---|---|---|
-| system.snapshot | 4.00 ms | 1.76 ms | |
-| process.list | 6.46 ms | 16.53 ms | |
-| process.tree | 4.24 ms | 3.72 ms | |
-| process.detail | 0.81 ms | 1.44 ms | |
-| process.threads | 6.42 ms | 0.29 ms | |
-| process.handles | 7.21 ms | 5.09 ms | |
-| process.modules | 0.48 ms | 0.19 ms | |
-| process.mappings | 1.59 ms | 1.24 ms | |
-| process.env | 0.20 ms | 0.11 ms | |
-| process.credential | 1.04 ms | 0.07 ms | |
-| kernel.modules | 0.65 ms | 0.26 ms | |
-| socket.list | 0.20 ms | 12.02 ms | |
+| system.snapshot | 4.27 ms | 1.90 ms | |
+| process.list | 6.01 ms | 16.14 ms | |
+| process.tree | 4.14 ms | 3.53 ms | |
+| process.detail | 0.93 ms | 1.39 ms | |
+| process.threads | 6.84 ms | 0.30 ms | |
+| process.handles | 4.18 ms | 4.90 ms | |
+| process.modules | 0.58 ms | 0.20 ms | |
+| process.mappings | 1.96 ms | 1.32 ms | |
+| process.env | 0.49 ms | 0.12 ms | |
+| process.credential | 1.76 ms | 0.07 ms | |
+| kernel.modules | 0.69 ms | 0.14 ms | |
+| socket.list | 0.33 ms | 11.99 ms | |
 
 （30 次采样，取 p50；两平台同 run、同口径，可直接横向比。
-`process.list` 覆盖数：Windows 136 个进程、Linux 163 个进程 —— 绝对耗时
-随进程数走，比较时要看这个量。）
+`process.list` 覆盖数：Windows 134 个进程、Linux 153 个进程 —— 绝对耗时
+随进程数走，比较时要看这个量。macOS 两列见上方「平台性能特征」表。）
 
 ---
 
@@ -913,10 +919,12 @@ python tools/sysinformer-accept/battery_verify_device.py --selftest
 
 已在 `build.sh` 对 MSVC 目标加 `-C link-arg=/Brepro`。
 
-### 3) 可复现性已被实测证明（不是推断）
+### 3) ⚠️ 上一版这里的「可复现性已被实测证明」是**错的**（2026-10-03 更正）
 
-「一次构建相同」不能证明可复现，必须**两次独立构建**比对。用 GitHub 的
-re-run 触发同一 SHA（`2deb08a`）的第二次构建：
+原文写的是「同 SHA 两次构建差异 0」，并据此断言四平台构建可复现。
+下面这段保留 2026-10-02 的原始数据作为**历史记录**，但结论已被推翻。
+
+**当时的实测（仅 Windows）**：
 
 | 来源 | run / attempt | md5 | 字节 |
 |---|---|---|---|
@@ -924,41 +932,91 @@ re-run 触发同一 SHA（`2deb08a`）的第二次构建：
 | `/Brepro` 第 1 次 | 36995361316 a1 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 |
 | `/Brepro` 第 2 次 | 36995361316 a2 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 |
 
-- **同 SHA 两次构建：差异 0 / 852,480 字节。**
-- 敏感性对照：pre-`/Brepro` 那份与 `/Brepro` 那份差 **90,496 字节**，
-  证明比对方法能测出差异，所以上面那个「相同」是真结论而不是检测失灵。
+`/Brepro` 本身是有效的：pre-`/Brepro` 与 `/Brepro` 那两份差 90,496 字节，
+逐项查证为 2,478 个 `RUNTIME_FUNCTION` 只改 `UnwindInfoAddress`（`Begin`/`End`
+零变化）、`.text` 那 8 字节是两条 `lea` 的 rip 相对位移（操作码相同），
+即链接期生成的展开信息落位变了、代码语义不变。**这一条结论至今成立。**
 
-那 90,496 字节是什么（同一份 Rust 源码，只多了 `/Brepro`）：
+**但「构建可复现」这个结论不成立。** 原因见下一节。
 
-| 区域 | 大小 | 差异 |
+### 4) 构建此前**按构造**就不可复现：两个未固定的输入（2026-10-03 实测）
+
+2026-10-03 做例行核对时，`verify_delivered.py` 报四平台**全部 MISMATCH**。
+先排除干扰项：远端 main == 本地 HEAD（没被别人推走）、`src/main/rust` 与
+`build.sh` 自 10-02 起**无任何改动**、工作区干净。即**输入逐字节相同，
+输出却不同**。逐字节定位确认差异落在**代码段**：
+
+| 平台 | 差异 |
+|---|---|
+| Windows `.text` | 22,939 / 605,184 字节 |
+| macOS x86_64 `__TEXT` | 41,396 / 827,392 字节 |
+| linux `.so` | 1,584,048 →（新构建）1,569,176，**体积变了** |
+| macOS arm64 | 1,122,928 →（新构建）1,119,664，**体积变了** |
+
+体积与 codegen 都变 —— 不是链接期元数据，是**编译器/依赖换了**。查出两个
+独立的漂移源：
+
+1. **`.gitignore` 第 11 行 `**/Cargo.lock`** —— 锁文件被刻意排除。而
+   `Cargo.toml` 里 `sysinfo = "0.33"` / `serde = "1.0"` /
+   `once_cell = "1.20"` / `libc = "0.2"` / `windows = "0.58"` /
+   `wmi = "0.18"` 全是**开放版本范围**，锁文件不入库就意味着 CI 每次
+   构建都重新解析 **90 个传递依赖**。
+2. **完全没有工具链固定** —— 无 `rust-toolchain.toml`、`build.sh` 不钉
+   版本、workflow 不装 Rust，全跟随 runner 预装的 stable；GitHub runner
+   镜像滚动更新会带上新的 stable。
+
+**上一版结论错在哪**：当时做了 6 次核对（同 SHA 两次 + 换 SHA 四次）都相同，
+看起来远超"两次"的最低要求。但**短时间窗口内的多次一致不能证明长期可复现** ——
+那 6 轮恰好落在依赖没更新的时间段里。当时只固定了 `/Brepro` 这一个输入
+（链接器行为），却当成了全部；真正决定字节的两个输入（工具链、依赖解析）
+当时都是浮动的。
+
+**教训**：可复现性取决于**所有**输入是否固定，这是可查的事实，不依赖统计。
+在输入没固定之前做多少次一致性核对都不构成证据。
+
+### 5) 修复与**在固定输入下**的可复现性证明
+
+三处改动，**缺一不可**：
+
+1. `.gitignore` 给本模块 `Cargo.lock` 开例外（交付的是 cdylib，锁文件应入库）
+2. 新增 `rust-toolchain.toml`，`channel = "1.97.1"`
+3. **`cargo build --locked`** —— 最关键的一条。只入库锁文件而不加它
+   等于白做：cargo 仍会按开放范围**静默更新**锁文件，且没有任何提示
+4. `build.sh` 每次打印 `rustc --version` / `cargo --version`（四平台共用
+   入口、本地也走它，于是每次构建日志自带版本）
+
+版本钉子生效确认（run 37124428590 日志，四平台一致）：
+
+```
+rustc 1.97.1 (8bab26f4f 2026-07-14)    cargo 1.97.1 (c980f4866 2026-06-30)
+```
+
+**证明（run 37124428590，同一 SHA `43de392` 的两次独立构建）**：
+
+| 组 | 内容 | 结果 |
 |---|---|---|
-| `.text` | 605,184 | **8 字节** |
-| `.rdata` | 212,992 | 86,374 字节 |
-| `.pdata` | 30,208 | 4,094 字节 |
+| A | attempt-1 vs attempt-2，**四平台** | 各 **0 字节差异** |
+| B | 钉版本**之前**的构建 vs 现在（四平台） | 长度全变 → **对照组能测出差异** |
+| C | 2026-10-02 那批入库产物 vs 现在（四平台） | 长度全变 |
 
-逐项查证：`.pdata` 是 2,517 个 `RUNTIME_FUNCTION`（每项 12 字节），
-其中 2,478 项变化，**全部只改 `UnwindInfoAddress`**，`Begin`/`End`
-**零变化**（函数起止地址一字节未动），且 2,478 项位移**全部恰为 `+0xa8`**。
-`.text` 那 8 字节是两条 `lea` 的 rip 相对位移操作数：
+**B 组是必需的**：没有它，A 组的「相同」可能只是比对方法失灵。
+2026-10-02 那次正是在这里翻的车 —— 当时也有敏感性对照，但对照的是
+`/Brepro` 前后的差异（确实能测出差异），却没测「输入未固定时会不会不同」，
+而后者才是真正的问题。
 
-```
-48 8d 1d ab 36 02 00    lea rbx,[rip+0x236ab]   (pre)
-48 8d 1d 53 37 02 00    lea rbx,[rip+0x23753]   (/Brepro)
-   操作码 48 8d 1d 完全相同，位移增量 +0xa8 与上面的展开信息平移量一致
-```
+与 10-02 那次的另一个关键区别：**这次四平台全部纳入**。上次只测了 Windows，
+而实际漂移最先发生在 linux/macOS（体积都变了）。
 
-即：`/Brepro` 改变的是**链接期生成的展开信息块在 `.rdata` 里的落位**，
-代码语义不变，且该落位现在是确定的。代价是它与 `/Brepro` 之前的产物
-**不再逐字节相同**，所以入库那份必须换成 `07cfbee4...`（提交 `1a0e4e2`）。
-
-### 4) 当前可绑定的四平台指纹
+### 6) 当前可绑定的四平台指纹
 
 | 平台 | md5 | 字节 |
 |---|---|---|
-| windows-x86_64 | `07cfbee40e4f2e9ca19e16319d961b8f` | 852,480 B |
-| linux-x86_64 | `55b86574a75568e09efeb2803e04084d` | 1,584,016 B |
-| darwin-x86_64 | `3d4a30c3484f098d72309c4572bb8e00` | 1,127,328 B |
-| darwin-aarch64 | `5b2c5a7e525427d9569e041055a2e859` | 1,122,912 B |
+| windows-x86_64 | `e43ee1b42542e02cc33f5c53a3bb3429` | 850,944 B |
+| linux-x86_64 | `8502df90fe3a221f18fe11fc4dee3301` | 1,569,176 B |
+| darwin-x86_64 | `f280d6d5b432514dabefb56147442fa5` | 1,124,380 B |
+| darwin-aarch64 | `b6653cd845d7ce52b531015bf1cade9d` | 1,119,664 B |
+
+来源 run 37124428590 attempt-1（与 attempt-2 逐字节相同）。
 
 **换包即失效**：上面任一产物被替换后，本文件的验收数据都不再适用，
 须重跑。核对用：
