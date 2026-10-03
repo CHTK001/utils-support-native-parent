@@ -556,6 +556,34 @@ utils-support-common-starter-4.0.0.42.jar
 
 **一旦构件发布到远端，无需再改 workflow，FfmSmoke 会自动开始运行。**
 
+### 2026-10-03：已在本地实跑验证该步骤本身可用
+
+上面那句「无需再改 workflow」此前是**断言**，现已**实测**。在有全部构件的
+本机（`D:\apache-maven-3.9.9-bin\apache-maven-3.9.9\conf\settings.xml`
+把 `localRepository` 指向 `D:\maven-repo`，这正是 386 个构件的所在），
+逐步跑了 CI 步骤体：
+
+```
+模块编译   mvn -f utils-support-native-sysinformer/pom.xml -DskipTests compile   exit 0
+拼 classpath  dependency:build-classpath -Dmdep.outputFile=target/cp.txt       exit 0
+编译冒烟   javac -encoding UTF-8 -cp <cp> -d target/smoke-ffm FfmSmoke.java      exit 0
+运行       java --enable-native-access=ALL-UNNAMED -cp <cp> FfmSmoke            exit 0
+           -> JAVA25_FFM_SMOKE_OK
+```
+
+即：**唯一缺的就是那些构件本身**，步骤体、classpath 拼接、native 加载、
+断言与收尾标记都已验证可用。（本机 classpath 分隔符是 `;`，Linux 是 `:`；
+CI 里已加 `tr ';' ':'` 兜底，不依赖插件「恰好写对了」。）
+
+复现时踩到的两个坑，已写进 workflow 注释：
+
+* **PowerShell 里 `-Dmdep.outputFile=x` 不加引号会被拆成 `-Dmdep` +
+  `.outputFile=x`**，Maven 报 `Unknown lifecycle phase ".outputFile=x"`，
+  看起来像插件没配好，实际是 shell 解析。CI 用 bash 不受影响。
+* 本机本地仓库**不在** `~/.m2/repository`，而在 Maven 安装目录的
+  `conf/settings.xml` 里指向 `D:\maven-repo`。换机器复现前要先确认这条，
+  否则会误判成「本地也解析不到」。
+
 未验项 #2 **仍未关闭**，但阻塞已从「缺凭据」更正为「构件未发布 / 同坐标不同字节」。
 这是环境性阻塞，需独立决策是否把本机 `mvn install` 的产物 deploy 到远端。
 

@@ -44,6 +44,17 @@ name: native-java-compile
 # 在本仓只匹配到一个 README.md），改真实模块**不触发**，所以历史上那 3 次
 # success 全是「跳过编译」，Java 侧实际从未被 CI 覆盖过。已修正过滤，
 # 并补上 FfmSmoke 步骤，见下方「Java 25 FFM 绑定端到端冒烟」。
+#
+# 复现时的两个已知陷阱（都不是 CI 的问题，但会浪费排查时间）：
+#
+# 1. **PowerShell 里 `-Dmdep.outputFile=x` 必须加引号**。不加会被 PowerShell
+#    拆成 `-Dmdep` + `.outputFile=x`，Maven 于是报
+#    `Unknown lifecycle phase ".outputFile=x"` —— 看起来像插件没配好，
+#    实际是 shell 解析。CI 用 bash，不受影响。
+# 2. 本机 Maven 的本地仓库**不在** `~/.m2/repository`，而在
+#    `D:\apache-maven-3.9.9-bin\apache-maven-3.9.9\conf\settings.xml` 里
+#    配的 `D:\maven-repo`。这正是 386 个构件「本机有、远端没有」的来源。
+#    换机器复现前先确认这条，否则会误判成「本地也解析不到」。
 
 on:
   workflow_dispatch:
@@ -258,8 +269,13 @@ jobs:
           mvn -B -ntp -q -f "$MOD/pom.xml" dependency:build-classpath \
             -Dmdep.outputFile=target/cp.txt
 
-          # Linux 上 classpath 分隔符是 ':'（Windows 才用 ';'）
-          CP="$MOD/target/classes:$(cat $MOD/target/cp.txt)"
+          # classpath 分隔符：Linux 是 ':'，Windows 是 ';'。
+          # 本 workflow 固定跑 ubuntu-22.04，所以用 ':'。
+          # 这里显式 tr 一次 ';' -> ':'，是为了**不依赖「插件恰好写对了」**：
+          # 万一它在别的环境下写出 ';'，拼出来的 classpath 会静默错误，
+          # 报出来的是莫名其妙的 ClassNotFoundException，而不是「分隔符不对」。
+          # 在 Linux 上正常时它是 no-op。
+          CP="$MOD/target/classes:$(tr ';' ':' < "$MOD/target/cp.txt")"
           rm -rf "$MOD/target/smoke-ffm"
           mkdir -p "$MOD/target/smoke-ffm"
           javac -encoding UTF-8 -nowarn -cp "$CP" \
