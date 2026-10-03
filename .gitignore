@@ -19,6 +19,16 @@ target/
 # 即体积与 codegen 都变了 —— 依赖解析漂移，不是链接期元数据。
 # 详见 ACCEPTANCE.md 第十一节。
 !utils-support-native-sysinformer/src/main/rust/Cargo.lock
+# 例外：CI 夹具的 jar **必须入库**。
+# `utils-support-native-sysinformer` 唯一的外部 com.chua 依赖就是它，而：
+#   * 它在 GitHub Packages 上的那份是**更早的构建**（1,048 个 .class，
+#     本机 2,294 个），**缺 NativeLoader** —— SysInformerNative 直接 import
+#     它，用远端那份根本编不过；
+#   * 本机那份从未发布到任何远端。
+# 所以把本机构建的那份作为夹具提交，供 CI `install:install-file`。
+# 与 Cargo.lock 同理：不开例外时 `*.jar` 会把它悄悄挡掉 ——
+# 2026-10-03 就踩了一次，`git add` 后 `git status` 里根本看不到这个文件。
+!utils-support-native-sysinformer/src/ci-fixture/*.jar
 **/*.log
 **/target/
 
