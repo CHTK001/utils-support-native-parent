@@ -79,6 +79,19 @@ utils-support-native-sysinformer-java8/     Java 8 JNA 绑定（独立模块）
 | `gpu.list` | — | GPU 适配器（厂商由 PCI VEN_ 判定） | — |
 | `sensor.list` | — | 温度/风扇/电压 | 多半为空，见下 |
 | `memory.modules` | — | 物理内存条（DDR4/2666MHz/Kingston…） | Win WMI / Linux DMI 需 root |
+| `battery.list` | — | 电池列表（名称、百分比、状态、剩余/充满时间）。**无电池设备返回空列表**，不是错误 | — |
+
+> **`battery.list` 此前漏在文档外**（2026-10-04 补）：它在三平台都有实现
+> （`platform_windows.rs` / `platform_linux.rs` / `platform_macos.rs` 各有
+> 分发点），验收里也一直在测（Linux 侧 `BATTERY_VALUE_OK` 3 用例），
+> 但 README 的 op 表里没有它 —— 调用方无从得知这个 op 存在。
+> 这是「代码有、文档无」的反向缺口，与 `NetworkConnect` 那种「文档有、
+> 代码无」正好相反，但同样会让调用方误判能力边界。
+>
+> 取值来源：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、
+> macOS `pmset -g batt`。注意 **Windows/macOS 的真机取值尚未对账**
+> （测试环境无电池设备），可用 `tools/sysinformer-accept/battery_verify_device.py`
+> 在任意笔记本上验证；详见 `ACCEPTANCE.md` 未验项 #6。
 
 ### 进程级
 
