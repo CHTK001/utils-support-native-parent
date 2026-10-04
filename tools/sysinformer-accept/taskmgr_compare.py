@@ -106,13 +106,21 @@ print("=" * 74)
 print("\n[1] CPU 总占用率")
 call("system.snapshot")          # 建立本库基线
 time.sleep(0.4)
-# CPU 判定**不在本脚本内做**：本库 refresh 窗口 ~27ms，PDH CookedValue 窗口 ~1s，
-# 两侧量级不同，任何 pp 级比较都不可靠（逐次差标准差约 14pp）。
-# 已验证：旧口径（100-%Idle）在这个判据下稳定 FAILED，新口径两轮 OK。
-# 权威判据见同目录 cpu_windowed_compare.py（TASKMGR_CPU_WINDOWED_OK）。
+# CPU 判定**不在本脚本内做**：判定见同目录 cpu_windowed_compare.py。
+#
+# 2026-10-04 更正：这里原来写「本库 refresh 窗口 ~27ms，PDH CookedValue
+# 窗口 ~1s，两侧量级不同，任何 pp 级比较都不可靠」。**那个理由已经过期** ——
+# `MIN_COLLECT_INTERVAL_MS` 从 100ms 提到 1000ms 之后，本库窗口也是 ~1s
+# 了。留着这句话会让人以为「窗口不同所以不能比」，从而看不出真正的问题：
+# 短窗口本身会**让读数偏低负载处虚高 4~5.5pp**（2026-10-04 实测并修复）。
+#
+# 现在的实际情况（同一轮 CI 实测）：
+#   本库窗口      ~1s（`MIN_COLLECT_INTERVAL_MS = 1000`）
+#   参照(PHD/原始累计计数器)  ~1s
+#   窗口对齐后 均值差 = +0.031pp（窗口改前是 +2.051pp）
+# 即两侧同窗口同口径，可以直接比 —— 这也正是改成 1s 的收益之一。
 print("    CPU 判定改由 cpu_windowed_compare.py 给出（窗口对齐判据）")
-print("    原因：本库窗口 ~27ms vs PDH ~1s，逐次差标准差约 14pp，")
-print("          在此之上做 pp 阈值判定只会随机红绿。")
+print("    本库窗口与参照同为 ~1s，测得均值差 +0.03pp（窗口改前 +2.05pp）。")
 
 # ---- 2) 内存 ----
 # 必须紧邻采样：若 api 与 ref 之间隔着「遍历 300+ 进程」的耗时，
