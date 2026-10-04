@@ -1284,7 +1284,8 @@ python tools/sysinformer-accept/cpu_accuracy.py <dll> --phase-sec 25
   本轮因此修掉三个此前无人发现的缺陷：Windows 句柄少报约 80%、首次调用 CPU 报 100%、
   Windows CPU 口径与任务管理器差 +2.96 ~ +5.17pp。三者**编译、类型检查、
   30 项生产验收、冒烟测试全部发现不了**。
-- **四平台生产验收：全部通过**（run 36995361316，sha `2deb08a`，结论 `success`）。
+- **四平台生产验收：全部通过**（run 37176426827，sha `1108fc4`，结论 `success`；
+  同源的另一轮 run 37172678738 亦全绿 —— 两轮 sha 不同、构建输入相同）。
   linux 33/33、windows 33/33、darwin-arm64 31/31、darwin-x86_64 31/31
   （macOS 少 2 项是 `events.*` 硬限制，日志有明确说明）。
   CPU 判据：有效配对 55，均值差 **+0.031pp** ≤ 4.0pp，`TASKMGR_CPU_WINDOWED_OK`
@@ -1307,6 +1308,14 @@ python tools/sysinformer-accept/cpu_accuracy.py <dll> --phase-sec 25
 - **交付物与被验收产物一致：已用逐字节比对证明**（见第九节），
   且 Windows 产物经两次独立构建复现，四个平台现在都能用 md5 绑定。
   此前「四平台入库产物已验证」对 macOS 与 Windows 都不成立，已修正。
+- **交付物（Maven 构件）本身也已核对**：调用方拿到的是 jar，不是仓库里的
+  文件，所以核对链延伸到打包结果。两个 jar 都验过 ——
+  `utils-support-native-sysinformer`（Java 25 FFM）与
+  `utils-support-native-sysinformer-java8`（Java 8 JNA，用 `<resource>`
+  **复用**同一批原生库），各自嵌的四个平台库与 git HEAD **逐字节一致**、
+  绑定类齐全（CI 实测 `JAR_DELIVERY_OK` + 自检 `SELFTEST_OK`）。
+  `mvn compile` 通过**不等于**打包正确（资源过滤/打包排除写错时，
+  编译、单测、冒烟全都发现不了），这是此前一直没验的一环。
 - **"生产级"口径：三平台（Windows/Linux/macOS）生产验收全绿，
   四平台运行时冒烟全覆盖。**
   仍未落实的未验项：**#6**（Windows/macOS 电池取值分支需真机；
