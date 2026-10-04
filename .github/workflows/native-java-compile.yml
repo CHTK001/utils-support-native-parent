@@ -287,6 +287,25 @@ jobs:
           tail -40 /tmp/mvn.log
           exit 1
 
+      - name: 交付物核对（jar 内原生库 == 入库且已验收的那份）
+        if: steps.creds.outputs.have == 'yes'
+        # 此前所有核对都停在 `src/main/resources/native/` 这一层
+        # （`verify_delivered.py` 比的是「仓库里的文件 == CI 编出来的」），
+        # 而**调用方拿到的是 Maven 构件（jar）**，不是仓库里的文件。
+        #
+        # `mvn compile` 通过 **不等于** 打出来的 jar 里装对了东西：
+        # 资源过滤、`<resources>` 配置写错、打包排除，都会让 jar 里少一个
+        # 平台的库或装成旧的那份，而**编译、单测、冒烟全都发现不了**
+        # —— 它们读的是 `target/classes` 或源码目录。
+        #
+        # 这是本模块反复踩过的「报告/产物/交付脱节」的最后一段：
+        # **交付物本身没被核对过**。
+        run: |
+          set -euo pipefail
+          MOD=utils-support-native-sysinformer
+          mvn -B -ntp -q -f "$MOD/pom.xml" -DskipTests package
+          python -X utf8 tools/sysinformer-accept/verify_jar_native.py
+
       - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
         # 未验项 #2 的收口步骤。
         #
