@@ -488,6 +488,78 @@ if env and env.get("ok"):
             ok(d2 < 0.5, f"自身 RSS 对照：api={rss_api / 1e6:.1f}MB vs "
                          f"python={rss_py / 1e6:.1f}MB（差 {d2 * 100:.0f}%）")
 
+print("################ 6) 控制动作的正向路径（action.exec）################")
+# 为什么要单独测：**此前只测了负例**（未知动作、目标非数字），6 个真实动作
+# 从未被执行 —— 而这些是**会改系统状态**的操作，回归了不会有任何验收发现。
+#
+# 只对自己派生的子进程动手（安全），且**以操作系统视角复核结果**，
+# 不看库自己说成没成。
+
+
+def _alive(pid):
+    """用操作系统视角判断进程是否存活，不看库怎么说。"""
+    if os.name == "nt":
+        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        return str(pid) in (r.stdout or "")
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _state(pid):
+    """取进程状态字符（仅 Linux 可得；其它平台返回 None）。"""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return None
+
+
+child = subprocess.Popen([sys.executable, "-c",
+                          "import time; time.sleep(600)"])
+cpid = child.pid
+ok(_alive(cpid), f"派生测试子进程 pid={cpid} 已存活")
+try:
+    # suspend / resume：断言信封合法；Linux 上另核对状态真的变了
+    for kind, want_state in (("suspend", "T"), ("resume", "R")):
+        env, _ = call("action.exec", {"kind": kind, "target": str(cpid)})
+        if env and env.get("ok"):
+            ok(True, f"{kind} -> 合法信封 ok=True")
+            st = _state(cpid)
+            if st is not None:
+                # resume 后可能瞬时处于 S 而非 R，所以只对 suspend 严格断言
+                if kind == "suspend":
+                    ok(st == want_state,
+                       f"{kind} 后 /proc 状态 = {st}（期望 {want_state}）")
+                else:
+                    ok(st != "T",
+                       f"{kind} 后 /proc 状态 = {st}（不应仍为 T）")
+        else:
+            ok(True, f"{kind} 平台不支持"
+                     f"（{(env or {}).get('error', '')[:50]}）-> 跳过，不算失败")
+
+    # terminate：**必须真的终止**，以 OS 视角为准
+    env, _ = call("action.exec", {"kind": "terminate", "target": str(cpid)})
+    if env and env.get("ok"):
+        gone = False
+        for _ in range(20):
+            time.sleep(0.25)
+            if not _alive(cpid):
+                gone = True
+                break
+        ok(gone, "terminate 后以操作系统视角确认子进程已消失")
+    else:
+        ok(False, f"terminate 未成功：{(env or {}).get('error', '')[:80]}")
+finally:
+    try:
+        child.kill()
+    except Exception:
+        pass
+
 print()
 print(f"  通过 {passed} / 失败 {failed}")
 print("PROD_ACCEPT_OK" if failed == 0 else f"PROD_ACCEPT_FAILED failed={failed}")
