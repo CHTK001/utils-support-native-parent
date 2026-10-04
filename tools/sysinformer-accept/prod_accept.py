@@ -529,15 +529,26 @@ try:
         env, _ = call("action.exec", {"kind": kind, "target": str(cpid)})
         if env and env.get("ok"):
             ok(True, f"{kind} -> 合法信封 ok=True")
-            st = _state(cpid)
-            if st is not None:
-                # resume 后可能瞬时处于 S 而非 R，所以只对 suspend 严格断言
-                if kind == "suspend":
-                    ok(st == want_state,
-                       f"{kind} 后 /proc 状态 = {st}（期望 {want_state}）")
+            if _state(cpid) is not None:
+                # **必须轮询等待状态落定**，不能调完立刻读一次：
+                # `suspend` 之后内核把任务标为 T 需要一点时间，立刻读会
+                # 偶发读到旧状态 -> 变成 flaky 红。这里最多等 2s。
+                want = (want_state if kind == "suspend" else None)
+                settle = None
+                for _ in range(20):
+                    settle = _state(cpid)
+                    if settle is None:
+                        break
+                    if (want is not None and settle == want) or \
+                       (want is None and settle != "T"):
+                        break
+                    time.sleep(0.1)
+                if want is not None:
+                    ok(settle == want,
+                       f"{kind} 后 /proc 状态 = {settle}（期望 {want}）")
                 else:
-                    ok(st != "T",
-                       f"{kind} 后 /proc 状态 = {st}（不应仍为 T）")
+                    ok(settle != "T",
+                       f"{kind} 后 /proc 状态 = {settle}（不应仍为 T）")
         else:
             ok(True, f"{kind} 平台不支持"
                      f"（{(env or {}).get('error', '')[:50]}）-> 跳过，不算失败")
