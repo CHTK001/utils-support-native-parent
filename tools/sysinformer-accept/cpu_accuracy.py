@@ -190,11 +190,97 @@ def main():
                     help="忙线程数，默认核数的一半")
     ap.add_argument("--selftest", action="store_true",
                     help="只验证忙线程真的在吃 CPU，不跑完整判据")
+    ap.add_argument("--probe", action="store_true",
+                    help="诊断模式：空转采样，逐条打印库的前若干样本与参照，"
+                         "用于定位「低负载时偏高」这类只在空闲机器上出现的问题")
     args = ap.parse_args()
 
     LIB = load_lib(os.path.abspath(args.lib))
     n = ncpu()
     busy = args.busy if args.busy is not None else max(1, n // 2)
+
+    if args.probe:
+        # ---- 诊断模式 --------------------------------------------------
+        #
+        # 起因：CI 实测（run 37169196233，4 核空闲 runner）
+        #
+        #   阶段1 基线      库 6.404%（n=448）   参照 0.893%（n=25）
+        #   阶段2 加负载    库 25.614%（n=220）  参照 25.265%（n=25）
+        #   增量之差 -5.162pp -> 判定失败
+        #
+        # 空闲时偏高 5.5pp，到 25% 负载时两者一致。**本机永远 98%+，
+        # 所以这个问题只可能在空闲机器上暴露** —— 而此前 ±4.0pp 的容差
+        # 把它盖住了，这正是「容差 ≠ 准确」的实例。
+        #
+        # 算术线索：5.5pp × 448 样本 ≈ 2464 样本pp；若有 ~25 个样本读到
+        # 约 100%，正好等于这个量 —— 指向**预热值未被丢弃**。
+        # 本模式把前若干样本逐条打出来，让这个假设可直接证伪。
+        print(f"=== 诊断模式：空转采样 {args.phase_sec}s ===")
+        print("  目的：定位「低负载时偏高」。重点看**前若干个样本**是否异常高。")
+        first = True
+        vals = []
+        t_start = time.time()
+        tp = subprocess.Popen(
+            ["typeperf", r"\Processor(_Total)\% Processor Time",
+             "-si", "1", "-sc", str(args.phase_sec)]
+            if sys.platform == "win32" else
+            ["python", "-c", "import time"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="replace")
+        ref = []
+        import threading as _th
+        stop = _th.Event()
+
+        def refstream():
+            if sys.platform != "win32":
+                return
+            for line in tp.stdout:
+                line = line.strip().strip('"')
+                if not line or line.startswith("("):
+                    continue
+                parts = line.split('","')
+                if len(parts) >= 2:
+                    try:
+                        ref.append(float(parts[1].strip('"')))
+                    except ValueError:
+                        pass
+
+        rt = _th.Thread(target=refstream, daemon=True)
+        rt.start()
+
+        while time.time() - t_start < args.phase_sec:
+            try:
+                env = call("system.snapshot")
+            except Exception:
+                time.sleep(0.05)
+                continue
+            u = ((env.get("data") or {}).get("cpu") or {}).get("usage")
+            if isinstance(u, (int, float)):
+                vals.append(float(u))
+                if len(vals) <= 30:
+                    tag = "  <-- 预热（首个样本）" if first else ""
+                    print(f"    #{len(vals):<3} t={time.time() - t_start:6.3f}s  "
+                          f"usage={float(u):7.3f}%{tag}")
+                    first = False
+            time.sleep(0.05)
+        stop.set()
+        try:
+            tp.wait(timeout=5)
+        except Exception:
+            pass
+
+        print(f"\n  采样 {len(vals)} 条，参照 {len(ref)} 条")
+        if len(vals) > 30:
+            tail = vals[30:]
+            print(f"  前 30 条均值 = {statistics.mean(vals[:30]):7.3f}%")
+            print(f"  其余均值     = {statistics.mean(tail):7.3f}%")
+            print(f"  全部均值     = {statistics.mean(vals):7.3f}%")
+            print(f"  若「其余均值」显著低于「前 30 条均值」，"
+                  f"则**预热值未被丢弃**成立")
+        if ref:
+            print(f"  参照均值     = {statistics.mean(ref):7.3f}%  (n={len(ref)})")
+        print("\n  CPU_PROBE_DONE")
+        return 0
 
     if args.selftest:
         # 忙线程自测：确认忙循环真的在吃 CPU（sleep 会假通过）。
