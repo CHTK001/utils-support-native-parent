@@ -99,9 +99,15 @@ def _burn(stop):
 
 
 def measure(seconds, label, reference):
-    """同时采样库与参照，返回 (库均值, 参照均值, 库样本数, 参照样本数, 库跨度)。
+    """同时采样库与参照。
 
-    `reference` 是一个可迭代的 (值) 生成器，由平台相关的实现提供。
+    返回 (库均值, 参照均值, 库样本数, 参照样本数, 库跨度, 库样本列表)。
+
+    **把原始样本一并返回**：判定失败时要靠它们做诊断（前 N 条 vs 其余）。
+    此前把诊断做成单独的 `--probe` 调用，结果我在 workflow 里把时长
+    当位置参数传（`--probe 12`），argparse 直接报错、诊断根本没跑 ——
+    同一类错误犯了三次。修法是**消除这个错误类别**：诊断并入失败路径，
+    只有一种调用形式。
     """
     stop = threading.Event()
     samples = []
@@ -134,7 +140,46 @@ def measure(seconds, label, reference):
     span = (max(ts) - min(ts)) if len(ts) > 1 else 0.0
     print(f"  [{label}] 库均值={lm:7.3f}% (n={len(samples)})   "
           f"参照均值={rm:7.3f}% (n={len(ref)})   库跨度={span:.1f}s")
-    return lm, rm, len(samples), len(ref), span
+    return lm, rm, len(samples), len(ref), span, samples
+
+
+def diagnose(label, samples):
+    """逐样本分解：前 N 条 vs 其余。
+
+    用来区分两种成因（处置完全不同）：
+
+    * 前 N 条显著更高 -> **预热值未被丢弃**（丢预热即可修）
+    * 前 N 条与其余相当 -> **系统性偏移**（要改采集方式）
+
+    N 取 30：CI 实测空闲时库偏高 5.5pp、样本 455 条，
+    5.5 × 455 ≈ 2500 样本pp；若约 25 条读到 ~100% 正好等于这个量，
+    所以前 30 条足以看出。
+    """
+    if not samples:
+        return
+    head, tail = samples[:30], samples[30:]
+    print(f"    [诊断 {label}] 前 30 条均值 = {statistics.mean(head):7.3f}%")
+    if tail:
+        print(f"                   其余 {len(tail)} 条均值 = "
+              f"{statistics.mean(tail):7.3f}%")
+        print(f"                   全部均值        = "
+              f"{statistics.mean(samples):7.3f}%")
+        hi = sum(1 for v in head if v > 50)
+        print(f"                   前 30 条里 >50% 的条数 = {hi}")
+        overall = statistics.mean(samples)
+        if overall > 90.0:
+            # 饱和时该诊断不适用：此时几乎所有样本都贴着 ~100%，
+            # 「前段略高于后段」只是正常波动。本机实测就出现过
+            # 94.391 vs 91.222（差 3.17，刚过 3.0 阈值）而误报
+            # 「预热值未被丢弃」。所以先判适用性，再下结论。
+            print(f"                   -> 本段均值 {overall:.1f}% 接近饱和，"
+                  f"**该诊断不适用**（前后差异属正常波动）")
+        elif statistics.mean(head) - statistics.mean(tail) > 3.0:
+            print("                   -> 前段明显更高，**预热值未被丢弃**")
+        else:
+            print("                   -> 前后相当，属**系统性偏移**")
+    print("                   前 12 条：" +
+          ", ".join(f"{v:.2f}" for v in samples[:12]))
 
 
 def win_reference(seconds):
@@ -190,97 +235,17 @@ def main():
                     help="忙线程数，默认核数的一半")
     ap.add_argument("--selftest", action="store_true",
                     help="只验证忙线程真的在吃 CPU，不跑完整判据")
-    ap.add_argument("--probe", action="store_true",
-                    help="诊断模式：空转采样，逐条打印库的前若干样本与参照，"
-                         "用于定位「低负载时偏高」这类只在空闲机器上出现的问题")
+    # 刻意**不提供单独的诊断模式**。
+    # 诊断（前 30 条 vs 其余）已并入判定失败路径自动打印。
+    # 2026-10-04 教训：曾提供 `--probe`，而 `--probe` 是开关、时长要走
+    # `--phase-sec`，我在 workflow 里写成 `--probe 12`，argparse 直接报错、
+    # 诊断根本没跑 —— 同一类错误（时长当位置参数）犯了三次。
+    # 减少调用形式比反复改正调用更可靠。
     args = ap.parse_args()
 
     LIB = load_lib(os.path.abspath(args.lib))
     n = ncpu()
     busy = args.busy if args.busy is not None else max(1, n // 2)
-
-    if args.probe:
-        # ---- 诊断模式 --------------------------------------------------
-        #
-        # 起因：CI 实测（run 37169196233，4 核空闲 runner）
-        #
-        #   阶段1 基线      库 6.404%（n=448）   参照 0.893%（n=25）
-        #   阶段2 加负载    库 25.614%（n=220）  参照 25.265%（n=25）
-        #   增量之差 -5.162pp -> 判定失败
-        #
-        # 空闲时偏高 5.5pp，到 25% 负载时两者一致。**本机永远 98%+，
-        # 所以这个问题只可能在空闲机器上暴露** —— 而此前 ±4.0pp 的容差
-        # 把它盖住了，这正是「容差 ≠ 准确」的实例。
-        #
-        # 算术线索：5.5pp × 448 样本 ≈ 2464 样本pp；若有 ~25 个样本读到
-        # 约 100%，正好等于这个量 —— 指向**预热值未被丢弃**。
-        # 本模式把前若干样本逐条打出来，让这个假设可直接证伪。
-        print(f"=== 诊断模式：空转采样 {args.phase_sec}s ===")
-        print("  目的：定位「低负载时偏高」。重点看**前若干个样本**是否异常高。")
-        first = True
-        vals = []
-        t_start = time.time()
-        tp = subprocess.Popen(
-            ["typeperf", r"\Processor(_Total)\% Processor Time",
-             "-si", "1", "-sc", str(args.phase_sec)]
-            if sys.platform == "win32" else
-            ["python", "-c", "import time"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", errors="replace")
-        ref = []
-        import threading as _th
-        stop = _th.Event()
-
-        def refstream():
-            if sys.platform != "win32":
-                return
-            for line in tp.stdout:
-                line = line.strip().strip('"')
-                if not line or line.startswith("("):
-                    continue
-                parts = line.split('","')
-                if len(parts) >= 2:
-                    try:
-                        ref.append(float(parts[1].strip('"')))
-                    except ValueError:
-                        pass
-
-        rt = _th.Thread(target=refstream, daemon=True)
-        rt.start()
-
-        while time.time() - t_start < args.phase_sec:
-            try:
-                env = call("system.snapshot")
-            except Exception:
-                time.sleep(0.05)
-                continue
-            u = ((env.get("data") or {}).get("cpu") or {}).get("usage")
-            if isinstance(u, (int, float)):
-                vals.append(float(u))
-                if len(vals) <= 30:
-                    tag = "  <-- 预热（首个样本）" if first else ""
-                    print(f"    #{len(vals):<3} t={time.time() - t_start:6.3f}s  "
-                          f"usage={float(u):7.3f}%{tag}")
-                    first = False
-            time.sleep(0.05)
-        stop.set()
-        try:
-            tp.wait(timeout=5)
-        except Exception:
-            pass
-
-        print(f"\n  采样 {len(vals)} 条，参照 {len(ref)} 条")
-        if len(vals) > 30:
-            tail = vals[30:]
-            print(f"  前 30 条均值 = {statistics.mean(vals[:30]):7.3f}%")
-            print(f"  其余均值     = {statistics.mean(tail):7.3f}%")
-            print(f"  全部均值     = {statistics.mean(vals):7.3f}%")
-            print(f"  若「其余均值」显著低于「前 30 条均值」，"
-                  f"则**预热值未被丢弃**成立")
-        if ref:
-            print(f"  参照均值     = {statistics.mean(ref):7.3f}%  (n={len(ref)})")
-        print("\n  CPU_PROBE_DONE")
-        return 0
 
     if args.selftest:
         # 忙线程自测：确认忙循环真的在吃 CPU（sleep 会假通过）。
@@ -337,7 +302,7 @@ def main():
         print("  预热失败:", e)
         return 3
 
-    L1, R1, n1, r1, sp1 = measure(args.phase_sec, "阶段1 基线", ref_fn)
+    L1, R1, n1, r1, sp1, s1 = measure(args.phase_sec, "阶段1 基线", ref_fn)
 
     global _busy_stop
     _busy_stop = threading.Event()
@@ -345,7 +310,7 @@ def main():
         threading.Thread(target=_burn, args=(_busy_stop,), daemon=True).start()
     time.sleep(2)
 
-    L2, R2, n2, r2, sp2 = measure(args.phase_sec, "阶段2 加负载", ref_fn)
+    L2, R2, n2, r2, sp2, s2 = measure(args.phase_sec, "阶段2 加负载", ref_fn)
     _busy_stop.set()
 
     if min(r1, r2) < args.phase_sec - 2 or min(n1, n2) < 20:
@@ -361,6 +326,14 @@ def main():
     print(f"\n  库的增量   = {dL:+.3f}pp   ({L1:.2f} -> {L2:.2f})")
     print(f"  参照的增量 = {dR:+.3f}pp   ({R1:.2f} -> {R2:.2f})")
     print(f"  增量之差   = {dL - dR:+.3f}pp")
+
+    # ---- 诊断并入失败路径 ------------------------------------------
+    # 只在需要时才打印（通过时不刷屏），但**不需要第二次调用**。
+    # 这一并消除了「把时长当位置参数传给 --probe」那类错误。
+    if dR < MIN_INCREMENT_PP or abs(dL - dR) > max(3.0, abs(dR) * 0.10):
+        print("\n  ---- 逐样本诊断 ----")
+        diagnose("阶段1 基线", s1)
+        diagnose("阶段2 加负载", s2)
 
     print("\n=== 判读 ===")
     if dR < MIN_INCREMENT_PP:
