@@ -609,6 +609,12 @@ jobs:
             #  runner 当时被别的作业占满了。）
             Write-Host "::warning title=CPU 准确性未判定::增量 < 5pp，机器饱和、无判别力。不是通过，是没测到。"
           } elseif ($rc -eq 1) {
+            # 判定失败时**顺带跑一次诊断模式**，把「前若干样本」打出来 ——
+            # 定位「低负载时偏高」这类只在空闲机器上出现的问题，
+            # 本机（长期 98%+）复现不了，只能靠 CI 的这份数据。
+            Write-Host "::group::CPU accuracy probe (diagnostic)"
+            python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll --probe 12
+            Write-Host "::endgroup::"
             throw "cpu_accuracy 判定失败：库对负载变化的响应与参照不一致 (rc=1)"
           } elseif ($rc -ne 0) {
             # 其余退出码是**脚本/用法问题**，不是判据结论。
