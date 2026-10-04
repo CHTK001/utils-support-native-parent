@@ -302,8 +302,11 @@ jobs:
         # **交付物本身没被核对过**。
         run: |
           set -euo pipefail
-          MOD=utils-support-native-sysinformer
-          mvn -B -ntp -q -f "$MOD/pom.xml" -DskipTests package
+          # 两个交付物都要打包：sysinformer（FFM）与 java8（JNA）。
+          # java8 的 pom 用 <resource> 指向 sysinformer 的 resources/native
+          # **复用**同一批原生库 —— 它是第二个把原生库发给调用方的构件。
+          mvn -B -ntp -q -f utils-support-native-sysinformer/pom.xml -DskipTests package
+          mvn -B -ntp -q -f utils-support-native-sysinformer-java8/pom.xml -DskipTests package
           # 先自检（故意篡改 1 字节，确认核对真能报错），再对真实 jar 核对。
           # 「先证明门禁能报错，再相信它的通过」—— 本模块在这条上栽过多次
           # （自制 shell 检查器曾对含引号内 # 的行测不出不配对）。
