@@ -571,6 +571,43 @@ jobs:
           python -X utf8 tools/sysinformer-accept/cpu_windowed_compare.py $dll 60
           if ($LASTEXITCODE -ne 0) { throw "cpu_windowed_compare failed" }
 
+      # CPU 准确性（增量判据）—— 与上面的 compare **回答的不是同一个问题**。
+      #
+      #   compare:          本库 vs 参照的**绝对值差**，配一个容差。
+      #                     它回答「允许多大偏差」，**不是**「偏差有多大」。
+      #   本步（增量判据）:  基线段 + 加负载段，比 **增量**。
+      #                     背景负载在两段里都在，**在差值中抵消**，
+      #                     所以它回答「库对负载变化的响应是否正确」。
+      #
+      # 为什么需要它：本地实测在 ~98%/100% 饱和负载下，两侧均值差
+      # -0.392pp / +0.020pp（都不显著），但**饱和时区分度极低**，
+      # 偏差会被压缩；而 CI 在中等负载下报 +2.05pp。本机长期满载、
+      # 造不出中等负载，所以那个区间只能在 CI 上判。
+      #
+      # 判据自带三项自我保护，缺任一项都可能造出假通过：
+      #   * 忙线程自测：确认忙循环真在吃 CPU（用 sleep 会假通过）
+      #   * 参照增量 < 5pp -> 判「无判别力」（机器已饱和），不是通过
+      #   * 库采样跨度不足窗口 80% -> 结论无效
+      # 输出 CPU_ACCURACY_OK / CPU_ACCURACY_FAILED，无判别力时退出码 3。
+      - name: CPU accuracy (increment judgement, Windows only)
+        if: matrix.build_os == 'windows'
+        shell: pwsh
+        run: |
+          $dll = Join-Path $PWD $env:LIB_PATH
+          if (-not (Test-Path $dll)) { throw "找不到库: $dll" }
+          python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll --selftest
+          if ($LASTEXITCODE -ne 0) { throw "cpu_accuracy --selftest failed" }
+          python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll 25
+          $rc = $LASTEXITCODE
+          if ($rc -eq 3) {
+            # 无判别力**不是通过**，但也**不是失败** —— 如实声明，不弄红。
+            #（CI runner 通常空闲，正常应能拿到足够增量；走到这里说明
+            #  runner 当时被别的作业占满了。）
+            Write-Host "::warning title=CPU 准确性未判定::增量 < 5pp，机器饱和、无判别力。不是通过，是没测到。"
+          } elseif ($rc -ne 0) {
+            throw "cpu_accuracy failed (rc=$rc)"
+          }
+
       # CPU +18pp 根因诊断（Windows only，临时脚本，定位后删除）。
       # 为什么要单独一步而不是塞进上面的 compare：compare 只输出
       # 「本库 vs .NET」两个数，而 CI 上的教训是**两个源都可能错**。

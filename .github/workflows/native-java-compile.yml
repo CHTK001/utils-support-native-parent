@@ -150,6 +150,75 @@ jobs:
           # 不打印文件内容（含密码占位引用），只确认结构
           echo "settings.xml 已生成，servers 数 = $(grep -c '<server>' "$HOME/.m2/settings.xml")"
 
+      - name: 装入 CI 夹具（utils-support-common-starter + 父链 pom）
+        if: steps.creds.outputs.have == 'yes'
+        # **必须排在「全反应堆编译」之前。**
+        #
+        # 2026-10-04 实测：装夹具 + 真实远端凭据后，全反应堆 18 个模块
+        # `mvn clean compile` **BUILD SUCCESS**、解析失败坐标 **0 个**
+        # （用空本地仓库复现，见本仓说明）。而此前它一直报「环境阻塞」，
+        # 原因是**顺序**：夹具装在反应堆编译**之后**，编译时仓库里什么都没有。
+        #
+        # 所以「全反应堆编译不了」不是缺更多构件，是步骤顺序错了。
+        #
+        # ---
+        # sysinformer 的外部 com.chua 依赖是 `utils-support-common-starter`。
+        # 它在 GitHub Packages 上确实存在，但**远端那份是更早的构建**：
+        # 实测远端 1,048 个 .class、本机 2,294 个，且远端**缺 NativeLoader**
+        # —— 而 SysInformerNative 直接 import 它，用远端那份根本编不过。
+        # 而本机那份从未发布到任何远端，所以把本机的 jar 作为**仓库内夹具**
+        # 提交（src/ci-fixture/），先 install 进本地仓库再编译。
+        #
+        # **为什么不直接发布到 GitHub Packages**：那会覆盖同坐标上已存在的
+        # 4.0.0.42（与本机字节不同），影响所有解析该坐标的人，且不可逆 ——
+        # 需要单独的决策，不该由 CI 改动顺手做掉。夹具方案效果相同、
+        # 零外部影响、可逆（删一个目录即可）。
+        run: |
+          set -euo pipefail
+          FX=utils-support-native-sysinformer/src/ci-fixture
+          GAV=utils-support-common-starter-4.0.0.42
+          for f in "$GAV.jar" "$GAV.pom"; do
+            [ -f "$FX/$f" ] || { echo "缺少夹具 $FX/$f"; exit 1; }
+            echo "  夹具 $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
+          done
+          REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42"
+          [ -d "$REP" ] && rm -rf "$REP"
+
+          # ---- 装入全部夹具：依赖 jar + **父链 pom** ------------------
+          #
+          # 为什么要父链：`common-starter` 的 parent 是
+          # `utils-support-core-parent`，再上是 `utils-support-parent-starter`。
+          # 只装依赖本身时，Maven 仍要去远端解析这两个父 pom，
+          # 于是又撞上 aliyun 的 403，报 `core-parent:pom ... (absent)`。
+          #
+          # **纯 pom 构件必须同时给 `-Dfile`**。2026-10-03 踩过：
+          # 只传 `-DpomFile` 时 `install:install-file` **静默失败**
+          # （不报错、什么都没装），于是父 pom 根本没进仓库，
+          # 表现出来就是「构件明明装了却说 absent」这种极难定位的现象。
+          install_fixture() {
+            local art="$1" jar="$2"
+            local pom="$FX/$art-4.0.0.42.pom"
+            [ -f "$pom" ] || { echo "::error title=缺少夹具 pom::$pom"; exit 1; }
+            if [ -f "$jar" ]; then
+              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+                "-Dfile=$jar" "-DpomFile=$pom"
+            else
+              echo "  装入纯 pom 构件 $art"
+              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+                "-Dfile=$pom" "-DpomFile=$pom"
+            fi
+          }
+
+          install_fixture utils-support-common-starter "$FX/$GAV.jar"
+          install_fixture utils-support-core-parent ""
+          install_fixture utils-support-parent-starter ""
+
+          GOT=$(wc -c < "$REP/$GAV.jar")
+          echo "  安装后 jar 大小 = $GOT"
+          [ "$GOT" = "4558874" ] || {
+            echo "::error title=装入的夹具不是预期那份::实际 $GOT 字节，期望 4558874"; exit 1; }
+          echo "FIXTURE_INSTALLED"
+
       - name: Java 侧编译（native-parent 全反应堆）
         if: steps.creds.outputs.have == 'yes'
         run: |
@@ -217,75 +286,6 @@ jobs:
           echo "::error title=Java 编译失败（非依赖解析问题）::请看 /tmp/mvn.log"
           tail -40 /tmp/mvn.log
           exit 1
-
-      - name: 装入 CI 夹具（utils-support-common-starter）
-        if: steps.creds.outputs.have == 'yes'
-        # sysinformer 唯一的外部 com.chua 依赖是 `utils-support-common-starter`。
-        # 它在 GitHub Packages 上确实存在，但**远端那份是更早的构建**：
-        # 实测远端 1,048 个 .class、本机 2,294 个，且远端**缺 NativeLoader**
-        # —— 而 SysInformerNative 直接 import 它，用远端那份根本编不过。
-        #
-        # 而本机那份从未发布到任何远端。所以这里把本机的 jar 作为**仓库内夹具**
-        # 提交（src/ci-fixture/），CI 先 install 进本地仓库再编译。
-        #
-        # **为什么不直接发布到 GitHub Packages**：那会覆盖同坐标上已存在的
-        # 4.0.0.42（与本机字节不同），影响所有解析该坐标的人，且不可逆 ——
-        # 需要单独的决策，不该由 CI 改动顺手做掉。夹具方案效果相同、
-        # 零外部影响、可逆（删一个目录即可）。
-        #
-        # 已用**空仓库本地模拟 CI 验证过**这条路径可行：
-        #   空 localRepository + 夹具 -> compile SUCCESS
-        #   -> dependency:build-classpath SUCCESS -> javac SUCCESS
-        #   -> java -> JAVA25_FFM_SMOKE_OK
-        run: |
-          set -euo pipefail
-          FX=utils-support-native-sysinformer/src/ci-fixture
-          GAV=utils-support-common-starter-4.0.0.42
-          for f in "$GAV.jar" "$GAV.pom"; do
-            [ -f "$FX/$f" ] || { echo "缺少夹具 $FX/$f"; exit 1; }
-            echo "  夹具 $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
-          done
-          # 装具前先清掉该坐标目录，避免全反应堆那一步下载的远端那份
-          # （1,843,758 字节、缺 NativeLoader）与夹具混在一起。
-          REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42"
-          [ -d "$REP" ] && rm -rf "$REP"
-
-          # ---- 装入全部夹具：依赖 jar + **父链 pom** ------------------
-          #
-          # 为什么要父链：`common-starter` 的 parent 是
-          # `utils-support-core-parent`，再上是 `utils-support-parent-starter`。
-          # 只装依赖本身时，Maven 仍要去远端解析这两个父 pom，
-          # 于是又撞上 aliyun 的 403，报 `core-parent:pom ... (absent)`。
-          #
-          # **纯 pom 构件必须同时给 `-Dfile`**。2026-10-03 踩过：
-          # 只传 `-DpomFile` 时 `install:install-file` **静默失败**
-          # （不报错、什么都没装），于是父 pom 根本没进仓库，
-          # 表现出来就是「构件明明装了却说 absent」这种极难定位的现象。
-          #
-          # 装完逐个校验 jar 大小必须是 4,558,874 —— 不是就报错退出。
-          install_fixture() {
-            local art="$1" jar="$2"
-            local pom="$FX/$art-4.0.0.42.pom"
-            [ -f "$pom" ] || { echo "::error title=缺少夹具 pom::$pom"; exit 1; }
-            if [ -f "$jar" ]; then
-              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
-                "-Dfile=$jar" "-DpomFile=$pom"
-            else
-              echo "  装入纯 pom 构件 $art"
-              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
-                "-Dfile=$pom" "-DpomFile=$pom"
-            fi
-          }
-
-          install_fixture utils-support-common-starter "$FX/$GAV.jar"
-          install_fixture utils-support-core-parent ""
-          install_fixture utils-support-parent-starter ""
-
-          GOT=$(wc -c < "$REP/$GAV.jar")
-          echo "  安装后 jar 大小 = $GOT"
-          [ "$GOT" = "4558874" ] || {
-            echo "::error title=装入的夹具不是预期那份::实际 $GOT 字节，期望 4558874"; exit 1; }
-          echo "FIXTURE_INSTALLED"
 
       - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
         # 未验项 #2 的收口步骤。
