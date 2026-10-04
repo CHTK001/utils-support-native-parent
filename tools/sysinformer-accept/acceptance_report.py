@@ -118,11 +118,75 @@ def strip(s):
     return re.sub(r"\x1b\[[0-9;]*m", "", s)
 
 
+def missing_markers(plat, text):
+    """返回该平台**缺失**的判定标记（空列表 = 齐全）。
+
+    抽成独立函数是为了能自检：若这段逻辑坏掉（比如 REQUIRED 被写空、
+    或判定写成恒真），`ACCEPTANCE_REPORT_OK` 就变成假绿灯。
+    """
+    return [k for k in REQUIRED[plat] if k not in text]
+
+
+def selftest():
+    """自检：证明标记判定**能发现缺失**，不是恒真。
+
+    「四平台判定标记齐全」这句话完全依赖 `missing_markers`。若它恒返回空
+    （例如 REQUIRED 被写空、或比较写成 `k in text or True` 之类），
+    这个核对就永远报 OK —— 而本模块反复踩过「门禁自己坏掉却报通过」，
+    所以自检的做法是**故意去掉一个标记，确认它真被发现**。
+    """
+    print("=== acceptance_report 自检：标记判定必须能发现缺失 ===")
+    ok = True
+
+    want = {"windows-x86_64", "linux-x86_64",
+            "darwin-x86_64", "darwin-aarch64"}
+    if set(REQUIRED) != want:
+        print(f"  **REQUIRED 的平台集合异常: {sorted(REQUIRED)}**")
+        ok = False
+    else:
+        print(f"  REQUIRED 覆盖四平台 OK")
+    for p, keys in REQUIRED.items():
+        if not keys:
+            print(f"  **{p} 的必需标记为空 —— 该平台等于不判**")
+            ok = False
+
+    for plat in sorted(REQUIRED):
+        keys = REQUIRED[plat]
+        # ① 全标记文本 -> 不应有缺失
+        full = "\n".join(f"line {k} line" for k in keys)
+        miss = missing_markers(plat, full)
+        if miss:
+            print(f"  {plat:<16} 全标记文本却报缺失 {miss} **FAIL**")
+            ok = False
+        # ② 逐个去掉一个标记 -> 必须被发现
+        for drop in keys:
+            partial = "\n".join(f"line {k} line" for k in keys if k != drop)
+            miss = missing_markers(plat, partial)
+            if drop not in miss:
+                print(f"  {plat:<16} 去掉 {drop} 却没被发现 **FAIL**")
+                ok = False
+        print(f"  {plat:<16} 全标记通过、逐个缺失均被发现  "
+              f"（{len(keys)} 个标记）")
+
+    print()
+    if ok:
+        print("  SELFTEST_OK —— 标记判定能发现缺失，不是恒真")
+        return 0
+    print("  **SELFTEST_FAILED** —— 本核对的「标记齐全」不可采信")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("run_id")
+    ap.add_argument("run_id", nargs="?")
     ap.add_argument("--repo", default=DEFAULT_REPO)
+    ap.add_argument("--selftest", action="store_true",
+                    help="自检标记判定能发现缺失")
     args = ap.parse_args()
+    if args.selftest:
+        return selftest()
+    if not args.run_id:
+        ap.error("需要 run_id（或 --selftest）")
     run = args.run_id
     root = repo_root()
 
@@ -188,11 +252,9 @@ def main():
             text = "\n".join(strip(x) for x in log.splitlines())
             for key in REQUIRED[plat]:
                 n = text.count(key)
-                if n:
-                    marks.append(f"{key}×{n}")
-                else:
-                    marks.append(f"**缺 {key}**")
-                    fails.append(f"{plat}: 日志里没有 {key}")
+                marks.append(f"{key}×{n}" if n else f"**缺 {key}**")
+            for key in missing_markers(plat, text):
+                fails.append(f"{plat}: 日志里没有 {key}")
         arch_txt = {0x8664: "x86_64(PE)", 62: "x86_64(ELF)",
                     0x01000007: "x86_64(Mach-O)",
                     0x0100000C: "arm64(Mach-O)"}.get(arch, str(arch))

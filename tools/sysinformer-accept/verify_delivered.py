@@ -143,13 +143,67 @@ def arch_of(buf, kind):
     return None
 
 
+def selftest(root):
+    """自检：证明**架构判读**不是恒真，且平台表没被写残。
+
+    这个核对的结论全靠 `arch_of()` —— 若它恒返回期望值（或恒返回 None），
+    「架构符合预期 = 是」就是个假绿灯。所以拿四份**真实产物**验它认得对，
+    再拿一段垃圾字节验它认得出来（返回 None）。
+    """
+    print("=== verify_delivered 自检：架构判读必须能分辨、不能恒真 ===")
+    # ① 四份真实产物必须被正确识别
+    ok = True
+    for plat, fn, kind, want in TARGETS:
+        rel = f"{NATIVE}/{plat}/{fn}"
+        b = subprocess.run(["git", "-C", root, "cat-file", "blob",
+                            f"HEAD:{rel}"], capture_output=True).stdout
+        if not b:
+            print(f"  {plat:<16} 取不到入库产物")
+            ok = False
+            continue
+        got = arch_of(b, kind)
+        good = got == want
+        ok = ok and good
+        print(f"  {plat:<16} arch_of={got!r:<12} 期望={want!r:<12} "
+              f"{'OK' if good else '**FAIL**'}")
+    # ② 垃圾字节必须被识别为「读不出」，而不是被当成某个架构
+    junk = b"\x00" * 256
+    got = arch_of(junk, "PE")
+    good = got is None
+    ok = ok and good
+    print(f"  {'（垃圾 256B）':<16} arch_of={got!r:<12} 期望=None          "
+          f"{'OK' if good else '**FAIL（恒真）**'}")
+    # ③ 平台表完整性
+    if len(TARGETS) != 4:
+        print(f"  **TARGETS 只有 {len(TARGETS)} 项，应覆盖四平台**")
+        ok = False
+    names = {p for p, _, _, _ in TARGETS}
+    if names != {"windows-x86_64", "linux-x86_64",
+                 "darwin-x86_64", "darwin-aarch64"}:
+        print(f"  **平台集合异常: {sorted(names)}**")
+        ok = False
+    print()
+    if ok:
+        print("  SELFTEST_OK —— 架构判读能分辨真伪，四平台齐全")
+        return 0
+    print("  **SELFTEST_FAILED** —— 本核对的「架构符合预期」不可采信")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("run_id", help="CI run id，结论必须是 success")
+    ap.add_argument("run_id", nargs="?", help="CI run id，结论必须是 success")
     ap.add_argument("--repo", default=DEFAULT_GH_REPO, help="owner/name")
+    ap.add_argument("--selftest", action="store_true",
+                    help="自检架构判读与平台表")
     args = ap.parse_args()
 
     root = repo_root()
+    if args.selftest:
+        return selftest(root)
+    if not args.run_id:
+        ap.error("需要 run_id（或 --selftest）")
+
     token = gh_token()
     print(f"=== 交付核对：run {args.run_id}  ({args.repo})\n")
 
