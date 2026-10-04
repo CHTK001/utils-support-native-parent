@@ -77,7 +77,7 @@ utils-support-native-sysinformer-java8/     Java 8 JNA 绑定（独立模块）
 | `kernel.modules` | — | 内核模块 / 驱动列表 | — |
 | `service.list` | — | 服务列表（systemd / launchd / SCM） | — |
 | `gpu.list` | — | GPU 适配器（厂商由 PCI VEN_ 判定） | — |
-| `sensor.list` | — | 温度/风扇/电压 | 多半为空，见下 |
+| `sensor.list` | — | 温度/风扇/电压。**平台上读不到传感器时返回 `ok=false` 并给出原因**（不是空列表），详见下表后的说明 | 见下 |
 | `memory.modules` | — | 物理内存条（DDR4/2666MHz/Kingston…） | Win WMI / Linux DMI 需 root |
 | `battery.list` | — | 电池列表（名称、百分比、状态、剩余/充满时间）。**无电池设备返回空列表**，不是错误 | — |
 
@@ -92,6 +92,29 @@ utils-support-native-sysinformer-java8/     Java 8 JNA 绑定（独立模块）
 > macOS `pmset -g batt`。注意 **Windows/macOS 的真机取值尚未对账**
 > （测试环境无电池设备），可用 `tools/sysinformer-accept/battery_verify_device.py`
 > 在任意笔记本上验证；详见 `ACCEPTANCE.md` 未验项 #6。
+
+> ⚠️ **`sensor.list` 与 `battery.list` 在「平台上没有该设备」时约定不同**，
+> 调用方必须分别处理（这是**已记录的已知不一致**，不是笔误）：
+>
+> | op | 平台上没有该设备时 |
+> |---|---|
+> | `battery.list` | `ok=true`、`data=[]`（空列表是正常结果）|
+> | `sensor.list` | **`ok=false`** + 明确原因文字 |
+>
+> 实测 `sensor.list` 在典型 Windows 机器上的返回：
+>
+> ```json
+> {"ok":false,"data":null,
+>  "error":"WMI 未提供任何温度/风扇传感器；多数机器的 BIOS 不实现
+>           MSAcpi_ThermalZoneTemperature，这属于正常情况而非缺陷"}
+> ```
+>
+> 即「读不到」被表达成**带解释的错误**而不是空列表 —— 好处是原因直接送到
+> 调用方面前，坏处是与 `battery.list` 的约定相反。**不要**据 `ok=false`
+> 判断「本模块坏了」；请读 `error`。
+>
+> 另外：本 README 之前此处写的是「多半为空，见下」，而**「下」并不存在**
+> （悬空引用），措辞也与实际行为（`ok=false`）不符 —— 2026-10-04 一并修正。
 
 ### 进程级
 
