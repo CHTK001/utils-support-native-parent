@@ -245,24 +245,42 @@ jobs:
             [ -f "$FX/$f" ] || { echo "缺少夹具 $FX/$f"; exit 1; }
             echo "  夹具 $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
           done
-          # 先把本地仓库里该坐标**已有的任何东西**清掉。
-          #
-          # 为什么必须清：全反应堆编译那一步现在能连上 github-resource 了，
-          # 它会**下载远端那份** jar（1,843,758 字节，且缺 NativeLoader）。
-          # 若不清，后续 install-file 虽然会覆盖 jar，但 `.lastUpdated` /
-          # `resolver-status.properties` 这些**负解析缓存**会留在原地，
-          # 行为就取决于那一步跑没跑过 —— 这正是本地能过、CI 不过的
-          # 唯一已知差异。宁可显式清掉，不依赖覆盖顺序。
+          # 装具前先清掉该坐标目录，避免全反应堆那一步下载的远端那份
+          # （1,843,758 字节、缺 NativeLoader）与夹具混在一起。
           REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42"
-          if [ -d "$REP" ]; then
-            echo "  安装前该坐标已有内容：$(ls "$REP" | tr '\n' ' ')"
-            echo "  jar 大小=$(wc -c < "$REP/$GAV.jar" 2>/dev/null || echo '无')"
-            rm -rf "$REP"
-            echo "  已清空 $REP"
-          fi
-          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
-            "-Dfile=$FX/$GAV.jar" "-DpomFile=$FX/$GAV.pom"
-          # 装完立刻核对：必须是夹具那份（4,558,874 字节），不是远端那份
+          [ -d "$REP" ] && rm -rf "$REP"
+
+          # ---- 装入全部夹具：依赖 jar + **父链 pom** ------------------
+          #
+          # 为什么要父链：`common-starter` 的 parent 是
+          # `utils-support-core-parent`，再上是 `utils-support-parent-starter`。
+          # 只装依赖本身时，Maven 仍要去远端解析这两个父 pom，
+          # 于是又撞上 aliyun 的 403，报 `core-parent:pom ... (absent)`。
+          #
+          # **纯 pom 构件必须同时给 `-Dfile`**。2026-10-03 踩过：
+          # 只传 `-DpomFile` 时 `install:install-file` **静默失败**
+          # （不报错、什么都没装），于是父 pom 根本没进仓库，
+          # 表现出来就是「构件明明装了却说 absent」这种极难定位的现象。
+          #
+          # 装完逐个校验 jar 大小必须是 4,558,874 —— 不是就报错退出。
+          install_fixture() {
+            local art="$1" jar="$2"
+            local pom="$FX/$art-4.0.0.42.pom"
+            [ -f "$pom" ] || { echo "::error title=缺少夹具 pom::$pom"; exit 1; }
+            if [ -f "$jar" ]; then
+              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+                "-Dfile=$jar" "-DpomFile=$pom"
+            else
+              echo "  装入纯 pom 构件 $art"
+              mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
+                "-Dfile=$pom" "-DpomFile=$pom"
+            fi
+          }
+
+          install_fixture utils-support-common-starter "$FX/$GAV.jar"
+          install_fixture utils-support-core-parent ""
+          install_fixture utils-support-parent-starter ""
+
           GOT=$(wc -c < "$REP/$GAV.jar")
           echo "  安装后 jar 大小 = $GOT"
           [ "$GOT" = "4558874" ] || {
