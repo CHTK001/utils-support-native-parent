@@ -304,6 +304,10 @@ jobs:
           set -euo pipefail
           MOD=utils-support-native-sysinformer
           mvn -B -ntp -q -f "$MOD/pom.xml" -DskipTests package
+          # 先自检（故意篡改 1 字节，确认核对真能报错），再对真实 jar 核对。
+          # 「先证明门禁能报错，再相信它的通过」—— 本模块在这条上栽过多次
+          # （自制 shell 检查器曾对含引号内 # 的行测不出不配对）。
+          python -X utf8 tools/sysinformer-accept/verify_jar_native.py --selftest
           python -X utf8 tools/sysinformer-accept/verify_jar_native.py
 
       - name: Java 25 FFM 绑定端到端冒烟（FfmSmoke）
