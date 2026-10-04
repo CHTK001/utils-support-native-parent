@@ -109,7 +109,8 @@ def measure(seconds, label, reference, interval_ms=50):
     同一类错误犯了三次。修法是**消除这个错误类别**：诊断并入失败路径，
     只有一种调用形式。
 
-    `interval_ms` 决定**库的采集窗口**：库内部有 100ms 最小采集间隔，
+    `interval_ms` 决定**库的采集窗口**：库内部有 `MIN_COLLECT_INTERVAL_MS`
+    最小采集间隔（2026-10-04 起为 **1000ms**；此前是 100ms），
     调用快于它时复用上次读数；调用慢于它时，每次调用覆盖的 PDH 窗口
     就等于两次调用的间隔。所以把 interval_ms 调到 1000 可以让库的窗口
     与参照（typeperf 1s）等长 —— 这是区分「窗口长度导致的偏差」与
