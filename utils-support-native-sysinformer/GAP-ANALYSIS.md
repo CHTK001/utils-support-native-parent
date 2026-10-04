@@ -14,7 +14,7 @@
 | 维度 | 状态 |
 |---|---|
 | **op 层** | 21 个 op，**20 个三平台均已实现**；唯一缺口是 macOS 的 `events.*`（硬限制）|
-| **已声明但未实现（空壳）** | 原 **3 项**，现剩 **1 项**：签名验证（电池信息、Windows 句柄数值均已修）|
+| **已声明但未实现（空壳）** | 原 **3 项**。电池信息、Windows 句柄数值**已修**；签名验证**已明确定为不实现**（理由见 §三 P0，并向调用方在 README 明示）。**当前无「待决」项** |
 | **数值准确性** | 与任务管理器同源对照 **12 项全绿**（CI 日志实测「判定项 = 12，失败 = 0」）；生产验收累计修掉 **5 个**此前无人发现的真实数据缺陷（Windows 句柄少报 80%、首次 CPU 报 100%、Windows CPU 口径差 5pp、Linux 电池列表未排序、Windows CPU 使用 PDH 声明为无效的读数 +18.5pp）—— 详见 §八。这五项**都不崩不报错、返回结构不变**，代码审查与类型检查完全看不出来 |
 | **平台不对称** | Linux 最强；Windows 中等；macOS 受 SIP 限制最弱（已在 README 记录）|
 | **事件类型** | 7 种中 **`NetworkConnect` 三平台都未实现**；Linux 缺 Thread\*/ImageUnload |
@@ -151,8 +151,37 @@ Linux 的 `CN_IDX_PROC` 只提供 FORK/EXEC/EXIT，线程与 unload 事件需 `t
 | # | 项 | 建议 | 状态 |
 |---|---|---|---|
 | 1 | `BatteryInfo` | 实现：Windows `GetSystemPowerStatus`、Linux `/sys/class/power_supply`、macOS `pmset -g batt` | ✅ **已完成 2026-10-01** |
-| 2 | `SignatureInfo` | **实现**或**从模型移除**。实现：Windows `WinVerifyTrust`、macOS `SecStaticCodeCheckValidity`；Linux 无统一模型，可只标 `signed: null` | ⬜ 待决（**剩余唯一空壳**）|
-| 3 | `EventKind::NetworkConnect` | **实现**或**从枚举移除**（让它走 `unsupported` 而不是静默不产出）| ⬜ 待决 |
+| 2 | `SignatureInfo` | **实现**或**从模型移除**。实现：Windows `WinVerifyTrust`、macOS `SecStaticCodeCheckValidity`；Linux 无统一模型，可只标 `signed: null` | ⛔ **已明确不实现（2026-10-04 定）**，理由见下 |
+| 3 | `EventKind::NetworkConnect` | **实现**或**从枚举移除**（让它走 `unsupported` 而不是静默不产出）| ⛔ **已明确不实现（2026-10-04 定）**，理由见下 |
+
+#### 这两项为什么定「不实现」而不是「待决」
+
+**`SignatureInfo`（进程/模块签名验证）** —— 不做，理由是**不能只做一半**：
+
+* Windows `WinVerifyTrust`、macOS `SecStaticCodeCheckValidity` 都能实现，
+  但 Linux **没有统一模型**（ELF 签名不是通行做法，发行版各有各的）。
+* 于是只做 Win/macOS 会在**安全属性**上造出平台不对称 ——
+  Windows 上 `signature` 有值、Linux 上恒为 `null`，
+  调用方极易把「Linux 返回 null」读成「这个进程没有签名」。
+  **安全字段上的静默不对称，比明确不实现更危险。**
+* 三处一起做又不成立（Linux 无从下手）。故选择**明确不做**，
+  并在 **README 里向调用方写明**「`signature` 恒为 `null`，
+  分不清『无签名』与『没查』，要判断签名请走操作系统自己的途径」。
+  调用方不会被误导，这就是本项要解决的全部问题。
+
+**`EventKind::NetworkConnect`** —— 不做，因为**它在三平台都是硬限制或不值得**：
+
+* macOS：事件订阅整体是硬限制（需 EndpointSecurity entitlement，已豁免）。
+* Linux：要精确到「连接建立」需 netlink 的 `CN_IDX_PROC` 之外的能力
+  或 eBPF，超出「用户态、免驱动」的模块边界。
+* Windows：ETW 的 Microsoft-Windows-Kernel-Network 可给，但
+  **语义与另两平台对不齐**（一个给连接事件、两个给不了），
+  而「同一个 op 在三平台语义不同」是本模块一直在避免的。
+* 枚举里留着它确实会让人误以为「过滤该类型会得到事件」——
+  **这一点已在 README 明示**（该类型三平台都不会产出，按它过滤只会得到空结果）。
+
+两项的处置都遵循同一条原则：**宁可明确不做并向调用方讲清，也不要
+「声明了却永不产出」而让调用方自己猜。**
 
 ### P1 —— 补实质能力差距
 
