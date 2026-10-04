@@ -1228,18 +1228,50 @@ rustc 1.97.1 (8bab26f4f 2026-07-14)    cargo 1.97.1 (c980f4866 2026-06-30)
 | darwin-x86_64 | `f280d6d5b432514dabefb56147442fa5` | 1,124,380 B |
 | darwin-aarch64 | `b6653cd845d7ce52b531015bf1cade9d` | 1,119,664 B |
 
-来源 run 37124428590 attempt-1（与 attempt-2 逐字节相同）。
+来源：`windows-x86_64` 取自 run **37172678738**（CPU 窗口修复后的新库）；
+另三份自 run **37124428590** 起**逐字节未变**（`cpu_windows.rs` 受
+`#[cfg(target_os = "windows")]` 门控，改动不影响它们 —— 该推理已用
+`check_cfg_gate.py` 对整轮 run 核对验证，非推断）。
+四个平台的产物都经 `verify_delivered.py` 对至少一轮成功 run 比对通过。
 
 **换包即失效**：上面任一产物被替换后，本文件的验收数据都不再适用，
-须重跑。核对用：
+须重跑。
+
+### 7) 四个入库门禁（都可独立复核，且都有自检）
+
+「交付」不只是「仓库里的文件对」——调用方拿到的是 **Maven 构件（jar）**，
+所以核对链覆盖到打包结果为止：
 
 ```bash
+# 1) 四平台产物 == 该 run 编出的（逐字节）
 python tools/sysinformer-accept/verify_delivered.py <run_id>
-#   -> DELIVERED_VERIFIED        （四平台逐字节与该 run 的 artifact 一致）
-#   -> DELIVERED_MISMATCH        （退出码 1，至少一个平台不一致）
+#   -> DELIVERED_VERIFIED / DELIVERED_MISMATCH(exit 1)
+#   --selftest：验证架构判读能分辨真伪、不恒真
+
+# 2) 四平台汇总：产物一致 + 架构 + 各平台应判定标记齐全
+python tools/sysinformer-accept/acceptance_report.py <run_id>
+#   -> ACCEPTANCE_REPORT_OK / ACCEPTANCE_REPORT_FAILED(exit 1)
+#   --selftest：逐个去掉任一判定标记，必须被发现
+
+# 3) 交付物（两个 jar）里嵌的原生库 == 已验收的那四份
+python tools/sysinformer-accept/verify_jar_native.py
+#   -> JAR_DELIVERY_OK / JAR_DELIVERY_FAILED(exit 1)
+#   --selftest：故意篡改 jar 内 1 字节，必须被抓到
+#   两个 jar：sysinformer（FFM）与 java8（JNA）—— 后者用 <resource>
+#   复用同一批原生库，是**第二个把原生库发给调用方的构件**
+
+# 4) CPU 准确性（增量判据，参照为第一性原理而非任务管理器）
+python tools/sysinformer-accept/cpu_accuracy.py <dll> --phase-sec 25
+#   -> CPU_ACCURACY_OK / CPU_ACCURACY_FAILED / 退出码 3 = 无判别力(不是通过)
 ```
 
 `run_id` 必须是结论为 `success` 的那一轮；脚本会拒绝用失败的 run 比对。
+
+**为什么每个门禁都要 `--selftest`**：本轮反复踩到「门禁自己坏掉却报通过」——
+自制 shell 检查器对含引号内 `#` 的行测不出不配对、`verify_pushed.py` 曾无论
+成败都返回 0、`poll_ci.py` 曾对不存在的 run 空转两小时、我的一次性脚本曾把
+`install:install-file` 的 Reactor Summary 当成编译结果。
+**先证明门禁能报错，再相信它的「通过」。**
 
 ---
 
