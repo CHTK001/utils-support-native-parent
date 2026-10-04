@@ -188,8 +188,86 @@ def diagnose(label, samples):
           ", ".join(f"{v:.2f}" for v in samples[:12]))
 
 
+def win_raw_reference(seconds):
+    """**第一性原理**参照：`GetSystemTimes` 的累计计数器自算利用率。
+
+    为什么不把 typeperf / 任务管理器当权威：
+
+        utilization = (kernel + user - idle) / (kernel + user)
+
+    这才是定义。`GetSystemTimes` 直接给出 idle / kernel / user 的**累计值**
+    （FILETIME，100ns 单位），由我们自己做差分算出窗口内的平均利用率 ——
+    **不经过 PDH 的衍生计数器 `% Processor Time`**，所以与库相互独立。
+
+    任务管理器是另一个平滑后的显示，它同样不是权威；此前把「与任务管理器
+    一致」当目标，方向就偏了。
+
+    注意 kerneltime **包含** idletime（Windows 的定义），所以
+    total = kernel + user、busy = total - idle。这一点写错会算出
+    明显偏低的利用率，是经典坑，已在 compute 里注明。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                    ("dwHighDateTime", wintypes.DWORD)]
+
+    def val(ft):
+        return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetSystemTimes.argtypes = [ctypes.POINTER(FILETIME)] * 3
+    k32.GetSystemTimes.restype = wintypes.BOOL
+
+    def snap():
+        i, k, u = FILETIME(), FILETIME(), FILETIME()
+        if not k32.GetSystemTimes(ctypes.byref(i), ctypes.byref(k),
+                                  ctypes.byref(u)):
+            return None
+        return val(i), val(k), val(u)
+
+    prev = snap()
+    if prev is None:
+        return []
+    out = []
+    for _ in range(seconds):
+        time.sleep(1.0)
+        cur = snap()
+        if cur is None:
+            continue
+        di, dk, du = (cur[0] - prev[0], cur[1] - prev[1], cur[2] - prev[2])
+        prev = cur
+        # kernel 已含 idle（Windows 定义）
+        total = dk + du
+        if total > 0:
+            out.append(100.0 * (1.0 - di / total))
+    return out
+
+
+def win_typeperf_reference(seconds):
+    """交叉校验用：`typeperf` 读 PDH 的 `% Processor Time`。"""
+    p = subprocess.Popen(
+        ["typeperf", r"\Processor(_Total)\% Processor Time",
+         "-si", "1", "-sc", str(seconds)],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8", errors="replace")
+    out = []
+    for line in p.stdout:
+        line = line.strip().strip('"')
+        if not line or line.startswith("("):
+            continue
+        parts = line.split('","')
+        if len(parts) >= 2:
+            try:
+                out.append(float(parts[1].strip('"')))
+            except ValueError:
+                pass
+    p.wait()
+    return out
+
+
 def win_reference(seconds):
-    """typeperf 走原始 PDH。逐行解析 CSV。"""
     p = subprocess.Popen(
         ["typeperf", r"\Processor(_Total)\% Processor Time",
          "-si", "1", "-sc", str(seconds)],
@@ -300,7 +378,10 @@ def main():
           f"（预期增量约 {busy * 100.0 / n:.0f}pp）")
     print(f"  每段 {args.phase_sec}s\n")
 
-    ref_fn = win_reference if sys.platform == "win32" else linux_reference
+    # 参照用**第一性原理**算的利用率（GetSystemTimes 累计值自差分），
+    # 而不是 PDH 的衍生计数器，也不是任务管理器 —— 后两者都只是另一种
+    # 平滑显示，不能当权威。linux_reference 同理（自己读 /proc/stat 差分）。
+    ref_fn = win_raw_reference if sys.platform == "win32" else linux_reference
 
     try:
         call("system.snapshot")          # 预热
