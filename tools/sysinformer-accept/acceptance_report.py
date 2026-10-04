@@ -50,7 +50,11 @@ PLATFORMS = [
 REQUIRED = {
     "windows-x86_64": ["SYSINFORMER_SMOKE_OK", "SYSINFORMER_JNA_SMOKE_OK",
                        "PROD_ACCEPT_OK", "TASKMGR_COMPARE_OK",
-                       "TASKMGR_CPU_WINDOWED_OK"],
+                       "TASKMGR_CPU_WINDOWED_OK",
+                       # CPU 准确性是**阻断项**（`cpu_accuracy.py`，增量判据）。
+                       # 它不在必需标记里的话，该步骤被静默跳过时汇总不会发现 ——
+                       # 而「门禁被跳过却不报」正是本模块反复踩的那类问题。
+                       "CPU_ACCURACY_OK"],
     "linux-x86_64": ["SYSINFORMER_SMOKE_OK", "SYSINFORMER_JNA_SMOKE_OK",
                      "PROD_ACCEPT_OK", "BATTERY_VALUE_OK"],
     "darwin-x86_64": ["SYSINFORMER_SMOKE_OK", "SYSINFORMER_JNA_SMOKE_OK",
