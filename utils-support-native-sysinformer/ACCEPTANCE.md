@@ -336,7 +336,7 @@ macOS x86_64 495 —— 绝对耗时随进程数走，比较时必须看这个�
 | # | 未验项 | 原因 | 影响 |
 |---|---|---|---|
 | 1 | ~~macOS x86_64 无运行时冒烟~~ **已关闭** | 改用 `macos-15-intel`（原生 Intel x86_64，Actions 最后一个 x86_64 镜像，支持到 2027-08）| run 36708484394 该腿 `Runtime smoke` 真实执行：dlopen x86_64 dylib 成功、`process.list 返回 502 个进程`、`SYSINFORMER_SMOKE_OK` |
-| 2 | **Java 25 FFM 绑定：功能已验，CI 步骤已就位但被环境阻塞** | `SysInformerNative` 依赖 `utils-support-common-starter`（仅为 `NativeLoader`/`NativeUtils`）。**2026-10-03 实测更正**：该构件**不在** `packages.aliyun.com`（带凭据仍 404），真实来源是 GitHub Packages `maven.pkg.github.com/CHTK001/utils-support-resource-parent`。而 `com.chua` 下 420 个坐标里 **386 个 jar 的 `_remote.repositories` 仓库 id 为空**，即本机 `mvn install` 装入、从未发布；已发布的那份与本机**不是同一份字节**（sha1 `8d2d6db0…` vs `05fa2221…`）| 绑定的**正确性已验**：`mvn clean compile` exit 0（class major 69），且 `FfmSmoke` **端到端跑通 16 项断言**（真数据：279 个进程 / 25 个根）。`native-java-compile.yml` 的 paths 过滤已修（原写法只匹配到一个 README.md，门禁从未执行）、`FfmSmoke` 步骤已加入、失败分类已加（环境阻塞不弄红、真实编译错误仍变红）。**但 CI 侧仍无法真正编译** —— 凭据已配齐（aliyun ×2 + GitHub Packages ×2），卡在构件未发布。**未验项仍未关闭**，需独立决策是否 deploy 本地产物到远端 |
+| 2 | ~~Java 25 FFM 绑定缺 CI 回归网~~ **已关闭（2026-10-04）** | 见下方「#2 的关闭记录」 | **已在 CI 里真跑并通过**：`native-java-compile.yml` run `37164920196`（sha `066b71f`）的 FfmSmoke 步骤打印 `JAVA25_FFM_SMOKE_OK`，16 项断言全过、退出码 0。连续多轮 CI 都会执行 |
 | 3 | **macOS `events.*`** | 系统级进程事件需 EndpointSecurity 框架及其 Apple 授权 entitlement（`com.apple.developer.endpoint-security.client`），只签发给经 Apple 批准的签名应用 | 硬限制。代码里明写"**不以轮询伪装成事件**" |
 | 4 | **未做真实业务集成测试** | 属独立立项 | 本模块只保证"库本身可用且指标数值正确" |
 | 5 | **未做长时间稳定性压测** | 属独立立项 | 目前只有 200 轮量级的泄漏检查 |
@@ -593,7 +593,92 @@ CI 里已加 `tr ';' ':'` 兜底，不依赖插件「恰好写对了」。）
   `conf/settings.xml` 里指向 `D:\maven-repo`。换机器复现前要先确认这条，
   否则会误判成「本地也解析不到」。
 
-未验项 #2 **仍未关闭**，但阻塞已从「缺凭据」更正为「构件未发布 / 同坐标不同字节」。
+### #2 的关闭记录（2026-10-04，run 37164920196，sha `066b71f`）
+
+**已在 CI 里真跑并通过**，日志原文：
+
+```
+夹具 utils-support-common-starter-4.0.0.42.jar  4558874 字节  md5=a8112cab86861523e1afa8ae726da0be
+装入纯 pom 构件 utils-support-core-parent
+装入纯 pom 构件 utils-support-parent-starter
+安装后 jar 大小 = 4558874
+FIXTURE_INSTALLED
+ASSERT ok   platform() 非空
+ASSERT ok   system.snapshot 含 cpu/host/memory
+ASSERT ok   process.list -> 154 个进程
+ASSERT ok   process.tree -> 2 个根
+ASSERT ok   process.detail(自身) name = java
+ASSERT ok   process.threads / handles / modules / credential 可调用
+ASSERT ok   kernel.modules / service.list / socket.list 可调用
+ASSERT ok   未知 op 被拒绝并取到原因
+ASSERT ok   events.start 可调用 / events.poll 返回数组（2 条）
+JAVA25_FFM_SMOKE_OK
+FfmSmoke 退出码 = 0
+```
+
+**最终采用的办法：仓库内夹具**（`src/ci-fixture/`），CI 先 `install:install-file`
+再编译。不做任何对外发布 —— 因为发布到 GitHub Packages 会**覆盖同坐标上
+已存在的 `4.0.0.42`**（与本机字节不同），影响所有解析该坐标的人，且不可逆。
+
+夹具共 4 个文件：
+
+| 文件 | 字节 | 说明 |
+|---|---|---|
+| `utils-support-common-starter-4.0.0.42.jar` | 4,558,874 | 依赖本体；远端那份缺 `NativeLoader`（1,048 vs 2,294 个 .class）|
+| `utils-support-common-starter-4.0.0.42.pom` | 5,404 | |
+| `utils-support-core-parent-4.0.0.42.pom` | 5,934 | 上面那个的 parent |
+| `utils-support-parent-starter-4.0.0.42.pom` | 105,965 | 再上一层，链到顶 |
+
+#### 真正的原因（此前三轮都在分析症状）
+
+失败的是**父 pom** `utils-support-core-parent`，不是 `common-starter` 本身。
+根因是 `install:install-file` 的参数写错：**装纯 pom 构件必须同时给 `-Dfile`**
+（指向 pom 自身），只给 `-DpomFile` 时它**静默失败** —— 不报错、什么都不装。
+于是两个父 pom 没进仓库，Maven 只能去远端解析父链，撞上 aliyun 的 403。
+
+所以 **aliyun 的 403 从头到尾是症状**。日志里 `ls -l` 明明显示文件都在
+（`common-starter` 带 jar 所以装成功了），却报父 pom `absent` ——
+两者混在一起看极难定位。
+
+#### 判据换成不依赖远端行为的离线验证
+
+把三个 `com.chua` 仓库用 settings.xml 的 `<mirror>` **强制指向一个恒返回 403
+的本地服务器**（Central 保留），实测：
+
+```
+装入全部夹具       4 个全部 BUILD SUCCESS
+编译 sysinformer   BUILD SUCCESS，target/classes 里 1 个 .class（真编译）
+build-classpath    BUILD SUCCESS
+javac              exit 0
+java               exit 0  -> JAVA25_FFM_SMOKE_OK
+com.chua 远端请求数  0
+```
+
+三个仓库全不可用也能跑通、且一个 `com.chua` 请求都没发 ——
+所以 CI 上 aliyun 返什么都影响不到这一步。#2 由此关闭。
+
+#### 本轮排查中我犯的 4 个错（都是同一类：用推理代替实测）
+
+| 错误 | 处置 |
+|---|---|
+| 只凭「md5 不同」断定必须发布到远端 | 实测发现远端那份缺 `NativeLoader`，且有**不用发布的路** |
+| 臆测父链清单（含一个不在链上的坐标），据此判「父链不可取」 | 改为沿 `<parent>` 逐层走实际链，三级全 200 |
+| 断言「403 会中止 Maven 解析」并据此提交了重排序 | 同类对照证伪（403 被访问 106 次仍成功）；改动已回滚 |
+| 「编译通过」其实是空跑（变体 pom 没有 `src/`） | 改用 `<mirror>` 保持真实路径，并加断言：`.class` 数为 0 即判验证无效 |
+
+第 4 条最危险 —— **验证脚本自己制造了假成功**。所以最终加的不是更多推理，
+而是一条能让验证**自我否证**的断言。
+
+#### 仍然存在的限制（如实记录）
+
+**全反应堆编译仍被同一类问题阻塞** —— 其余模块还需要别的、同样只存在于
+本机 `D:\maven-repo` 的 `com.chua` 构件。所以该 job 的结论是两句并存的事实，
+不是一句「通过」：
+
+* 全反应堆：编译执行过，失败全是依赖解析失败 -> 声明「环境阻塞」，不弄红
+* FfmSmoke：**已执行并通过** -> #2 关闭
+
+**未验项 #2 已关闭**（此前阻塞为「构件未发布 / 同坐标不同字节」）。
 这是环境性阻塞，需独立决策是否把本机 `mvn install` 的产物 deploy 到远端。
 
 同一模块的 Java 8 侧（`SysInformerJnaSmoke`）**已在 CI 里真跑**，那条腿是自动的。
@@ -1052,11 +1137,12 @@ python tools/sysinformer-accept/verify_delivered.py <run_id>
   此前「四平台入库产物已验证」对 macOS 与 Windows 都不成立，已修正。
 - **"生产级"口径：三平台（Windows/Linux/macOS）生产验收全绿，
   四平台运行时冒烟全覆盖。**
-  仍未落实的未验项：**#2**（Java 25 FFM 绑定进 CI，需私有仓库凭据，属全仓性限制）、
-  **#6**（Windows/macOS 电池取值分支需真机，测试环境无电池设备）、
+  仍未落实的未验项：**#6**（Windows/macOS 电池取值分支需真机；
+  用户已裁定**无电池就不做**，本机无电池设备，该项不再推进）、
   **#7**（CPU 判定为统计性，95% CI 含 0 而非逐点相等）；
+  **#2 已于 2026-10-04 关闭**（CI 里真跑并通过 FfmSmoke）；
   #3 为硬限制且已豁免；#4 / #5 属独立立项。
-  **在 #2 与 #6 落实或明确豁免之前，不宣告"生产级已全部验收"。**
+  **在 #6 落实或按上述裁定搁置确认之后，不宣告"生产级已全部验收"。**
 
 ### 一句话回答"数据准不准、比不比任务管理器准"
 
