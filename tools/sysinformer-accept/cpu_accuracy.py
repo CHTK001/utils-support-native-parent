@@ -98,7 +98,7 @@ def _burn(stop):
             break
 
 
-def measure(seconds, label, reference):
+def measure(seconds, label, reference, interval_ms=50):
     """同时采样库与参照。
 
     返回 (库均值, 参照均值, 库样本数, 参照样本数, 库跨度, 库样本列表)。
@@ -108,6 +108,12 @@ def measure(seconds, label, reference):
     当位置参数传（`--probe 12`），argparse 直接报错、诊断根本没跑 ——
     同一类错误犯了三次。修法是**消除这个错误类别**：诊断并入失败路径，
     只有一种调用形式。
+
+    `interval_ms` 决定**库的采集窗口**：库内部有 100ms 最小采集间隔，
+    调用快于它时复用上次读数；调用慢于它时，每次调用覆盖的 PDH 窗口
+    就等于两次调用的间隔。所以把 interval_ms 调到 1000 可以让库的窗口
+    与参照（typeperf 1s）等长 —— 这是区分「窗口长度导致的偏差」与
+    「实现本身有偏差」的关键手段。
     """
     stop = threading.Event()
     samples = []
@@ -119,7 +125,7 @@ def measure(seconds, label, reference):
             try:
                 env = call("system.snapshot")
             except Exception:
-                time.sleep(0.05)
+                time.sleep(interval_ms / 1000.0)
                 continue
             u = ((env.get("data") or {}).get("cpu") or {}).get("usage")
             if first:
@@ -127,7 +133,7 @@ def measure(seconds, label, reference):
             elif isinstance(u, (int, float)):
                 samples.append(float(u))
                 ts.append(time.time())
-            time.sleep(0.05)
+            time.sleep(interval_ms / 1000.0)
 
     th = threading.Thread(target=stream, daemon=True)
     th.start()
@@ -334,6 +340,32 @@ def main():
         print("\n  ---- 逐样本诊断 ----")
         diagnose("阶段1 基线", s1)
         diagnose("阶段2 加负载", s2)
+
+    # ---- 窗口长度对照：区分「窗口导致的偏差」与「实现本身的偏差」 ----
+    # CI 实测（run 37170551267）：空闲时库 6.09% vs 参照 0.63%（+5.5pp），
+    # 而 25% 负载时两者一致。**加性偏移被排除**（否则 25% 时也该偏高）。
+    # 唯一能同时解释两端的是**下限效应**：短窗口（~112ms）里任何活动
+    # 占比都被放大，1s 窗口会稀释掉。
+    # 这一测直接把库的窗口拉到 1s（与参照等长）再比一次 ——
+    # 若空闲读数随之降到 ~0.6%，则「窗口长度」就是成因。
+    print("\n  ---- 窗口长度对照（库以 1Hz 调用 -> PDH 窗口 ~1s）----")
+    L1b, R1b, n1b, r1b, _, _ = measure(12, "基线@1Hz", ref_fn, interval_ms=1000)
+    if n1b >= 5 and r1b >= 8:
+        d_short = L1 - R1
+        d_long = L1b - R1b
+        print(f"    短窗口偏差 = {d_short:+.3f}pp（50ms 调用，窗口 ~112ms）")
+        print(f"    长窗口偏差 = {d_long:+.3f}pp（1s 调用，窗口 ~1s）")
+        if abs(d_short) < 2.0:
+            # 短窗口偏差本身很小 -> 该对照无判别力。
+            # 饱和机器上两个偏差都接近 0，「拉长后变小」自然成立，
+            # 会得出「窗口长度是成因」这种**看似有据实则无意义**的结论。
+            # 与 diagnose() 的饱和判断同一类问题，故同样先判适用性。
+            print(f"    -> 短窗口偏差本身只有 {abs(d_short):.2f}pp，"
+                  f"**此对照无判别力**（无法据此判断窗口长度是否为成因）")
+        elif d_long < d_short / 2:
+            print("    -> **窗口长度是成因**：窗口拉长后偏差显著变小。")
+        else:
+            print("    -> 窗口长度不是主要成因，需另找。")
 
     print("\n=== 判读 ===")
     if dR < MIN_INCREMENT_PP:
