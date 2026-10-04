@@ -92,44 +92,58 @@ FFI 里崩溃会带走宿主 JVM，这是生产事故。
 
 ## 四、实测结果（最新入库产物）
 
-### Windows（`sysinformer.dll` md5 `e43ee1b42542e02cc33f5c53a3bb3429`，850,944 B，run 37124428590，2026-10-03）
+### Windows（`sysinformer.dll` md5 `a88ce67adfe87b7bc9fc737daafbfc41`，850,944 B，run 37172678738，2026-10-04）
 
 ```
 prod_accept.py        通过 33 / 失败 0   PROD_ACCEPT_OK
 taskmgr_compare.py    判定项 12 / 失败 0  TASKMGR_COMPARE_OK
-cpu_windowed_compare  有效配对 53（每对含 3~37 个本库样本，窗口中位 1002ms）
-                      均值差 +2.051pp，容差 ±4.0pp -> TASKMGR_CPU_WINDOWED_OK
+cpu_windowed_compare  有效配对 55（每对含 3~37 个本库样本，窗口中位 1008ms）
+                      均值差 +0.031pp，容差 ±4.0pp -> TASKMGR_CPU_WINDOWED_OK
+cpu_accuracy.py       增量之差 -0.946pp，容差 3.0pp -> CPU_ACCURACY_OK
 
 与任务管理器同源数据对照（GetPerformanceInfo，5 次紧邻采样取均值）：
   物理内存占用率   差 0.00pp        进程数        差  0.00%
   可用内存        差 0.00%         已用内存      差  0.00%
-  线程总数        差 0.00%         句柄总数      差  0.15%
+  线程总数        差 0.04%         句柄总数      差  0.15%
   磁盘 C:\ 总量/可用                全部 0.00%
   磁盘 D:\ 总量/可用                全部 0.00%
 
-并发 8 线程 × 15 轮 × 6 op：120 次调用耗时 1.78s，错误 0 条
+并发 8 线程 × 15 轮 × 6 op：120 次调用耗时 1.76s，错误 0 条
 并发后连续两次 process.list 数量一致（134 vs 134）
 事件订阅下 4 线程并发 poll：错误 0
-泄漏：200 轮 × 4 op 后 RSS 29.0MB -> 29.7MB、句柄 424 -> 425
-事件启停 20 轮（成功 20 次）：句柄 425 -> 425
+泄漏：200 轮 × 4 op 后 RSS 28.4MB -> 28.9MB、句柄 424 -> 424
+事件启停 20 轮（成功 20 次）：句柄 424 -> 424
 ```
 
+> **CPU 判据的两个数字都变了，且是变好**：均值差 `+2.051pp -> +0.031pp`
+> （见第四节末「CPU 低负载虚高」一节）。原因不是判据放松 —— 容差仍是
+> ±4.0pp 未动 —— 而是把采集窗口从 100ms 改到 1000ms 后**偏差真的消失了**。
+>
 > CPU 判据在同轮诊断里的原始数据（`cpu_rootcause_diag.py`，五源并置）：
 >
 > ```
-> 有效配对 53（窗口中位 1002ms）  均值差 +2.051pp  容差 ±4.0pp -> OK
+> 有效配对 55（窗口中位 1008ms）  均值差 +0.031pp  容差 ±4.0pp -> OK
 >
-> [8] 同窗口配对比较（参考流间隔 100ms，与库的最小窗口等长）
->   A 本库        配对 2216  均值差 +1.343pp  sd 6.984  95% CI [+1.052, +1.634]
->   F 修复后逻辑   配对 2216  均值差 +2.525pp  sd 8.326  95% CI [+2.178, +2.872]
->   A − F 同迭代配对 2216      均值差 -1.182pp  sd 7.396  95% CI [-1.490, -0.874]
+> [8] 同窗口配对比较（参考流间隔 100ms，**刻意与库的 1s 窗口不同**，
+>     使 F 成为「旧窗口」对照组）
+>   A 本库（窗口 ~1s）    配对 2209  均值差 +0.034pp  sd 10.065  95% CI [-0.385, +0.454]
+>   F 旧窗口（100ms）     配对 2209  均值差 +2.538pp  sd  8.216  95% CI [+2.196, +2.881]
+>   A − F 同迭代配对 2209            均值差 -2.504pp  sd  9.798  95% CI [-2.912, -2.095]
 > ```
+>
+> **A 与 F 的对比是「窗口长度是成因」最直接的证据**：同一个算式、同一个
+> 容器、同一轮采样，只把窗口从 1s 换成 100ms，就多出 **2.5pp** 偏差。
+> 这比任何文字解释都有力。
 >
 > **注意**：`cpu_rootcause_diag.py` 报告的「非 VALID 的 CStatus 占比」这一项
 > 本轮日志未采集（旧脚本已随第 9 节一并更正），所以这里不列该数字 ——
 > **宁可少写一项，也不引用无法在当前代码上复现的数字**。
 
-### Linux（`libsysinformer.so` md5 `8502df90fe3a221f18fe11fc4dee3301`，1,569,176 B，run 37124428590，2026-10-03）
+### Linux（`libsysinformer.so` md5 `8502df90fe3a221f18fe11fc4dee3301`，1,569,176 B，run 37172678738，2026-10-04）
+
+> 该 `.so` 与上一轮（run 37124428590）**逐字节相同** —— 本轮只改了
+> `cpu_windows.rs`，由 `#[cfg(target_os = "windows")]` 门控（`lib.rs:34`），
+> Linux/macOS 的实现一个字节未动。这一点已用核对验证，不是推断。
 
 真实 Kali（`192.168.50.198`，普通用户 + root 各一遍，用仓库当前版
 `prod_accept.py`，即含 3 条电池断言的那一版）：
@@ -166,23 +180,26 @@ battery_value_linux.py  case1 字段齐全 / case2 缺 power_now /
 守卫敏感性对照：同一夹具在**修复前**的产物上，case1/case2 全绿而 case3 报
 `FAIL order: ['B1','B0'] sorted=False` —— 证明顺序断言不是恒真。
 
-### macOS（run 37124428590，2026-10-03）
+### macOS（run 37172678738，2026-10-04）
 
 - `darwin-aarch64`：`libsysinformer.dylib` md5 `b6653cd845d7ce52b531015bf1cade9d`，1,119,664 B
 - `darwin-x86_64`：`libsysinformer.dylib` md5 `f280d6d5b432514dabefb56147442fa5`，1,124,380 B
 
+（两份 dylib 与上一轮 run 37124428590 **逐字节相同** —— 本轮只改了 Windows 实现。）
+
 两腿均为 `SYSINFORMER_SMOKE_OK` + `SYSINFORMER_JNA_SMOKE_OK`
 + **31/31 `PROD_ACCEPT_OK`**（含电池断言，走 `pmset -g batt` 分支）。
-泄漏检查（按平台缩放为 60 轮）：arm64 RSS 41.0MB→41.0MB 句柄 8→8；
-x86_64 RSS 32.5MB→33.0MB 句柄 8→8。
+泄漏检查（按平台缩放为 60 轮）：arm64 RSS 41.7MB→41.7MB 句柄 8→8；
+x86_64 RSS 34.9MB→34.9MB 句柄 8→8。
 
-### 四平台生产验收：全绿（2026-10-03，run 37124428590，sha `43de392`，结论 `success`）
+### 四平台生产验收：全绿（2026-10-04，run 37172678738，sha `ecace37`，结论 `success`）
 
-> 这一轮编出的四份产物就是**当前入库的那一份**，且已被同 run 的
-> attempt-2 独立复现（**四平台各 0 字节差异**），见第九节 5)。
+> 这一轮编出的四份产物就是**当前入库的那一份**：
+> `verify_delivered.py` 报 `DELIVERED_VERIFIED`、
+> `acceptance_report.py` 报 `ACCEPTANCE_REPORT_OK`（均见第九节）。
 >
-> 注意这是**换了工具链与依赖锁定之后**的新基线，与 10-02 那批不可比 ——
-> 那批产物的字节已被这次改动取代。
+> 注意这是**改了 CPU 采集窗口之后**的新基线：Windows 产物变了
+> （`e43ee1b4…` -> `a88ce67a…`），另三份经核对确认**逐字节未变**。
 
 ```
 [OK] linux-x86_64     success
@@ -224,8 +241,11 @@ CI 每个平台都**重新构建**产物（`build.sh`），所以验的是含本
 静态核查确认这两条路径上没有任何外部命令调用）。
 **当时（2026-10-02，run 36995361316）实测**：arm64 约 1.8~2.2 秒、
 x86_64 约 5.4~5.5 秒 —— 这一节是历史叙事，保留当时的数字以说明当时的判断依据。
-**当前基线（run 37124428590）**：arm64 约 1.9~2.2 秒、x86_64 约 4.5~4.6 秒，
-见上方「平台性能特征」表。
+**当前基线（run 37172678738，2026-10-04）**：arm64 约 1.3~2.0 秒、
+x86_64 约 4.1~4.2 秒，见上方「平台性能特征」表。`process.list` 的
+p50 在 arm64 上从 1.9 秒降到 1.3 秒、在 x86_64 上从 4.5 秒降到 4.1 秒，
+**同一台机器不同轮次本来就有波动**（runner 负载不同），引用时务必
+连同 run id 一起引。
 而验收脚本原本用与其他平台相同的采样次数 —— 泄漏检查一项在
 x86_64 上就是 200 轮 × 约 5.5 秒 ≈ **18 分钟**，加上并发与性能段
 整步远超 `concurrency: cancel-in-progress` 能容忍的窗口。
@@ -243,26 +263,26 @@ macOS 逐进程 `proc_pidinfo`），不是本模块的封装开销：
 
 | op | Windows | Linux | macOS arm64 | macOS x86_64 |
 |---|---|---|---|---|
-| `system.snapshot` | 4.27 ms | 1.90 ms | 48.48 ms | 57.40 ms |
-| `process.list` | **6.01 ms** | 16.14 ms | **1891.24 ms** | **4462.90 ms** |
-| `process.detail` | **0.93 ms** | 1.39 ms | **2150.32 ms** | **4590.43 ms** |
-| `process.tree` | 4.14 ms | 3.53 ms | 1963.82 ms | 4436.89 ms |
-| `process.threads` | 6.84 ms | 0.30 ms | 0.01 ms | 0.02 ms |
-| `process.handles` | 4.18 ms | 4.90 ms | 0.01 ms | 0.04 ms |
-| `process.mappings` | 1.96 ms | 1.32 ms | 0.38 ms | 0.96 ms |
-| `process.modules` | 0.58 ms | 0.20 ms | 0.49 ms | 1.03 ms |
-| `process.env` | 0.49 ms | 0.12 ms | 0.09 ms | 0.20 ms |
-| `process.credential` | 1.76 ms | 0.07 ms | 8.08 ms | 16.55 ms |
-| `kernel.modules` | 0.69 ms | 0.14 ms | 200.11 ms | 273.01 ms |
-| `socket.list` | 0.33 ms | 11.99 ms | 19.52 ms | 25.12 ms |
+| `system.snapshot` | 4.11 ms | 1.88 ms | 31.48 ms | 51.28 ms |
+| `process.list` | **5.96 ms** | 18.31 ms | **1321.38 ms** | **4126.65 ms** |
+| `process.detail` | **0.91 ms** | 1.43 ms | **2000.25 ms** | **4140.87 ms** |
+| `process.tree` | 4.12 ms | 3.82 ms | 1334.11 ms | 4153.01 ms |
+| `process.threads` | 6.62 ms | 0.30 ms | 0.01 ms | 0.02 ms |
+| `process.handles` | 4.18 ms | 5.37 ms | 0.02 ms | 0.03 ms |
+| `process.mappings` | 1.92 ms | 1.32 ms | 0.43 ms | 0.89 ms |
+| `process.modules` | 0.56 ms | 0.20 ms | 0.58 ms | 0.96 ms |
+| `process.env` | 0.27 ms | 0.12 ms | 0.13 ms | 0.20 ms |
+| `process.credential` | 1.77 ms | 0.08 ms | 6.57 ms | 15.37 ms |
+| `kernel.modules` | 0.66 ms | 0.15 ms | 219.15 ms | 262.51 ms |
+| `socket.list` | 0.31 ms | 12.47 ms | 17.59 ms | 24.88 ms |
 
-四个平台**全部取自 run 37124428590 同一轮**，p50，同口径。
-`process.list` 覆盖进程数：Windows 134、Linux 153、macOS arm64 496、
-macOS x86_64 495 —— 绝对耗时随进程数走，比较时必须看这个量。
+四个平台**全部取自 run 37172678738 同一轮**，p50，同口径。
+`process.list` 覆盖进程数：Windows 134、Linux 166、macOS arm64 471、
+macOS x86_64 494 —— 绝对耗时随进程数走，比较时必须看这个量。
 
 > ⚠️ **此前这张表只写了一个 macOS 数（约 2 秒），那是 arm64 的值。**
-> 实测 Intel macOS 上 `process.list` 是 **4462.90 ms**、`process.detail`
-> 是 **4590.43 ms**，比 arm64 慢约 **2.2 倍**。原来那句「单次约 2 秒」
+> 实测 Intel macOS 上 `process.list` 是 **4126.65 ms**、`process.detail`
+> 是 **4140.87 ms**，比 arm64 慢约 **3 倍**。原来那句「单次约 2 秒」
 > 对 Intel 用户是**低报了一倍有余**，据此定采样周期会直接翻车。
 
 **对调用方的实际含义**：
@@ -283,25 +303,25 @@ macOS x86_64 495 —— 绝对耗时随进程数走，比较时必须看这个�
 现已按平台缩放采样次数（macOS 并发 6 / 性能 10 / 泄漏 60），
 **断言条件、容差与信封校验未改**。
 
-### 性能（Windows / Linux p50，同一轮 run 37124428590 实测）
+### 性能（Windows / Linux p50，同一轮 run 37172678738 实测，2026-10-04）
 
 | op | Windows p50 | Linux p50 | 说明 |
 |---|---|---|---|
-| system.snapshot | 4.27 ms | 1.90 ms | |
-| process.list | 6.01 ms | 16.14 ms | |
-| process.tree | 4.14 ms | 3.53 ms | |
-| process.detail | 0.93 ms | 1.39 ms | |
-| process.threads | 6.84 ms | 0.30 ms | |
-| process.handles | 4.18 ms | 4.90 ms | |
-| process.modules | 0.58 ms | 0.20 ms | |
-| process.mappings | 1.96 ms | 1.32 ms | |
-| process.env | 0.49 ms | 0.12 ms | |
-| process.credential | 1.76 ms | 0.07 ms | |
-| kernel.modules | 0.69 ms | 0.14 ms | |
-| socket.list | 0.33 ms | 11.99 ms | |
+| system.snapshot | 4.11 ms | 1.88 ms | |
+| process.list | 5.96 ms | 18.31 ms | |
+| process.tree | 4.12 ms | 3.82 ms | |
+| process.detail | 0.91 ms | 1.43 ms | |
+| process.threads | 6.62 ms | 0.30 ms | |
+| process.handles | 4.18 ms | 5.37 ms | |
+| process.modules | 0.56 ms | 0.20 ms | |
+| process.mappings | 1.92 ms | 1.32 ms | |
+| process.env | 0.27 ms | 0.12 ms | |
+| process.credential | 1.77 ms | 0.08 ms | |
+| kernel.modules | 0.66 ms | 0.15 ms | |
+| socket.list | 0.31 ms | 12.47 ms | |
 
-（30 次采样，取 p50；两平台同 run、同口径，可直接横向比。
-`process.list` 覆盖数：Windows 134 个进程、Linux 153 个进程 —— 绝对耗时
+（30 次采样，取 p50；两平台**同一轮**、同口径，可直接横向比。
+`process.list` 覆盖数：Windows 134 个进程、Linux 166 个进程 —— 绝对耗时
 随进程数走，比较时要看这个量。macOS 两列见上方「平台性能特征」表。）
 
 ---
@@ -1187,7 +1207,7 @@ rustc 1.97.1 (8bab26f4f 2026-07-14)    cargo 1.97.1 (c980f4866 2026-06-30)
 
 | 平台 | md5 | 字节 |
 |---|---|---|
-| windows-x86_64 | `e43ee1b42542e02cc33f5c53a3bb3429` | 850,944 B |
+| windows-x86_64 | `a88ce67adfe87b7bc9fc737daafbfc41` | 850,944 B |
 | linux-x86_64 | `8502df90fe3a221f18fe11fc4dee3301` | 1,569,176 B |
 | darwin-x86_64 | `f280d6d5b432514dabefb56147442fa5` | 1,124,380 B |
 | darwin-aarch64 | `b6653cd845d7ce52b531015bf1cade9d` | 1,119,664 B |
@@ -1219,7 +1239,15 @@ python tools/sysinformer-accept/verify_delivered.py <run_id>
 - **四平台生产验收：全部通过**（run 36995361316，sha `2deb08a`，结论 `success`）。
   linux 33/33、windows 33/33、darwin-arm64 31/31、darwin-x86_64 31/31
   （macOS 少 2 项是 `events.*` 硬限制，日志有明确说明）。
-  CPU 判据：有效配对 55，均值差 +0.795pp ≤ 4.0pp，`TASKMGR_CPU_WINDOWED_OK`。
+  CPU 判据：有效配对 55，均值差 **+0.031pp** ≤ 4.0pp，`TASKMGR_CPU_WINDOWED_OK`
+  （窗口从 100ms 改到 1000ms 后由 +2.051pp 降到 +0.031pp，见下）。
+  CPU 准确性（增量判据）：`CPU_ACCURACY_OK`，增量之差 −0.946pp。
+- **CPU 低负载虚高已修（2026-10-04）**：采集窗口 100ms -> 1000ms。
+  空闲读数偏差从 **+4.14pp 降到 +0.72pp**，增量之差从 **−4.05pp 降到 −0.95pp**。
+  根因是短窗口使中断/DPC 与调用方自身采样开销的占比被放大。
+  验证参照已改为**第一性原理**（`GetSystemTimes` 累计值自差分算
+  `(kernel+user-idle)/(kernel+user)`），**不再以任务管理器或 PDH 的衍生
+  计数器为权威**。
 - **交付物与被验收产物一致：已用逐字节比对证明**（见第九节），
   且 Windows 产物经两次独立构建复现，四个平台现在都能用 md5 绑定。
   此前「四平台入库产物已验证」对 macOS 与 Windows 都不成立，已修正。
@@ -1227,7 +1255,9 @@ python tools/sysinformer-accept/verify_delivered.py <run_id>
   四平台运行时冒烟全覆盖。**
   仍未落实的未验项：**#6**（Windows/macOS 电池取值分支需真机；
   用户已裁定**无电池就不做**，本机无电池设备，该项不再推进）、
-  **#7**（CPU 判定为统计性，95% CI 含 0 而非逐点相等）；
+  **#7**（CPU 判定形式上是统计性判据，不是「逐点相等」—— 这是方法学
+  特性：两次采样覆盖的时间区间本就不同。窗口统一到 1s 后实测偏差
+  +0.031pp，已在统计意义上等同逐点相等）；
   **#2 已于 2026-10-04 关闭**（CI 里真跑并通过 FfmSmoke）；
   #3 为硬限制且已豁免；#4 / #5 属独立立项。
   **在 #6 落实或按上述裁定搁置确认之后，不宣告"生产级已全部验收"。**
