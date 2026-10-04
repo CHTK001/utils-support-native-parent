@@ -597,15 +597,23 @@ jobs:
           if (-not (Test-Path $dll)) { throw "找不到库: $dll" }
           python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll --selftest
           if ($LASTEXITCODE -ne 0) { throw "cpu_accuracy --selftest failed" }
-          python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll 25
+          # 注意 `--phase-sec` 是**选项**，位置参数只有库路径。
+          # 2026-10-04 踩过：写成 `cpu_accuracy.py $dll 25` -> argparse 报
+          # `unrecognized arguments: 25`、退出码 2，而被外层当成「判据失败」
+          # 报出来，看起来像 CPU 不准，实际是命令行用错。
+          python -X utf8 tools/sysinformer-accept/cpu_accuracy.py $dll --phase-sec 25
           $rc = $LASTEXITCODE
           if ($rc -eq 3) {
             # 无判别力**不是通过**，但也**不是失败** —— 如实声明，不弄红。
             #（CI runner 通常空闲，正常应能拿到足够增量；走到这里说明
             #  runner 当时被别的作业占满了。）
             Write-Host "::warning title=CPU 准确性未判定::增量 < 5pp，机器饱和、无判别力。不是通过，是没测到。"
+          } elseif ($rc -eq 1) {
+            throw "cpu_accuracy 判定失败：库对负载变化的响应与参照不一致 (rc=1)"
           } elseif ($rc -ne 0) {
-            throw "cpu_accuracy failed (rc=$rc)"
+            # 其余退出码是**脚本/用法问题**，不是判据结论。
+            # 明确区分，否则会被误读成「CPU 不准」。
+            throw "cpu_accuracy 脚本自身出错 (rc=$rc)，不是判据结论"
           }
 
       # CPU +18pp 根因诊断（Windows only，临时脚本，定位后删除）。
