@@ -169,8 +169,24 @@ jobs:
           # 那会让冒烟退化成「只 dlopen 不解析符号」。
           echo "NEED=$NEED" >> "$GITHUB_ENV"
           for s in $NEED; do
-            grep -qxF -- "$s" "$RUNNER_TEMP/symbols_match.txt" \
-              || { echo "ASSERT FAIL missing export: $s"; exit 1; }
+            if ! grep -qxF -- "$s" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT FAIL missing export: $s"
+              # 失败时就地倾印四路证据，把「符号到底在哪一层消失」一次看清：
+              #   token 流（校验器看到的） / 原始串（strings，不经 tr）
+              #   动态导出表（dlopen 后能解析到的） / 全符号表（含未 strip 的 .symtab）
+              echo "--- tokens (symbols.txt) 含子串："
+              grep -F -- "$s" "$RUNNER_TEMP/symbols.txt" || echo "(none)"
+              echo "--- strings 原始串含子串："
+              LC_ALL=C strings -a "$LIB_PATH" 2>/dev/null | grep -F -- "$s" || echo "(none)"
+              echo "--- nm -D --defined-only 动态导出（前 60 行 + 子串）："
+              nm -D --defined-only "$LIB_PATH" 2>&1 | head -60
+              nm -D --defined-only "$LIB_PATH" 2>&1 | grep -F -- "$s" || echo "(dynsym none)"
+              echo "--- readelf --dyn-syms 含子串："
+              readelf --dyn-syms "$LIB_PATH" 2>&1 | grep -F -- "$s" || echo "(none)"
+              echo "--- nm --defined-only 全符号表 含子串："
+              nm --defined-only "$LIB_PATH" 2>&1 | grep -F -- "$s" || echo "(none)"
+              exit 1
+            fi
             echo "ASSERT ok   $s"
           done
           if [ "${{ matrix.platform }}" = "darwin-x86_64" ]; then
