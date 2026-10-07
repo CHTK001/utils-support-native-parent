@@ -110,9 +110,11 @@ jobs:
           echo "LIB_PATH=$D/$EXPECT" >> "$GITHUB_ENV"
 
       - name: Check exports
-        # 不用 nm 做这件事。实测三种情况下 nm 都给不出可用符号表：
+        # 符号从哪来：nm 认得的格式用符号表（见 run 块开头的分工说明），认不得的回退 token。
+        # 当年「不用 nm」的结论其实是 `nm -gU` 之过 —— 实测三种情况下它都给不出可用符号表：
         #   1) Windows Git Bash 的 nm 不解析 PE/COFF，对 dll 只往 stderr 写 "no symbols"；
-        #   2) ffmpeg / smb 的 Linux release 构建剥掉了符号表，nm 同样报 "no symbols"；
+        #   2) ffmpeg / smb 的 Linux release 构建剥掉了 .symtab，nm 同样报 "no symbols"
+        #      （但 .dynsym 永远剥不掉，`nm -D --defined-only` 正是为此准备的）；
         #   3) 关键细节：`nm -gU` 在这两种情况下**退出码是 0**，只输出空表。所以原先那句
         #      `nm -gU ... || nm -g ...` 的兜底从来没执行过，它是死代码；exports.txt 恒为空，
         #      期望清单的第一个符号必然失败。
@@ -143,7 +145,35 @@ jobs:
         # 匹配用的集合因此额外并入「去掉一个前导下划线」的形式，同一份期望清单四个平台通用。
         # 摘要里仍打原始 token，便于人工排查真实符号名。
         run: |
-          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          # 先拿「库真实导出的符号名」，nm 认得的格式一律用符号表，认不得的才回退字节扫描：
+          #   ELF    nm -D --defined-only —— .dynsym 在 strip 之后依然存在，ffmpeg/smb 的
+          #          release 构建剥掉 .symtab 也照样拿得到；
+          #   Mach-O nm -g --defined-only —— 符号带一个前导下划线，下游归一化时统一剥；
+          #   都拿不到（Git Bash 的 nm 解析不了 Windows PE/COFF，只往 stderr 吐 "no symbols"）
+          #   才回到整 token 扫描（tr 把非标识符字节换成换行，每行恰是一个完整标识符）。
+          #
+          # 为什么不能只用 token 扫描 —— headless linux 腿 run #17/#18 的假红：
+          #   `free_string` 是 `pw_free_string` 的一行转发，链接器把两者折叠成同址别名，
+          #   .dynstr 里两个名字还做了**后缀共享**（free_string 的 st_name 指向
+          #   pw_free_string 串内第 3 个字节）。nm -D / readelf 都解析得出独立的
+          #   `free_string` 条目、dlsym 也取得到，但文件字节里**不存在**独立的
+          #   `free_string` 串 —— 基于字节的整行匹配必然假红。
+          #   「红的从来不是库，是校验器」在 nm 之后第二次应验。
+          SYM_SRC=""
+          for probe in "nm -D --defined-only" "nm -g --defined-only" "nm -gU"; do
+            if $probe "$LIB_PATH" 2>/dev/null | grep -v '^[[:space:]]*$' > "$RUNNER_TEMP/nm_raw.txt" \
+               && [ -s "$RUNNER_TEMP/nm_raw.txt" ]; then
+              SYM_SRC="$probe"
+              break
+            fi
+          done
+          if [ -n "$SYM_SRC" ]; then
+            echo "symbol source: $SYM_SRC"
+            awk '{print $NF}' "$RUNNER_TEMP/nm_raw.txt" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          else
+            echo "symbol source: byte-token fallback (nm 无法识别该二进制格式)"
+            LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          fi
           sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
             | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
           cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
