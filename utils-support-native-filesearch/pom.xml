@@ -33,7 +33,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <!-- 绑定类用到 record，且原在 utils 侧按 release 25 编译，
                          不能沿用父 POM 默认的 target 1.8 -->
