@@ -123,17 +123,19 @@ const INPUT_VALUE_JS: &str = "function(){ var t = (this.nodeName || '').toUpperC
        throw new Error('Node is not an <input>, <textarea> or <select> element');\
      } return this.value; }";
 
-/// 勾选状态：`{m: bool, r: bool}`（m=当前勾选；r=是否 radio）。
+/// 勾选状态：JSON 字符串 `{"m": bool, "r": bool}`（m=当前勾选；r=是否 radio）。
+/// 返回 JSON 串而非对象：CDP 默认 `returnByValue=false`，对象结果只带 objectId
+/// 不带 `value`，`call_value` 会取到 Null（曾导致恒读 {false,false}）。
 /// 非勾选控件抛 `Not a checkbox or radio button`（与 Playwright injected 一致）。
 const CHECK_STATE_JS: &str = "function(){\
      var el = this;\
      var roles = ['checkbox','menuitemcheckbox','option','radio','switch','menuitemradio','treeitem'];\
      if (el.nodeName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {\
-       return { m: !!el.checked, r: el.type === 'radio' };\
+       return JSON.stringify({ m: !!el.checked, r: el.type === 'radio' });\
      }\
      var role = el.getAttribute('role');\
      if (role && roles.indexOf(role) !== -1 && el.hasAttribute('aria-checked')) {\
-       return { m: el.getAttribute('aria-checked') === 'true', r: false };\
+       return JSON.stringify({ m: el.getAttribute('aria-checked') === 'true', r: false });\
      }\
      throw new Error('Not a checkbox or radio button');\
    }";
@@ -170,7 +172,7 @@ fn fill_js(value: &str) -> String {
              }}\
            }} else if (name === 'textarea') {{\
            }} else if (!el.isContentEditable) {{\
-             throw new Error('Element is not an <input>, <textarea> or [contenteditable] element');\
+             throw new Error('Element is not an <input>, <textarea>, <select> or [contenteditable] and does not have a role allowing [aria-readonly]');\
            }}\
            if (name === 'input') {{\
              el.select(); el.focus();\
@@ -227,11 +229,41 @@ fn select_js(selector: &str, values: &[String]) -> String {
     )
 }
 
+/// 与 Playwright `normalizeEvaluationExpression` 对齐：
+/// `^(async)?\s*function(\s|\()` 形态的表达式包一层括号再 eval，
+/// 否则 `eval("function(){}")` 会按**函数声明**解析并抛
+/// `Function statements require a function name`（V8 已实测）。
+fn normalize_eval_expression(expression: &str) -> String {
+    let expr = expression.trim();
+    let after_async = expr
+        .strip_prefix("async")
+        .map(|s| s.trim_start())
+        .unwrap_or(expr);
+    if let Some(after_fn) = after_async.strip_prefix("function") {
+        let next_ok = after_fn.starts_with('(')
+            || after_fn
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace);
+        if next_ok {
+            return format!("({expr})");
+        }
+    }
+    expr.to_string()
+}
+
 /// evaluate 包装：与 Playwright utilityScript 语义一致。
-/// `element=true` 时以 `(this, arg)` 调用函数；返回 JSON 字符串（失败返回 `'null'`）。
+/// `element=true` 时元素作为**第一个参数**传入；返回 JSON 字符串（失败返回 `'null'`）。
+/// 与 playwright-Java 对齐：`arg` 为 null/缺省时**不传参数**（`v === undefined`）。
 fn eval_wrapper(expression: &str, arg: &Value, element: bool) -> String {
+    let has_arg = !arg.is_null();
     let arg_json = serde_json::to_string(arg).unwrap_or_else(|_| "null".to_string());
-    let call = if element { "__e(this, __a)" } else { "__e(__a)" };
+    let call = match (element, has_arg) {
+        (true, true) => "__e(this, __a)",
+        (true, false) => "__e(this)",
+        (false, true) => "__e(__a)",
+        (false, false) => "__e()",
+    };
     format!(
         "async function(){{\
            const __e = globalThis.eval({expr});\
@@ -240,7 +272,7 @@ fn eval_wrapper(expression: &str, arg: &Value, element: bool) -> String {
            const __v = await __r;\
            try {{ return JSON.stringify(__v === undefined ? null : __v); }} catch (e) {{ return 'null'; }}\
          }}",
-        expr = jstr(expression),
+        expr = jstr(&normalize_eval_expression(expression)),
         arg = arg_json,
         call = call
     )
@@ -384,12 +416,17 @@ fn call_value(ret: CallFunctionOnReturns) -> Result<Value> {
     Ok(ret.result.value.unwrap_or(Value::Null))
 }
 
-/// JS 异常消息（优先 exception.description，如 `Error: boom`）。
+/// JS 异常消息：取 description 首行并剥掉 `Error: ` 前缀 —— 与 Playwright
+/// `createStacklessError` 的对外消息一致（如 `Element is not an <input>...`）；
+/// `TypeError:` / `SyntaxError:` 等类型前缀保留（Playwright 同样保留）。
 fn js_error(det: &ExceptionDetails) -> String {
-    det.exception
+    let raw = det
+        .exception
         .as_ref()
         .and_then(|o| o.description.clone())
-        .unwrap_or_else(|| det.text.clone())
+        .unwrap_or_else(|| det.text.clone());
+    let first = raw.lines().next().unwrap_or_default().trim();
+    first.strip_prefix("Error: ").unwrap_or(first).to_string()
 }
 
 /// `page.evaluate_function` 错误 → 带 `evaluation failed:` 前缀（Playwright 同款）。
@@ -420,8 +457,8 @@ async fn eval_f64(page: &Page, expr: &str) -> Option<f64> {
 }
 
 /// 轮询表达式直到为 true；JS 异常立即失败；到达截止时间 → 超时错误。
-async fn wait_expr_true(page: &Page, expr: &str, deadline: tokio::time::Instant) -> Result<()> {
-    let timeout_ms = deadline_ms(deadline);
+async fn wait_expr_true(page: &Page, expr: &str, timeout_ms: u64) -> Result<()> {
+    let deadline = deadline_after(timeout_ms);
     loop {
         match page.evaluate_expression(expr).await {
             Ok(res) => {
@@ -439,20 +476,14 @@ async fn wait_expr_true(page: &Page, expr: &str, deadline: tokio::time::Instant)
     }
 }
 
-/// 截止时间对应的毫秒数（供超时消息使用）。
-fn deadline_ms(deadline: tokio::time::Instant) -> u64 {
-    deadline
-        .saturating_duration_since(tokio::time::Instant::now())
-        .as_millis() as u64
-}
-
+/// 截止时间生成（消息一律使用**请求的**超时值，与 Playwright 一致）。
 fn deadline_after(timeout_ms: u64) -> tokio::time::Instant {
     tokio::time::Instant::now() + Duration::from_millis(timeout_ms)
 }
 
 /// 等待元素可操作（元素句柄路径）。
-async fn wait_element(el: &Element, level: u8, deadline: tokio::time::Instant) -> Result<()> {
-    let timeout_ms = deadline_ms(deadline);
+async fn wait_element(el: &Element, level: u8, timeout_ms: u64) -> Result<()> {
+    let deadline = deadline_after(timeout_ms);
     loop {
         match el.call_js_fn(&actionability_fn(level), false).await {
             Ok(ret) => {
@@ -481,12 +512,13 @@ async fn resolve_selector(
     page: &Page,
     selector: &str,
     level: u8,
-    deadline: tokio::time::Instant,
+    timeout_ms: u64,
 ) -> Result<Element> {
+    let deadline = deadline_after(timeout_ms);
     if level == 0 {
-        wait_expr_true(page, &attached_expr(selector), deadline).await?;
+        wait_expr_true(page, &attached_expr(selector), timeout_ms).await?;
     } else {
-        wait_expr_true(page, &actionability_expr(selector, level), deadline).await?;
+        wait_expr_true(page, &actionability_expr(selector, level), timeout_ms).await?;
     }
     loop {
         match page.find_element(selector).await {
@@ -537,7 +569,7 @@ fn op_launch(params: &Value) -> Result<Value> {
                 .collect()
         })
         .unwrap_or_default();
-    let config =
+    let (config, profile_dir) =
         state::headless_config(headless, executable, &args).map_err(|e| anyhow!("启动配置失败: {e}"))?;
     let browser = state::block_on(async {
         let (b, mut handler) = Browser::launch(config)
@@ -551,7 +583,11 @@ fn op_launch(params: &Value) -> Result<Value> {
         });
         Ok::<_, anyhow::Error>(b)
     })?;
-    Ok(json!({"handle": state::register(Entry::Browser(browser))}))
+    let handle = state::register(Entry::Browser(browser));
+    if let Some(dir) = profile_dir {
+        state::track_launch_dir(handle, dir);
+    }
+    Ok(json!({"handle": handle}))
 }
 
 /// newContext(browserHandle, options 忽略) -> {"handle": n}
@@ -634,6 +670,10 @@ fn op_close(handle: u64) -> Result<Value> {
         None => Ok(json!({})),
         Some(Entry::Browser(mut b)) => {
             let _ = state::block_on(b.close());
+            // 浏览器已退出（异步）：带重试地删除本库生成的独立 profile 目录
+            if let Some(dir) = state::take_launch_dir(handle) {
+                state::cleanup_profile_dir(dir);
+            }
             Ok(json!({}))
         }
         Some(Entry::Page(p)) => {
@@ -917,7 +957,7 @@ fn op_elem(handle: u64, params: &Value, act: Act) -> Result<Value> {
                     Entry::Element { el, page } => {
                         let level = act.level();
                         if level > 0 {
-                            wait_element(el, level, deadline_after(DEFAULT_TIMEOUT_MS)).await?;
+                            wait_element(el, level, DEFAULT_TIMEOUT_MS).await?;
                         }
                         act.run(el, page).await
                     }
@@ -929,8 +969,7 @@ fn op_elem(handle: u64, params: &Value, act: Act) -> Result<Value> {
             let selector = p_str(params, "selector")?;
             let page = page_of(handle)?;
             state::block_on(async {
-                let deadline = deadline_after(DEFAULT_TIMEOUT_MS);
-                let el = resolve_selector(&page, selector, act.level(), deadline).await?;
+                let el = resolve_selector(&page, selector, act.level(), DEFAULT_TIMEOUT_MS).await?;
                 act.run(&el, &page).await
             })
         }
@@ -1126,6 +1165,11 @@ async fn send_key(
 async fn check_state(el: &Element) -> Result<(bool, bool)> {
     let ret = el.call_js_fn(CHECK_STATE_JS, false).await.map_err(|e| anyhow!("{e}"))?;
     let v = call_value(ret)?;
+    // JSON 串 → 对象（容错：直接返回对象时也兼容）
+    let v = match v {
+        Value::String(s) => serde_json::from_str::<Value>(&s).unwrap_or(Value::Null),
+        other => other,
+    };
     Ok((
         v.get("m").and_then(Value::as_bool).unwrap_or(false),
         v.get("r").and_then(Value::as_bool).unwrap_or(false),
@@ -1190,12 +1234,7 @@ fn op_wait_for_selector(handle: u64, params: &Value) -> Result<Value> {
     let selector = p_str(params, "selector")?.to_string();
     let timeout_ms = p_u64(params, "timeout", DEFAULT_TIMEOUT_MS);
     state::block_on(async move {
-        wait_expr_true(
-            &page,
-            &actionability_expr(&selector, 1),
-            deadline_after(timeout_ms),
-        )
-        .await?;
+        wait_expr_true(&page, &actionability_expr(&selector, 1), timeout_ms).await?;
         Ok(json!({}))
     })
 }
@@ -1237,7 +1276,7 @@ fn op_select_option(handle: u64, params: &Value) -> Result<Value> {
                 Err(_) => {}
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(timeout_err(deadline_ms(deadline)));
+                return Err(timeout_err(DEFAULT_TIMEOUT_MS));
             }
             tokio::time::sleep(POLL).await;
         }
@@ -1519,9 +1558,20 @@ fn op_version() -> Result<Value> {
 
 // ==================== 旧符号实现 ====================
 
+/// 本库生成的 profile 目录守卫：作用域结束（此时浏览器已关闭）后 best-effort 删除。
+struct ProfileDirGuard(Option<std::path::PathBuf>);
+
+impl Drop for ProfileDirGuard {
+    fn drop(&mut self) {
+        if let Some(dir) = self.0.take() {
+            state::cleanup_profile_dir(dir);
+        }
+    }
+}
+
 /// 启动一个临时无头浏览器并打开空白页（旧符号专用）。
-async fn launch_temp() -> Result<(Browser, Page)> {
-    let config = state::headless_config(true, None, &[])
+async fn launch_temp() -> Result<(Browser, Page, ProfileDirGuard)> {
+    let (config, profile_dir) = state::headless_config(true, None, &[])
         .map_err(|e| anyhow!("启动配置失败: {e}"))?;
     let (b, mut handler) = Browser::launch(config)
         .await
@@ -1535,7 +1585,7 @@ async fn launch_temp() -> Result<(Browser, Page)> {
         .new_page(CreateTargetParams::from("about:blank"))
         .await
         .map_err(|e| anyhow!("{e}"))?;
-    Ok((b, page))
+    Ok((b, page, ProfileDirGuard(profile_dir)))
 }
 
 /// headers 字符串 → JSON 对象：支持 JSON map 或 `Key: Value` 每行一条。
@@ -1591,7 +1641,7 @@ fn op_legacy_download(params: &Value) -> Result<Value> {
     let cookies = p_str_opt(params, "cookies").to_string();
     let ua = p_str_opt(params, "userAgent").to_string();
     state::block_on(async move {
-        let (mut browser, page) = launch_temp().await?;
+        let (mut browser, page, _profile_guard) = launch_temp().await?;
         if !headers.trim().is_empty() {
             let map = parse_headers(&headers);
             if let Value::Object(m) = &map {
@@ -1627,7 +1677,7 @@ fn op_legacy_execute_script(params: &Value) -> Result<Value> {
     let url = p_str(params, "url")?.to_string();
     let script = p_str(params, "script")?.to_string();
     state::block_on(async move {
-        let (mut browser, page) = launch_temp().await?;
+        let (mut browser, page, _profile_guard) = launch_temp().await?;
         goto_nav(&page, &url, DEFAULT_TIMEOUT_MS).await?;
         let decl = eval_wrapper(&script, &Value::Null, false);
         let res = page
@@ -1647,7 +1697,7 @@ fn op_legacy_screenshot(params: &Value) -> Result<Value> {
     let check = p_str_opt(params, "check").to_string();
     let wait_ms = p_u64(params, "waitMs", 5_000);
     state::block_on(async move {
-        let (mut browser, page) = launch_temp().await?;
+        let (mut browser, page, _profile_guard) = launch_temp().await?;
         goto_nav(&page, &url, wait_ms.max(DEFAULT_TIMEOUT_MS)).await?;
         if !check.trim().is_empty() {
             let deadline = deadline_after(wait_ms);

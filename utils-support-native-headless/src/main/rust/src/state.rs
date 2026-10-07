@@ -15,6 +15,7 @@
 //!   不访问注册表，故不会死锁）。
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -144,12 +145,44 @@ pub fn remove_many(handles: &[u64]) {
     }
 }
 
+/// 由本库生成的独立 profile 目录（句柄 → 目录）；close 时 best-effort 清理。
+static LAUNCH_DIRS: Lazy<Mutex<HashMap<u64, PathBuf>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 登记 launch 时生成的 profile 目录。
+pub fn track_launch_dir(handle: u64, dir: PathBuf) {
+    LAUNCH_DIRS.lock().expect("launch dirs lock").insert(handle, dir);
+}
+
+/// 取出并移除登记的 profile 目录（供 close 后清理）。
+pub fn take_launch_dir(handle: u64) -> Option<PathBuf> {
+    LAUNCH_DIRS.lock().expect("launch dirs lock").remove(&handle)
+}
+
+/// best-effort 删除本库生成的 profile 目录。
+///
+/// Chrome 收到 `Browser.close` 后是**异步退出**的，文件锁可能在命令返回后
+/// 才释放 —— 单次删除经常失败，因此小步重试（最多约 2s）；仍失败则放弃
+/// （只泄漏一次启动的临时目录，不影响功能）。
+pub fn cleanup_profile_dir(dir: PathBuf) {
+    use std::time::Duration;
+    for attempt in 0..10u32 {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => return,
+            Err(_) if attempt < 9 => std::thread::sleep(Duration::from_millis(200)),
+            Err(_) => return,
+        }
+    }
+}
+
 /// 默认启动配置：headless + 禁沙箱（CI/容器友好）+ 禁shm。
+///
+/// 返回 `(配置, 本库生成的 profile 目录)`：目录仅在本库生成时返回
+/// （用户 args 显式指定 `--user-data-dir` 时返回 None —— 不归本库清理）。
 pub fn headless_config(
     headless: bool,
     executable: Option<String>,
     args: &[String],
-) -> Result<BrowserConfig, String> {
+) -> Result<(BrowserConfig, Option<PathBuf>), String> {
     let mut builder = BrowserConfig::builder();
     if headless {
         // 0.7 默认即 headless，无需显式设置
@@ -160,6 +193,27 @@ pub fn headless_config(
     if let Some(exe) = executable.filter(|s| !s.trim().is_empty()) {
         builder = builder.chrome_executable(exe);
     }
+    // 每次启动独立 profile：chromiumoxide 默认是固定目录（%TEMP%/chromiumoxide-runner），
+    // 第一个浏览器存活期间再启动第二个实例会因 profile 锁直接退出（exit code 21）。
+    let owned_profile: Option<PathBuf> = match args
+        .iter()
+        .find_map(|a| a.strip_prefix("--user-data-dir="))
+    {
+        Some(user) => {
+            builder = builder.user_data_dir(user);
+            None
+        }
+        None => {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default();
+            let dir =
+                std::env::temp_dir().join(format!("headless-rust-{}-{nanos}", std::process::id()));
+            builder = builder.user_data_dir(dir.to_string_lossy().into_owned());
+            Some(dir)
+        }
+    };
     // 稳定性参数：CI/容器/无界面环境必备。
     // DEFAULT_ARGS（chromiumoxide 内置，等价 Puppeteer/Playwright 那套）
     // 已包含 --disable-dev-shm-usage / --disable-extensions / --no-first-run /
@@ -183,5 +237,5 @@ pub fn headless_config(
         height: 720,
         ..Default::default()
     });
-    builder.build()
+    Ok((builder.build()?, owned_profile))
 }
