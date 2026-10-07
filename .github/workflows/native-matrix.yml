@@ -436,9 +436,20 @@ jobs:
           LOG="$RUNNER_TEMP/commit.log"
           BRANCH="build/native-matrix-artifacts"
           {
+            # 产物布局 vs 仓库布局，此前这一步一直对不上：
+            #   artifact 根 = <module>/native/<platform>/<lib>（Stage 步骤 stage/<module>/native/... 上传）
+            #   仓库布局     = <module>/src/main/resources/native/<platform>/<lib>
+            # 旧代码 `cp -R "$d." .` 把 dl/<module>/ 的内容（即 native/ 目录）
+            # 拷到仓库根，落地成 ./native/... —— 永远进不了
+            # utils-support-native-*/src/main/resources/native，git diff 恒空，
+            # 于是每次都判「产物与仓库一致，无需提交」、分支从不产生（run #20 实测）。
+            # 现在按模块名把 native/ 放回 src/main/resources/ 下。
             for d in dl/*/; do
               [ -d "$d" ] || continue
-              cp -R "$d." .
+              M=$(basename "$d")
+              [ -d "$d/native" ] || { echo "$M 无 native 目录，跳过"; continue; }
+              mkdir -p "$M/src/main/resources"
+              cp -R "$d/native" "$M/src/main/resources/"
             done
             echo "== 待提交产物 =="
             git status --porcelain -- 'utils-support-native-*/src/main/resources/native'
