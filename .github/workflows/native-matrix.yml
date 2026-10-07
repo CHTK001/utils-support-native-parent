@@ -156,7 +156,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           case "${{ matrix.module }}" in
             *filestorage)     NEED="native_get_version native_init" ;;
-            *headless)        NEED="download_page screenshot free_string" ;;
+            *headless)        NEED="download_page screenshot free_string pw_call pw_free_string pw_version" ;;
             *metrics)         NEED="metrics_start_sampler metrics_stop_sampler metrics_snapshot_size metrics_get_snapshot" ;;
             *smb)             NEED="smb_server_start smb_server_stop smb_server_list_shares smb_server_free_string" ;;
             *video-codec)     NEED="Java_com_chua_nativevideocodec_support_NativeVideoCodec_getVersion Java_com_chua_nativevideocodec_support_NativeVideoCodec_h264Decode" ;;
