@@ -54,7 +54,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <!-- Java 8 绑定：禁止 record / FFM / switch 表达式等 9+ 语法，产物为 52.0 字节码 -->
                     <release>8</release>
