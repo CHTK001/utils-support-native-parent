@@ -41,3 +41,7 @@ target/
 replay_pid*
 hs_err*
 __pycache__/
+# 例外：utils-support-native-imageopt 的 Cargo.lock **必须入库**
+# 本模块同样交付编好的动态库（cdylib），libdeflater / imagequant 若不做版本锁定，
+# CI 每次构建都会重新解析依赖，产物不可复现。理由同上面的 sysinformer。
+!utils-support-native-imageopt/src/main/rust/Cargo.lock

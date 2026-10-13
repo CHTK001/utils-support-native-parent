@@ -1,0 +1,23 @@
+[package]
+name = "rust_imageopt"
+version = "0.1.0"
+edition = "2021"
+authors = ["CH <ch@utils.com>"]
+license = "Apache-2.0"
+description = "libdeflate + libimagequant facade exposed as a flat C ABI for Panama FFM"
+
+# 两个 C 库都由 crates.io 上游 crate 自带源码、经 cc 在本机编译，
+# 不需要外部安装 libdeflate-dev / libimagequant-dev，也不依赖 CMake。
+[dependencies]
+libdeflater = "1.26.1"
+imagequant = "4.4.1"
+
+[lib]
+name = "chua_native_imageopt"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
