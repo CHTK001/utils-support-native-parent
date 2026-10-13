@@ -1,0 +1,443 @@
+name: native-imageopt
+
+# 三平台产物构建 + 运行时冒烟门。
+# 与 native-libjpeg-turbo 不同，本模块不需要 CMake/nasm/厂商 tarball：
+# libdeflate 与 libimagequant 的 C 源码随 crates.io 上的 libdeflater / imagequant
+# crate 一起分发，由 cc crate 在构建机本地编译并静态链接进 cdylib，
+# 所以每个 job 只需要 cargo + 一个 C 编译器。
+#
+# 每个 job 在自己的目标平台上原生构建（不交叉），避免 macOS Rosetta 与
+# Apple Silicon 的工具链问题；产物字节由 actions 上传，是否回提交由
+# workflow_dispatch 的输入决定。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把各平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-imageopt/**'
+      - '.github/workflows/native-imageopt.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-imageopt/**'
+      - '.github/workflows/native-imageopt.yml'
+
+concurrency:
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消。concurrency 对**所有**触发器生效、同组即互相取消。
+  group: imageopt-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            build_os: windows
+            build_arch: x86_64
+            smoke: true
+            lib: chua_native_imageopt.dll
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            build_os: linux
+            build_arch: x86_64
+            smoke: true
+            lib: libchua_native_imageopt.so
+          - platform: darwin-x86_64
+            # 托管 macOS runner 已无 Intel 镜像（macos-13 下架），只能在 arm64 上交叉编；
+            # 没有 x64 JVM 可加载它，故这一腿只验产物架构与导出符号，不跑 FFM 冒烟。
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: x86_64
+            smoke: false
+            lib: libchua_native_imageopt.dylib
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            build_os: darwin
+            build_arch: aarch64
+            smoke: true
+            lib: libchua_native_imageopt.dylib
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu runner 自带 build-essential，但显式装一次 gcc 头文件，
+      # 免得哪天换 runner 镜像时 cc crate 找不到 stdio.h 才发现。
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          cc --version 2>/dev/null | head -1 || clang --version | head -1
+
+      - name: Build (Windows)
+        if: matrix.build_os == 'windows'
+        shell: pwsh
+        run: >-
+          powershell -NoProfile -ExecutionPolicy Bypass
+          -File utils-support-native-imageopt/src/main/rust/build.ps1
+
+      - name: Build (Linux / macOS)
+        if: matrix.build_os != 'windows'
+        run: |
+          chmod +x utils-support-native-imageopt/src/main/rust/build.sh
+          ./utils-support-native-imageopt/src/main/rust/build.sh \
+            "${{ matrix.build_os }}" "${{ matrix.build_arch }}"
+
+      - name: Verify artifact exists
+        run: |
+          path="utils-support-native-imageopt/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "missing artifact: $path"; exit 1; }
+          ls -la "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Check exports
+        # 不用 nm。Windows 的 Git Bash nm 不解析 PE/COFF（只往 stderr 写 "no symbols"，
+        # 退出码却是 0），所以 `nm -gU ... || nm -g ...` 的兜底是死代码、symbols.txt 恒为空。
+        # 改成对二进制做「整 token 精确匹配」：tr 把所有非标识符字节（含 NUL、换行）替换成
+        # 换行，每行恰好一个完整标识符，再用 grep -qxF 要求整行相等。
+        # LC_ALL=C 对 tr 和 sort 都必须加：macOS 的 BSD tr 在 UTF-8 locale 下遇到二进制里的
+        # 非法多字节序列会报 "Illegal byte sequence" 并非 0 退出。Mach-O 的 C 符号带一个
+        # 前导下划线（dyld 解析时剥掉），故匹配集合并入「去掉一个前导下划线」的形式，
+        # 同一份清单四平台通用。
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sym in chua_df_zlib_compress chua_df_zlib_compress_best chua_iq_quantize \
+                     chua_imageopt_version chua_imageopt_deflate_version \
+                     chua_imageopt_quantize_version chua_imageopt_last_error; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+
+      - name: Check mach-o architecture
+        if: matrix.smoke == false
+        run: |
+          file "$LIB_PATH"
+          lipo -info "$LIB_PATH"
+          lipo -archs "$LIB_PATH" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
+          echo "ASSERT ok   mach-o x86_64"
+
+      - uses: actions/setup-java@v4
+        if: matrix.smoke != false
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Runtime round trip (Panama FFM, no project deps)
+        # ImageOptBridge 本身不能用在这里：它 import 了
+        # com.chua.common.support.utils.NativeLoader 并用 Lombok 的 @Slf4j，
+        # 依赖 utils-support-common-starter，而这个 workflow 刻意保持零项目依赖。
+        # 所以这里直接用 Panama FFM 绑 7 个 C 导出做一次真实的
+        # 「压缩 -> JDK Inflater 还原」与「量化 -> 索引回查」往返，不引入任何项目类。
+        if: matrix.smoke != false
+        run: |
+          mkdir -p target/smoke
+          cat > target/smoke/ImageOptRoundTrip.java <<'JAVA'
+          import java.lang.foreign.Arena;
+          import java.lang.foreign.FunctionDescriptor;
+          import java.lang.foreign.Linker;
+          import java.lang.foreign.MemorySegment;
+          import java.lang.foreign.SymbolLookup;
+          import java.lang.foreign.ValueLayout;
+          import java.lang.invoke.MethodHandle;
+          import java.nio.file.Path;
+          import java.util.Arrays;
+          import java.util.Random;
+          import java.util.zip.DataFormatException;
+          import java.util.zip.Inflater;
+
+          public final class ImageOptRoundTrip {
+            private static final int ERR_TOO_SMALL = -2;
+            private static final int W = 128;
+            private static final int H = 96;
+
+            private static void check(boolean ok, String what) {
+              if (!ok) {
+                throw new AssertionError("ASSERT FAIL: " + what);
+              }
+              System.out.println("ASSERT ok   " + what);
+            }
+
+            /**
+             * 读一个以 NUL 结尾的 C 字符串。
+             *
+             * <p>downcall 以 ValueLayout.ADDRESS 返回的是**零长** MemorySegment，
+             * 直接 getString(0) 会抛 IndexOutOfBoundsException: No null terminator found，
+             * 因为它拿不到扫描边界。必须先 reinterpret 出一个上界再读。
+             * 上界取 256 字节足够放版本号和错误描述。
+             */
+            private static String cstr(MemorySegment segment, Arena arena) {
+              return segment.reinterpret(256, arena, null).getString(0);
+            }
+
+            public static void main(String[] args) throws Throwable {
+              Path lib = Path.of(args[0]).toAbsolutePath();
+              Linker linker = Linker.nativeLinker();
+              // SymbolLookup 不是 AutoCloseable，它由传入的 Arena 负责生命周期，
+              // 所以只把 Arena 放进 try-with-resources。
+              try (Arena arena = Arena.ofShared()) {
+                SymbolLookup lookup = SymbolLookup.libraryLookup(lib, arena);
+
+                MethodHandle version = linker.downcallHandle(
+                        lookup.find("chua_imageopt_version").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle deflateVersion = linker.downcallHandle(
+                        lookup.find("chua_imageopt_deflate_version").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle quantizeVersion = linker.downcallHandle(
+                        lookup.find("chua_imageopt_quantize_version").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle lastError = linker.downcallHandle(
+                        lookup.find("chua_imageopt_last_error").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.ADDRESS));
+                MethodHandle compress = linker.downcallHandle(
+                        lookup.find("chua_df_zlib_compress").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+                MethodHandle compressBest = linker.downcallHandle(
+                        lookup.find("chua_df_zlib_compress_best").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT,
+                                ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
+                MethodHandle quantize = linker.downcallHandle(
+                        lookup.find("chua_iq_quantize").orElseThrow(),
+                        FunctionDescriptor.of(ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
+                                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
+                                ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+
+                String v = cstr((MemorySegment) version.invokeExact(), arena);
+                check(v != null && v.startsWith("chua_native_imageopt/"), "version = " + v);
+                String dv = cstr((MemorySegment) deflateVersion.invokeExact(), arena);
+                String qv = cstr((MemorySegment) quantizeVersion.invokeExact(), arena);
+                check(!dv.isEmpty() && !qv.isEmpty(),
+                        "embedded versions = libdeflate " + dv + " / libimagequant " + qv);
+
+                // ---- 1. deflate -> JDK Inflater 往返 ----
+                byte[] payload = new byte[256 * 1024];
+                Random random = new Random(2026);
+                for (int i = 0; i < payload.length; i++) {
+                  // 低熵但非纯常量，保证真的有压缩收益又不至于退化成 RLE 边界情况
+                  payload[i] = (byte) (random.nextInt(8) + 60);
+                }
+                int capacity = payload.length + payload.length / 1000 + 64;
+                MemorySegment src = arena.allocateFrom(ValueLayout.JAVA_BYTE, payload);
+                MemorySegment dst = arena.allocate(capacity);
+                MemorySegment len = arena.allocate(ValueLayout.JAVA_LONG);
+
+                int rc = (int) compress.invokeExact(src, (long) payload.length, 12,
+                        dst, (long) capacity, len);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_df_zlib_compress rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                long n = len.get(ValueLayout.JAVA_LONG, 0);
+                check(n > 0 && n < payload.length,
+                        "chua_df_zlib_compress level 12: " + payload.length + " -> " + n);
+
+                byte[] z = dst.asSlice(0, n).toArray(ValueLayout.JAVA_BYTE);
+                check((z[0] & 0xFF) == 0x78, "zlib CMF byte = 0x" + Integer.toHexString(z[0] & 0xFF));
+                Inflater inflater = new Inflater();
+                byte[] back = new byte[payload.length];
+                try {
+                  inflater.setInput(z);
+                  int written = inflater.inflate(back);
+                  check(written == payload.length, "inflate produced " + written + " bytes");
+                  check(Arrays.equals(back, payload), "zlib round trip is byte-identical");
+                } catch (DataFormatException e) {
+                  throw new AssertionError("ASSERT FAIL: not a valid zlib stream: " + e);
+                } finally {
+                  inflater.end();
+                }
+
+                // 缓冲区不足必须回 ERR_TOO_SMALL 并在 len 里回填所需字节数，
+                // 这正是调用方扩容重试所依赖的契约。
+                rc = (int) compress.invokeExact(src, (long) payload.length, 12,
+                        dst, 16L, len);
+
+                long needed = len.get(ValueLayout.JAVA_LONG, 0);
+                check(rc == ERR_TOO_SMALL && needed > 16,
+                        "too-small buffer -> ERR_TOO_SMALL, need " + needed);
+
+                // 多档试压不得比单档更差
+                rc = (int) compressBest.invokeExact(src, (long) payload.length, 11, 3,
+                        dst, (long) capacity, len);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_df_zlib_compress_best rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                long bestN = len.get(ValueLayout.JAVA_LONG, 0);
+                check(bestN <= n,
+                        "compressBest(11,3)=" + bestN + " <= compress(12)=" + n);
+                // 最高档不再向下试压，否则候选应只剩 1 档、结果与单档一致
+                rc = (int) compressBest.invokeExact(src, (long) payload.length, 12, 3,
+                        dst, (long) capacity, len);
+                check(len.get(ValueLayout.JAVA_LONG, 0) == bestN,
+                        "compressBest(12,3) at max level == compressBest(11,3): "
+                                + len.get(ValueLayout.JAVA_LONG, 0));
+
+                // ---- 2. 量化 -> 索引回查调色板 ----
+                byte[] rgba = new byte[W * H * 4];
+                for (int i = 0; i < W * H; i++) {
+                  rgba[i * 4] = (byte) (i % 256);
+                  rgba[i * 4 + 1] = (byte) ((i / 256) % 256);
+                  rgba[i * 4 + 2] = (byte) 128;
+                  rgba[i * 4 + 3] = (byte) 0xFF;
+                }
+                MemorySegment qSrc = arena.allocateFrom(ValueLayout.JAVA_BYTE, rgba);
+                MemorySegment palette = arena.allocate(256 * 4);
+                MemorySegment indices = arena.allocate((long) W * H);
+                MemorySegment colorCount = arena.allocate(ValueLayout.JAVA_INT);
+                rc = (int) quantize.invokeExact(qSrc, (long) W * H, W, H,
+                        256, 100, 4, palette, 256L * 4, indices, colorCount);
+                if (rc != 0) {
+                  throw new AssertionError("ASSERT FAIL: chua_iq_quantize rc=" + rc
+                          + " err=" + cstr((MemorySegment) lastError.invokeExact(), arena));
+                }
+                int colors = colorCount.get(ValueLayout.JAVA_INT, 0);
+                byte[] idx = indices.toArray(ValueLayout.JAVA_BYTE);
+                int maxIdx = 0;
+                for (byte b : idx) {
+                  maxIdx = Math.max(maxIdx, b & 0xFF);
+                }
+                check(idx.length == W * H, "quantize produced " + idx.length + " indices");
+                check(colors >= 1 && colors <= 256, "quantize palette size = " + colors);
+                // 索引越界会让 Java 侧构造 IndexColorModel 时炸掉，必须在这里拦住
+                check(maxIdx < colors,
+                        "max index " + maxIdx + " < palette size " + colors);
+
+                // 参数校验：非法 max_colors 必须被拒，而不是静默产出垃圾结果
+                rc = (int) quantize.invokeExact(qSrc, (long) W * H, W, H,
+                        999, 100, 4, palette, 256L * 4, indices, colorCount);
+                check(rc < 0, "max_colors=999 rejected with rc=" + rc);
+                rc = (int) quantize.invokeExact(qSrc, (long) W * H, W, H,
+                        256, 100, 99, palette, 256L * 4, indices, colorCount);
+                check(rc < 0, "speed=99 rejected with rc=" + rc);
+                rc = (int) quantize.invokeExact(qSrc, (long) (W * H - 1), W, H,
+                        256, 100, 4, palette, 256L * 4, indices, colorCount);
+                check(rc < 0, "pixel_count != width*height rejected with rc=" + rc);
+
+                System.out.println("ROUND_TRIP_OK");
+              }
+            }
+          }
+          JAVA
+          javac -d target/smoke target/smoke/ImageOptRoundTrip.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 \
+            -cp target/smoke ImageOptRoundTrip "$(pwd)/$LIB_PATH"
+
+      - name: Stage artifact for upload
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-imageopt
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    # always() 保证部分平台失败时成功平台的产物仍能回填。
+    # push 与手动 dispatch 都触发，回填用 workflow 自带 GITHUB_TOKEN。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-imageopt'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          echo "### 已回填的产物" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null \
+            | sed 's#^dl/##' >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "build job: ${{ needs.build.result }}（产物已推送到分支 \`build/imageopt-native-artifacts\`，由维护者合并进 main）" \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 仓库 main 启用 "require pull request" 保护，GITHUB_TOKEN 直推 main
+          # 会被 GH006 拒绝；且仓库设置禁止 Actions 创建 PR。
+          # 但推送到非保护的新分支是允许的，因此改为推分支，由维护者合并。
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/imageopt-native-artifacts"
+          {
+            mkdir -p utils-support-native-imageopt/src/main/resources/native
+            cp -R dl/. utils-support-native-imageopt/src/main/resources/native/
+            echo "== 待提交内容 =="
+            git status --porcelain utils-support-native-imageopt/src/main/resources/native
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- utils-support-native-imageopt/src/main/resources/native \
+               && [ -z "$(git ls-files --others --exclude-standard \
+                    utils-support-native-imageopt/src/main/resources/native)" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add utils-support-native-imageopt/src/main/resources/native
+            git commit -m "build(native): imageopt 多平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH，等待维护者合并"
