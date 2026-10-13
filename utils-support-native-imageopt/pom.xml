@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.42</version>
+    </parent>
+    <artifactId>utils-support-native-imageopt</artifactId>
+    <packaging>jar</packaging>
+    <description>libdeflate + libimagequant Rust native 库（PNG 压缩 deflate 内核与调色板量化内核，扁平 C ABI 供 Panama FFM 调用）</description>
+
+    <properties>
+        <lombok.version>1.18.46</lombok.version>
+    </properties>
+
+    <dependencies>
+        <!-- FFM 绑定类 ImageOptBridge 需要 NativeLoader / NativeUtils -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.16.0</version>
+                <configuration>
+                    <!-- 绑定类使用 java.lang.foreign（JDK 22+），故不能沿用父 POM 默认的 target 1.8 -->
+                    <release>25</release>
+                    <encoding>UTF-8</encoding>
+                    <compilerArgs>
+                        <arg>-proc:full</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

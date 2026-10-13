@@ -31,6 +31,7 @@
         <module>utils-support-native-sysinformer-java8</module>
         <module>utils-support-native-needle</module>
         <module>utils-support-native-libjpeg-turbo</module>
+        <module>utils-support-native-imageopt</module>
 </modules>
 
     <repositories>

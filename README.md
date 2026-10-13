@@ -12,6 +12,7 @@
 | `utils-support-native-filesearch` | 文件搜索 Rust native 库（WizTree 能力，JNI） | **25** | `utils-support-filesearch-starter` |
 | `utils-support-native-filesearch-java8` | 文件搜索 Rust native 库的 Java 8 JNA 绑定（同一组扁平 C ABI，独立于 25 档主模块） | 1.8 | 无 |
 | `utils-support-native-filestorage` | 文件存储 Rust native 库（URL 参数解析 + 图片滤镜 + HEIC 预览转码） | 1.8 | 无 |
+| `utils-support-native-imageopt` | 图片压缩 native 库（libdeflate deflate 内核 + libimagequant 调色板量化内核，FFM） | **25** | `utils-support-image-starter` |
 | `utils-support-native-headless` | 无头环境 native 支持 | 1.8 | 无 |
 | `utils-support-native-libjpeg-turbo` | libjpeg-turbo TurboJPEG（SIMD JPEG 编解码，FFM） | **25** | `utils-support-image-starter` |
 | `utils-support-native-metrics` | 系统指标 Rust native 库（FFM） | **25** | `utils-support-metrics-starter` |
@@ -32,7 +33,7 @@
 | 档位 | 适用 | 模块 |
 |---|---|---|
 | **1.8**（父 POM 默认） | 纯 Java / 传统 JNI（`native` 方法）/ JNA 绑定，无新语法 | cuda、datarecovery、ffmpeg、filesearch-java8、filestorage、headless、nmap、sqlite、video-codec、video-processor |
-| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | filesearch、libjpeg-turbo、metrics、needle、smb、uia、wechat |
+| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | filesearch、imageopt、libjpeg-turbo、metrics、needle、smb、uia、wechat |
 
 **引用 25 档模块的应用运行时必须是 JDK 25**（CI 亦为 temurin 25）；1.8 档模块可运行于更早的 JDK。
 新增 native 模块时请按此二选一，不要引入第三档。
@@ -142,6 +143,7 @@ export OSXCROSS_ROOT=/opt/osxcross
 | headless | ⬜ 未测 | DLL 存在但为 C-style exports，无 JNI 符号 |
 | cuda | ⬜ 未测 | 无 DLL，仅 CUDA 环境检测脚本 |
 | filestorage | ⬜ 未测 | DLL 存在但为 C-style exports，无 JNI 符号 |
+| imageopt | ✅ 由 CI 覆盖 | 四个平台各自跑 `native-imageopt.yml` 的 FFM 冒烟：deflate→JDK `Inflater` 字节级往返、量化→索引回查调色板、`ERR_TOO_SMALL` 契约、参数校验 |
 
 **已测：23/23 PASS · 待桥接：headless、filestorage · 环境检测：cuda**
 
