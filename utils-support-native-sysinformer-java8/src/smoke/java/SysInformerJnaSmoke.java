@@ -1,3 +1,4 @@
+// [P3C A20 豁免] A20/A30/A31: 含日志/界面/SQL 字符串字面量等非业务魔法值场景，豁免。
 import com.chua.nativesysinformer.java8.SysInformerJna;
 
 /**
@@ -31,9 +32,9 @@ public final class SysInformerJnaSmoke {
         // 1) version：应能解析出 platform 字段
         String ver = SysInformerJna.version();
         if (ver != null && ver.contains("\"platform\"")) {
-            System.out.println("ASSERT ok   version = " + ver);
+            System.out.println("ASSERT ok   version = " + ver); // [P3C E1 豁免]
         } else {
-            System.out.println("ASSERT FAIL version 异常: " + ver);
+            System.out.println("ASSERT FAIL version 异常: " + ver); // [P3C E1 豁免]
             failures++;
         }
 
@@ -43,29 +44,29 @@ public final class SysInformerJnaSmoke {
                 && snap.contains("\"cpu\"")
                 && snap.contains("\"host\"")
                 && snap.contains("\"memory\"")) {
-            System.out.println("ASSERT ok   system.snapshot 含 cpu/host/memory（"
+            System.out.println("ASSERT ok   system.snapshot 含 cpu/host/memory（" // [P3C E1 豁免]
                     + snap.length() + " 字符）");
         } else {
-            System.out.println("ASSERT FAIL system.snapshot 异常: " + first(snap, 200));
+            System.out.println("ASSERT FAIL system.snapshot 异常: " + first(snap, 200)); // [P3C E1 豁免]
             failures++;
         }
 
         // 3) process.list：必须非空
         String list = SysInformerJna.call("process.list");
         if (SysInformerJna.isOk(list) && list.contains("\"pid\"")) {
-            System.out.println("ASSERT ok   process.list 非空（" + list.length() + " 字符）");
+            System.out.println("ASSERT ok   process.list 非空（" + list.length() + " 字符）"); // [P3C E1 豁免]
         } else {
-            System.out.println("ASSERT FAIL process.list 异常: " + first(list, 200));
+            System.out.println("ASSERT FAIL process.list 异常: " + first(list, 200)); // [P3C E1 豁免]
             failures++;
         }
 
         // 4) 未知 op 必须被显式拒绝
         String bad = SysInformerJna.call("__no_such_op__");
         if (!SysInformerJna.isOk(bad) && SysInformerJna.errorOf(bad) != null) {
-            System.out.println("ASSERT ok   未知 op 被拒绝: "
+            System.out.println("ASSERT ok   未知 op 被拒绝: " // [P3C E1 豁免]
                     + first(SysInformerJna.errorOf(bad), 60));
         } else {
-            System.out.println("ASSERT FAIL 未知 op 未被拒绝: " + first(bad, 200));
+            System.out.println("ASSERT FAIL 未知 op 未被拒绝: " + first(bad, 200)); // [P3C E1 豁免]
             failures++;
         }
 
@@ -82,9 +83,9 @@ public final class SysInformerJnaSmoke {
         String err = SysInformerJna.errorOf(unsup);
         if (!SysInformerJna.isOk(unsup) && err != null && err.length() > 0
                 && !"null".equals(err)) {
-            System.out.println("ASSERT ok   errorOf 提取到原因: " + first(err, 60));
+            System.out.println("ASSERT ok   errorOf 提取到原因: " + first(err, 60)); // [P3C E1 豁免]
         } else {
-            System.out.println("ASSERT FAIL errorOf 未能提取失败原因: " + first(unsup, 200));
+            System.out.println("ASSERT FAIL errorOf 未能提取失败原因: " + first(unsup, 200)); // [P3C E1 豁免]
             failures++;
         }
 
@@ -96,19 +97,19 @@ public final class SysInformerJnaSmoke {
         boolean hasDataError = ks != null && ks.contains("\"error\":\"")
                 && !ks.contains("\"error\":null");
         if (okForm || hasDataError) {
-            System.out.println("ASSERT ok   process.stack(kernel=true) 返回形态符合契约（"
+            System.out.println("ASSERT ok   process.stack(kernel=true) 返回形态符合契约（" // [P3C E1 豁免]
                     + (okForm ? "ok:true + data.error" : "ok:false") + "）");
         } else {
-            System.out.println("ASSERT FAIL process.stack(kernel=true) 形态异常: " + first(ks, 200));
+            System.out.println("ASSERT FAIL process.stack(kernel=true) 形态异常: " + first(ks, 200)); // [P3C E1 豁免]
             failures++;
         }
 
-        System.out.println();
+        System.out.println(); // [P3C E1 豁免]
         if (failures > 0) {
-            System.out.println("SYSINFORMER_JNA_SMOKE_FAILED failures=" + failures);
+            System.out.println("SYSINFORMER_JNA_SMOKE_FAILED failures=" + failures); // [P3C E1 豁免]
             System.exit(1);
         }
-        System.out.println("SYSINFORMER_JNA_SMOKE_OK");
+        System.out.println("SYSINFORMER_JNA_SMOKE_OK"); // [P3C E1 豁免]
     }
 
     /**
