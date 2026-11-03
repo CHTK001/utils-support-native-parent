@@ -86,7 +86,7 @@ public final class FilesearchJnaBridgeSmoke {
         JnaFileSearchBridge.cancel();
 
         log("SMOKE OK");
-        System.out.println(LOG);
+        System.out.println(LOG); // [P3C E1 豁免]
     }
 
     /**

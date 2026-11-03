@@ -24,7 +24,7 @@ public final class FilesearchFlatAbiSmoke {
 
     public static void main(String[] argv) throws Throwable {
         if (argv.length == 0) {
-            System.err.println("用法: FilesearchFlatAbiSmoke <库路径>");
+            System.err.println("用法: FilesearchFlatAbiSmoke <库路径>"); // [P3C E1 豁免]
             System.exit(2);
         }
         Path lib = Path.of(argv[0]);
@@ -70,7 +70,7 @@ public final class FilesearchFlatAbiSmoke {
         }
 
         log("SMOKE OK");
-        System.out.println(LOG);
+        System.out.println(LOG); // [P3C E1 豁免]
     }
 
     private static boolean require(boolean condition, String message) {

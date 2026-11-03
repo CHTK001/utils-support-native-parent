@@ -75,7 +75,7 @@ public final class FilesearchMftJnaSmoke {
      */
     public static void main(String[] argv) throws Exception {
         if (argv.length < 2) {
-            System.err.println("用法: FilesearchMftJnaSmoke <扫描根目录> <mft|walkdir>");
+            System.err.println("用法: FilesearchMftJnaSmoke <扫描根目录> <mft|walkdir>"); // [P3C E1 豁免]
             System.exit(2);
         }
         Path root = Paths.get(argv[0]);
@@ -143,7 +143,7 @@ public final class FilesearchMftJnaSmoke {
             deleteQuietly(probeRoot);
         }
         log("SMOKE OK");
-        System.out.println(LOG);
+        System.out.println(LOG); // [P3C E1 豁免]
     }
 
     /**

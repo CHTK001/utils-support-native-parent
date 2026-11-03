@@ -1,3 +1,4 @@
+// [P3C A20 豁免] A20/A30/A31: 含日志/界面/SQL 字符串字面量等非业务魔法值场景，豁免。
 import com.chua.nativesysinformer.support.SysInformerNative;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -46,7 +47,7 @@ public final class FfmSmoke {
      * @param msg 描述
      */
     private static void ok(boolean cond, String msg) {
-        System.out.println((cond ? "ASSERT ok   " : "ASSERT FAIL ") + msg);
+        System.out.println((cond ? "ASSERT ok   " : "ASSERT FAIL ") + msg); // [P3C E1 豁免]
         if (!cond) {
             bad++;
         }
@@ -58,7 +59,7 @@ public final class FfmSmoke {
      * @param args 未使用
      */
     public static void main(String[] args) {
-        System.out.println("version = " + SysInformerNative.version());
+        System.out.println("version = " + SysInformerNative.version()); // [P3C E1 豁免]
         ok(SysInformerNative.platform() != null, "platform() 非空");
 
         JsonNode snap = SysInformerNative.systemSnapshot();
@@ -100,11 +101,11 @@ public final class FfmSmoke {
                 "events.poll 返回数组（" + (evs == null ? "null" : evs.size()) + " 条）");
         SysInformerNative.stopEvents();
 
-        System.out.println();
+        System.out.println(); // [P3C E1 豁免]
         if (bad > 0) {
-            System.out.println("JAVA25_FFM_SMOKE_FAILED bad=" + bad);
+            System.out.println("JAVA25_FFM_SMOKE_FAILED bad=" + bad); // [P3C E1 豁免]
             System.exit(1);
         }
-        System.out.println("JAVA25_FFM_SMOKE_OK");
+        System.out.println("JAVA25_FFM_SMOKE_OK"); // [P3C E1 豁免]
     }
 }

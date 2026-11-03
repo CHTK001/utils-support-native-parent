@@ -6,10 +6,10 @@
 直接产出路径 + 大小 + 修改时间，**需管理员权限**）；其它平台或 MFT 打不开时
 回退 `walkdir`（深度上限 3）。两条路径输出**同一份 JSON ABI**，Java 侧无感知。
 
-> 实测（管理员、C: 盘、960,768 条 MFT 记录）：
-> 解析出 696,886 条有效文件记录，全量列举 **559,042** 个文件且大小/时间正确，
-> 单次全盘扫描约 **20~23 秒**（逐条读取 1KB 记录 + 建路径索引；WizTree 走内存映射顺序读，
-> 会更快）。设置环境变量 `CHUA_MFT_DEBUG=1` 可打印解析诊断计数。
+> 实测（管理员、D: 盘，2,170,112 条 MFT 记录 / 2.22GB 数据）：
+> 解析出约 559,000 条有效记录（目录 73,744 / 文件 598,836，随磁盘状态浮动），
+> 8 路并行读 2.2GB MFT + rayon 逐条并行解析：全量扫描约 **6~7 秒**；
+> 设置环境变量 `CHUA_MFT_SERIAL=1` 回退到原来的顺序读（约 9~10 秒），用于对比数据一致性。
 > 非管理员时 `\\.\X:` 打不开，会自动回退到 walkdir（此时只有深度 ≤3 的结果）。
 
 > 需要 JDK 8 运行环境时，改用同目录下的 `utils-support-native-filesearch-java8`：
@@ -68,12 +68,14 @@ cd src/main/rust
 
 | 平台 | 状态 |
 |------|------|
-| `windows-x86_64` | `file_search.dll`（306,688 字节，sha256 `B457841B…`）**含 MFT 直读**，`rust-lld` 链接 |
+| `windows-x86_64` | `file_search.dll`（1,264,128 字节，sha256 `7C6B2A84309A9EAEC7AA88D0EAF3994ADE4E5053C93AD54280E5371A4A1B2001`）**含 MFT 直读**，`rust-lld` 链接 |
 | `linux-x86_64` | `libfile_search.so`（434,856 字节，sha256 `52174464…`）已按当前源码重建，**不再带 7 个已删除的 JNI 导出** |
 | `darwin-x86_64` | `libfile_search.dylib`（398,160 字节，sha256 `8CBE77F5…`）已补齐 |
 | `darwin-aarch64` | `libfile_search.dylib`（384,528 字节，sha256 `E1E29A19…`）已补齐 |
 
 四平台产物均出自同一份源码，5 个导出齐全。
+
+> 注意：`linux-x86_64` / `darwin-x86_64` / `darwin-aarch64` 这三只产物还是在添加 `rayon` 之前构建的，目前已按当前 `mft.rs` 并行重建中；正式出货以 CI 产物为准。
 
 ### 交叉编译（无需 Docker / osxcross / Apple SDK）
 
