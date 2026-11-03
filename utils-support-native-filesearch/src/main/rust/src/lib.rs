@@ -1,7 +1,7 @@
 use std::ffi::{c_char, CStr, CString};
 use std::os::raw::c_int;
 
-mod mft;
+pub mod mft;
 
 fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\")

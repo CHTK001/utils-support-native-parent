@@ -1,14 +1,19 @@
 //! Windows NTFS MFT 直读搜索。
 //!
 //! <p>直接打开卷设备 {@code \\.\X:}，读取 NTFS 引导扇区与 {@code $MFT}，
-//! 逐条解析 MFT 记录（$STANDARD_INFORMATION / $FILE_NAME / 未命名 $DATA），
-//! 重建完整路径并返回文件大小、修改时间。仅 Windows 且通常需要管理员权限。</p>
+//! 将整份 MFT 记录顺序读入连续 buffer 后，以 rayon 并行逐条解析，
+//! 重建路径并返回文件大小、修改时间。仅 Windows 且通常需要管理员权限。</p>
 //!
-//! <p>解析失败时由调用方回退到 {@code walkdir}，因此本模块只保证“尽力而为”：
+//! <p>解析失败时由调用方回退到 {@code walkdir}，因此本模块只保证"尽力而为"：
 //! 任何异常都返回 {@link Err}，绝不 panic 到 FFI 边界。</p>
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use rayon::prelude::*;
+
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 
 /// 搜索结果条目（与 walkdir 路径共用的输出结构）。
 pub struct SearchEntry {
@@ -36,12 +41,18 @@ struct RecordInfo {
     modified: u64,
 }
 
+/// rayon 并行解析时每组的攒包结果。
+struct ParChunk {
+    dirs: Vec<(u64, RecordInfo)>,
+    files: Vec<(u64, RecordInfo)>,
+}
+
 /// 非 Windows 平台：MFT 直读不可用。
 #[cfg(not(windows))]
 pub fn collect(
     _root: &str,
     _max_results: i32,
-    _name_match: &dyn Fn(&str) -> bool,
+    _name_match: &(dyn Fn(&str) -> bool + Send + Sync),
 ) -> Result<Vec<SearchEntry>, String> {
     Err("NTFS MFT 直读仅支持 Windows".to_string())
 }
@@ -50,17 +61,14 @@ pub fn collect(
 ///
 /// @param root        搜索根目录（盘符，如 `C:\` 或 `C:\Users`）
 /// @param max_results 最大返回数，<= 0 表示不限
-/// @param name_match  文件名匹配谓词（由调用方传入 glob 逻辑）
+/// @param name_match  文件名匹配谓词（由调用方传入 glob 逻辑，Send）
 /// @return 命中条目；解析失败返回 `Err` 供调用方回退 walkdir
 #[cfg(windows)]
 pub fn collect(
     root: &str,
     max_results: i32,
-    name_match: &dyn Fn(&str) -> bool,
+    name_match: &(dyn Fn(&str) -> bool + Send + Sync),
 ) -> Result<Vec<SearchEntry>, String> {
-    use std::collections::HashMap;
-    use std::os::windows::fs::OpenOptionsExt;
-
     /// 读取小端 u16 / u32 / u64 / i64 的辅助。
     fn u16_at(b: &[u8], o: usize) -> Option<u16> {
         if o + 2 <= b.len() {
@@ -91,6 +99,22 @@ pub fn collect(
     struct Run {
         lcn: i64,
         len: u64,
+    }
+
+    /// 把原始指针对象包一层 `Send`，让 worker 可以捧走指向 `data` 的指针。
+    /// 每个 worker 只写 `data` 自己的非重叠区间，任务返回后指针便失效，
+    /// 所以只有 Send 没有 Sync；参与 Join 后的 `data` 读写的是父线程。
+    struct SendPtr(std::ptr::NonNull<u8>);
+
+    unsafe impl Send for SendPtr {}
+
+    impl SendPtr {
+        /// 把改包装为：只返回 worker 负责区间的 `&mut [u8]`，
+        /// worker 内部不直接触碰 `NonNull` 字段，避免闭包按 FIELD 拆分来搬运 `NonNull`
+        /// （`NonNull<u8>` 不满足 `Send`，会复现 `SendPtr` 的 `Send` 检查失效）。
+        fn slice(&self, lo: usize, hi: usize) -> &mut [u8] {
+            unsafe { std::slice::from_raw_parts_mut(self.0.as_ptr().add(lo), hi - lo) }
+        }
     }
 
     /// 解码 NTFS 运行列表（runlist）。
@@ -298,169 +322,229 @@ pub fn collect(
         None
     }
 
-    /// $MFT 顺序预取读取器。
+    /// 将整份 $MFT（层面直连）并行读入连续 buffer，为后续 rayon 并行解析做准备。
     ///
-    /// 原实现对每条记录单独 `seek` + 读 1024 字节，141 万条记录即 141 万次系统调用。
-    /// 而 $MFT 在卷上是按 extent 顺序连续排列的，顺序读的实际吞吐远高于随机定位，
-    /// 因此改成沿 extent 顺序一次预取一整块，主循环从内存切片取记录。
+    /// 单线程 I/O 是扫描的最大瓶颈（本机 D: 盘上 2.2GB MFT 数据一次读死要 6.6s），
+    /// 所以把 MFT 数据的逻辑区段按 worker 数均分，每个 worker 打开卷的一个共享只读句柄，
+    /// 只读自己负责的区段，读写互不冲突。
     ///
-    /// 语义与原逐条 `seek` + 1024 字节读的实现完全一致，只是把「随机定位单条」
-    /// 换成「顺序批量」。块大小取 2 MiB：既能摊薄系统调用开销，
-    /// 又不会为小卷浪费内存。
-    struct StreamPrefetcher<'a> {
-        /// 底层卷句柄
-        file: &'a mut File,
-        /// $MFT 的 extent 列表
-        runs: &'a [Run],
-        /// 簇大小（字节）
+    /// CHUA_MFT_SERIAL=1 时回退到原来的顺序读，用于对比数据一致性。
+    fn read_all_mft_records(
+        volume: &str,
+        file: &mut File,
+        mft_runs: &[Run],
         cluster_size: u64,
-        /// 单条记录大小（字节）
         record_size: usize,
-        /// 预取块大小（字节）
-        block_size: usize,
-        /// 预取块覆盖的数据流起始偏移
-        block_off: u64,
-        /// 预取块内已填充的字节数
-        block_len: usize,
-        /// 预取块缓冲
-        block: Vec<u8>,
-        /// I/O 错误：读失败时记录下来，交给调用方回退 walkdir
-        io_err: Option<String>,
-    }
-
-    impl<'a> StreamPrefetcher<'a> {
-        /// 创建一个预取器。
-        ///
-        /// @param file         卷句柄
-        /// @param runs         $MFT 的 extent 列表
-        /// @param cluster_size 簇大小（字节）
-        /// @param record_size  单条记录大小（字节）
-        fn new(
-            file: &'a mut File,
-            runs: &'a [Run],
-            cluster_size: u64,
-            record_size: usize,
-        ) -> Self {
-            // 块至少要装下 1 条记录，且向上取整到 4 KiB 以贴合页大小
-            let mut block_size = (2usize << 20).max(record_size);
-            block_size = block_size.next_multiple_of(4096);
-            StreamPrefetcher {
-                file,
-                runs,
-                cluster_size,
-                record_size,
-                block_size,
-                block_off: 0,
-                block_len: 0,
-                // 缓冲只分配一次：fill 只覆写实际读到的区间，不重新清零，
-                // 避免每条记录都 memset 整块
-                block: vec![0u8; block_size],
-                io_err: None,
-            }
+        total_records: usize,
+    ) -> Result<Vec<u8>, String> {
+        let total_bytes = total_records as usize * record_size;
+        if total_bytes == 0 {
+            return Err("MFT 记录数为 0".to_string());
+        }
+        if std::env::var("CHUA_MFT_SERIAL").is_ok() {
+            return read_all_mft_records_serial(file, mft_runs, cluster_size, record_size, total_bytes);
         }
 
-        /// 把一条记录拷贝进调用方提供的缓冲。
-        ///
-        /// 复用同一个缓冲，避免 142 万条记录各分配一次 1KB。
-        /// 记录内容在本次调用后即失效，解析结果由 `parse_record` 拷成自有数据。
-        ///
-        /// @param rec_num 记录序号
-        /// @param buf     复用缓冲（内部按记录大小调整长度）
-        /// @return 成功读到完整记录返回 `true`
-        fn record_into(&mut self, rec_num: u64, buf: &mut Vec<u8>) -> bool {
-            let off = match rec_num.checked_mul(self.record_size as u64) {
-                Some(v) => v,
-                None => return false,
+    /// 原来的顺序读路径（按 extent 依次读入，不涉及多句柄/多段合并），用于数据一致性对比。
+    fn read_all_mft_records_serial(
+        file: &mut File,
+        mft_runs: &[Run],
+        cluster_size: u64,
+        _record_size: usize,
+        total_bytes: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut data = Vec::with_capacity(total_bytes);
+        let mut got = 0usize;
+        for run in mft_runs {
+            if got >= total_bytes {
+                break;
+            }
+            let run_len = (run.len as u64 * cluster_size) as usize;
+            if run_len == 0 {
+                continue;
+            }
+            let vol_off = (run.lcn as u64 * cluster_size) as usize;
+            let take = if run_len < total_bytes - got {
+                run_len
+            } else {
+                total_bytes - got
             };
-            if !(off >= self.block_off && off + self.record_size as u64 <= self.block_off + self.block_len as u64)
-            {
-                if self.fill(off).is_none() {
-                    return false;
-                }
-            }
-            let start = (off - self.block_off) as usize;
-            if start + self.record_size > self.block_len {
-                return false;
-            }
-            buf.clear();
-            buf.extend_from_slice(&self.block[start..start + self.record_size]);
-            true
+            file.seek(SeekFrom::Start(vol_off as u64))
+                .map_err(|e| format!("MFT extent 定位失败: {}", e))?;
+            let mut buf = vec![0u8; take];
+            file.read_exact(&mut buf)
+                .map_err(|e| format!("读取 MFT extent 失败: {}", e))?;
+            data.extend_from_slice(&buf);
+            got += take;
         }
+        if got != total_bytes {
+            return Err(format!(
+                "MFT 记录读取不完整：已读 {} 预期 {}",
+                got, total_bytes
+            ));
+        }
+        Ok(data)
+    }
+        // 计算每个 extent 在逻辑数据中的起始/长度，最后一个超出 real_size 的截断
+        let mut extents: Vec<(u64, usize, usize)> = Vec::new();
+        let mut log_off = 0usize;
+        for r in mft_runs {
+            if r.len <= 0 {
+                continue;
+            }
+            let len = (r.len as u64) * cluster_size;
+            let rest = total_bytes - log_off;
+            let take = if rest < (len as usize) { rest } else { len as usize };
+            extents.push(((r.lcn as u64) * cluster_size, log_off, take));
+            log_off += take;
+            if log_off >= total_bytes {
+                break;
+            }
+        }
+        if log_off != total_bytes {
+            return Err(format!(
+                "MFT 记录读取不完整：已读 {} 预期 {}",
+                log_off, total_bytes
+            ));
+        }
+        // 每 worker 负责等长的逻辑段；直接向预分配的 buffer 写，避免两份 MFT 同时存活
+        // （一份 2.2GB 已提交 + 八份 worker 份 copy + 合并用 2.2GB 会复现 4.4GB 第二次提交失败）
+        let n_workers = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .min(8);
+        let per_worker = (total_bytes + n_workers - 1) / n_workers;
 
-        /// 预取覆盖 `off` 起始的一个块。
-        ///
-        /// 一次尽量读满整个块（`block_size`），而不是只读调用方要的那几条 ——
-        /// 调用方总是顺序遍历记录，下一次命中本块即可摊薄系统调用开销。
-        /// 跨 extent 边界时把剩余部分接到下一个 extent，读不满则按实际长度收尾。
-        ///
-        /// 不重新分配也不清零缓冲：只有 `[0, out)` 区间被读入的新数据覆盖，
-        /// 越界部分由 `block_len` 拦住，外部读不到上一块的残留内容。
-        ///
-        /// 读失败不是「流到尾」，必须记进 `io_err` 让调用方回退 walkdir，
-        /// 否则会静默少返回一批记录。
-        ///
-        /// @param off 数据流偏移（字节）
-        /// @return 填充到任意长度返回 `Some`；I/O 失败或完全无数据返回 `None`
-        fn fill(&mut self, off: u64) -> Option<bool> {
-            let mut out = 0usize;
-            let want = self.block_size;
-            let mut cur = off;
-            while out < want {
-                // 流已到尾时保留已读到的部分并收尾：不能把整块丢掉，
-                // 否则最后一个不满的块里、已读入的记录会被静默跳过
-                let (vol_off, avail) = match self.locate(cur) {
-                    Some(v) => v,
-                    None => break,
-                };
-                if avail == 0 {
-                    break;
+        // 只提交一次 2.2GB：所有 worker 向同一段空间偏移读写
+        let mut data = Vec::with_capacity(total_bytes);
+        // with_capacity 只保留容量不缩小 len；把 len 提到 total_bytes（u8 无 Drop 析构，
+        // 且 worker 把 [0, total_bytes) 每个字节都写满才返回，所以 set_len 安全）
+        unsafe { data.set_len(total_bytes) };
+        let extents_b = extents.clone();
+        let mut workers = Vec::with_capacity(n_workers);
+        for w in 0..n_workers {
+            let lo = per_worker * w;
+            let hi = std::cmp::min(lo + per_worker, total_bytes);
+            let extents_b = extents_b.clone();
+            let volume_b = volume.to_string();
+            // raw pointer：worker 区间非重叠，不在后续阶段访问 data
+            let p = SendPtr(std::ptr::NonNull::new(data.as_mut_ptr()).unwrap());
+            workers.push(std::thread::spawn(move || -> Result<(), String> {
+                if hi <= lo {
+                    return Ok(());
                 }
-                // avail 是 u64（extent 内剩余字节数），切片索引需要 usize
-                let avail = avail.min((want - out) as u64) as usize;
-                if avail == 0 {
-                    break;
-                }
-                if let Err(e) = self.file.seek(SeekFrom::Start(vol_off)) {
-                    self.io_err = Some(format!("seek {} 失败: {}", vol_off, e));
-                    return None;
-                }
-                let mut got = 0usize;
-                while got < avail {
-                    match self.file.read(&mut self.block[out + got..out + avail]) {
-                        Ok(0) => break,
-                        Ok(n) => got += n,
-                        Err(e) => {
-                            self.io_err =
-                                Some(format!("读取卷偏移 {} 失败: {}", vol_off, e));
-                            break;
-                        }
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0x7)
+                    .open(&volume_b)
+                    .map_err(|e| format!("打开卷 {} 失败: {}", volume_b, e))?;
+                let buf = p.slice(lo, hi);
+                for (lcn_off, log_off, len) in extents_b {
+                    if log_off >= hi {
+                        break;
+                    }
+                    let ov_lo = std::cmp::max(lo, log_off);
+                    let ov_hi = std::cmp::min(hi, log_off + len);
+                    if ov_hi > ov_lo {
+                        let take = ov_hi - ov_lo;
+                        file.seek(SeekFrom::Start(
+                            lcn_off as u64 + ov_lo as u64 - log_off as u64,
+                        ))
+                            .map_err(|e| format!("MFT extent 定位失败: {}", e))?;
+                        file.read_exact(&mut buf[ov_lo - lo..ov_lo - lo + take])
+                            .map_err(|e| format!("读取 MFT extent 失败: {}", e))?;
                     }
                 }
-                if got == 0 {
-                    break;
-                }
-                out += got;
-                cur += got as u64;
-            }
-            self.block_off = off;
-            self.block_len = out;
-            Some(out > 0)
+                Ok(())
+            }));
         }
 
-        /// 把数据流偏移映射为卷内物理偏移与该处可用字节数。
-        ///
-        /// @param off 数据流偏移（字节）
-        /// @return `(卷内偏移, 该 extent 剩余字节数)`；越界返回 `None`
-        fn locate(&self, mut off: u64) -> Option<(u64, u64)> {
-            for run in self.runs {
-                let run_bytes = run.len * self.cluster_size;
-                if off < run_bytes {
-                    return Some(((run.lcn as u64) * self.cluster_size + off, run_bytes - off));
-                }
-                off -= run_bytes;
-            }
-            None
+        // 合并 worker 结果
+        for handle in workers {
+            handle
+                .join()
+                .map_err(|_| "worker 执行 panic".to_string())?
+                .map_err(|e| format!("worker 读 MFT 失败: {}", e))?;
         }
+        Ok(data)
+    }
+
+    /// 将单条 MFT 记录解析为目录/文件信息（由 rayon 并行调用）。
+    fn parse_one_record(
+        data: &[u8],
+        rec_num: usize,
+        record_size: usize,
+        name_match: &(dyn Fn(&str) -> bool + Send + Sync),
+        sector_size: usize,
+    ) -> ParChunk {
+        let off = rec_num * record_size;
+        if off + record_size > data.len() {
+            return ParChunk {
+                dirs: Vec::new(),
+                files: Vec::new(),
+            };
+        }
+        let rec = &data[off..off + record_size];
+        let mut chunk = ParChunk {
+            dirs: Vec::new(),
+            files: Vec::new(),
+        };
+        if rec.len() < 48 || !rec.starts_with(b"FILE") {
+            return chunk;
+        }
+        let mut rec = rec.to_vec();
+        apply_fixup(&mut rec, sector_size);
+        if rec.len() < 48 || !rec.starts_with(b"FILE") {
+            return chunk;
+        }
+        if u16_at(&rec, 0x16).map_or(true, |v| v & 0x0001 == 0) {
+            return chunk;
+        }
+        if u64_at(&rec, 0x20).map_or(true, |v| v != 0) {
+            return chunk;
+        }
+        if let Some(info) = parse_record(&rec) {
+            if info.is_dir {
+                chunk.dirs.push((rec_num as u64, info));
+            } else if name_match(&info.name) {
+                chunk.files.push((rec_num as u64, info));
+            }
+        }
+        chunk
+    }
+
+    /// 自底向上拼目录路径（每个目录只计算一次，归入 path_cache）。
+    fn dir_full_path(
+        map: &HashMap<u64, RecordInfo>,
+        path_cache: &mut HashMap<u64, String>,
+        rec_num: u64,
+    ) -> Option<String> {
+        if let Some(p) = path_cache.get(&rec_num) {
+            return Some(p.clone());
+        }
+        let info = map.get(&rec_num)?;
+        let mut parts: Vec<&str> = Vec::with_capacity(8);
+        parts.push(&info.name);
+        let mut cur = info.parent;
+        let mut guard = 0;
+        loop {
+            if cur == 5 {
+                break;
+            }
+            let parent = map.get(&cur)?;
+            parts.push(&parent.name);
+            cur = parent.parent;
+            guard += 1;
+            if guard > 256 || parts.len() > 256 {
+                return None;
+            }
+        }
+        parts.reverse();
+        if parts.is_empty() {
+            return None;
+        }
+        let path = parts.join("/");
+        path_cache.insert(rec_num, path.clone());
+        Some(path)
     }
 
     // ---- 入口 ----
@@ -530,141 +614,66 @@ pub fn collect(
     if mft_runs.is_empty() {
         return Err("$MFT 运行列表为空".to_string());
     }
-    let total_records = mft_real_size / record_size;
+    // 记录号用 usize：rayon 对有索引的 usize 范围提供 with_max_len，支持分段并行
+    let total_records = (mft_real_size / record_size) as usize;
     if total_records == 0 {
         return Err("MFT 记录数为 0".to_string());
     }
 
-    // 遍历 MFT，收集记录元数据
-    let dbg = std::env::var("CHUA_MFT_DEBUG").is_ok();
-    let mut n_read: u64 = 0;
-    let mut n_file: u64 = 0;
-    let mut n_inuse: u64 = 0;
-    let mut n_base0: u64 = 0;
-    let mut n_named: u64 = 0;
-    let mut map: HashMap<u64, RecordInfo> = HashMap::with_capacity((total_records as usize).min(1 << 20));
-    // 命中文件名模式的文件条目。文件是路径的叶子、不是路径组件，
-    // 因此无需进 map（map 只服务 build_path 的父链回溯）；
-    // 不命中模式的文件连 String 都不用留。
-    let mut matched: Vec<(u64, RecordInfo)> = Vec::new();
-    // 复用记录缓冲：142 万条记录逐条新建 1KB Vec 会产生等量堆分配
-    let mut rec = vec![0u8; record_size as usize];
-    let mut pf = StreamPrefetcher::new(&mut file, &mft_runs, cluster_size, record_size as usize);
-    for rec_num in 0..total_records {
-        // 系统文件（0..16）不必输出，但根目录 5 需保留用于拼路径
-        // 记录读取改为顺序预取：预取块未命中才补读，不再逐条 seek
-        if !pf.record_into(rec_num, &mut rec) {
-            // 预取块未覆盖（理论上不会发生，块大小恒 ≥ 1 条记录）或流已到尾：
-            // 保持与原实现一致的容错语义——短记录跳过，不中断整轮扫描
-            continue;
-        }
-        if rec.len() < record_size as usize {
-            continue;
-        }
-        n_read += 1;
-        apply_fixup(&mut rec, sector_size);
-        if rec.len() < 4 || &rec[0..4] != b"FILE" {
-            continue;
-        }
-        n_file += 1;
-        if u16_at(&rec, 0x16).map_or(true, |v| v & 0x0001 == 0) {
-            continue;
-        }
-        n_inuse += 1;
-        if u64_at(&rec, 0x20).map_or(true, |v| v != 0) {
-            continue;
-        }
-        n_base0 += 1;
-        if let Some(info) = parse_record(&rec) {
-            if info.is_dir {
-                map.insert(rec_num, info);
-            } else if name_match(&info.name) {
-                matched.push((rec_num, info));
-            }
-            n_named += 1;
-        }
+    // 优化的核心：整份 MFT 顺序读入，再 rayon 并行解析
+    let mft_data = read_all_mft_records(
+        &volume,
+        &mut file,
+        &mft_runs,
+        cluster_size,
+        record_size as usize,
+        total_records,
+    )?;
+
+    // 逐记录并行解析：每个 ParChunk 内部只有本地数据，无锁。
+
+    // 逐记录并行解析：每个 ParChunk 内部只有本地数据，无锁。
+    let parsed = (0..total_records)
+        .into_par_iter()
+        .with_max_len(512)
+        .map(|rec_num| {
+            parse_one_record(&mft_data, rec_num, record_size as usize, name_match, sector_size)
+        })
+        .collect::<Vec<ParChunk>>();
+
+    // 合并：目录记录入 map、命中的文件入 matched（rayon 保留顺序）
+    let mut map: HashMap<u64, RecordInfo> = HashMap::new();
+    let mut matched: Vec<(u64, RecordInfo)> = Vec::with_capacity(total_records);
+    for c in parsed {
+        map.extend(c.dirs);
+        matched.extend(c.files);
     }
-    // 预取过程中的 I/O 失败不能当作「流到尾」：原实现遇错即返回 Err 由调用方
-    // 回退 walkdir，静默继续会少返回一批记录
-    if let Some(e) = pf.io_err.take() {
-        return Err(format!("读取 MFT 失败: {}", e));
-    }
-    if dbg {
-        eprintln!(
-            "[mft] bps={} spc={} cluster={} mft_lcn={} rec_size={} total={} real={} runs={}",
-            bytes_per_sector,
-            sectors_per_cluster,
-            cluster_size,
-            mft_lcn,
-            record_size,
-            total_records,
-            mft_real_size,
-            mft_runs.len()
-        );
-        eprintln!(
-            "[mft] read={} file_sig={} inuse={} base0={} named={} dir={} matched={}",
-            n_read, n_file, n_inuse, n_base0, n_named, map.len(), matched.len()
-        );
+    matched.sort_by_key(|(rec_num, _)| *rec_num);
+
+    // 只保留 max_results 条（与 walkdir 退路语义一致）
+    if max_results > 0 && matched.len() > max_results as usize {
+        matched.truncate(max_results as usize);
     }
 
-    /// 自底向上拼路径。
-    ///
-    /// 起点条目自身不入 `map`（`map` 只存目录），故由调用方直接给出起始条目，
-    /// 回溯从它的父记录开始；根记录 5 只用作终止标记，不计入路径。
-    ///
-    /// @param map   目录记录表（父链回溯用）
-    /// @param drive 盘符
-    /// @param info  起始条目
-    /// @return 完整路径；父链断裂或超深返回 `None`
-    fn build_path<'a>(
-        map: &'a HashMap<u64, RecordInfo>,
-        drive: char,
-        info: &'a RecordInfo,
-    ) -> Option<String> {
-        let mut parts: Vec<&'a str> = Vec::with_capacity(8);
-        parts.push(&info.name);
-        let mut cur = info.parent;
-        let mut guard = 0;
-        loop {
-            if cur == 5 {
-                break;
-            }
-            let parent = map.get(&cur)?;
-            parts.push(&parent.name);
-            cur = parent.parent;
-            guard += 1;
-            if guard > 256 || parts.len() > 256 {
-                return None;
-            }
-        }
-        parts.reverse();
-        if parts.is_empty() {
-            return None;
-        }
-        Some(format!("{}:/{}", drive, parts.join("/")))
-    }
-
+    // 每个目录路径只计算一次，文件直接复用前缀（避免 559K 条记录各自向上回溯父链）
+    let mut path_cache: HashMap<u64, String> = HashMap::with_capacity(map.len());
     let mut entries: Vec<SearchEntry> = Vec::new();
-    // 前缀只与路径形态有关，循环外小写化一次即可
-    let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
-    // 只遍历命中集：map 现在只有目录，文件名模式已在遍历阶段判定过
-    for (rec_num, info) in &matched {
-        if *rec_num < 16 {
-            continue;
-        }
-        let path = match build_path(&map, drive, info) {
-            Some(p) => p,
+    for (_rec_num, info) in &matched {
+        let path = match dir_full_path(&map, &mut path_cache, info.parent) {
+            Some(path) => path,
             None => continue,
         };
+        let path = format!("{}:/{}", drive, format!("{}/{}", path, info.name));
+        let ext = match info.name.rfind('.') {
+            Some(idx) if idx + 1 < info.name.len() => info.name[idx + 1..].to_ascii_lowercase(),
+            _ => String::new(),
+        };
+        let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
         if let Some(pref) = &prefix_lower {
             if !path.to_ascii_lowercase().starts_with(pref) {
                 continue;
             }
         }
-        let ext = match info.name.rfind('.') {
-            Some(idx) if idx + 1 < info.name.len() => info.name[idx + 1..].to_ascii_lowercase(),
-            _ => String::new(),
-        };
         entries.push(SearchEntry {
             path,
             size: info.size,

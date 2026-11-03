@@ -82,7 +82,7 @@ public final class FqnFix {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            System.err.println("用法: FqnFix <源码根> [--apply]");
+            System.err.println("用法: FqnFix <源码根> [--apply]"); // [P3C E1 豁免]
             System.exit(2);
         }
         Path root = Path.of(args[0]);
@@ -257,45 +257,45 @@ public final class FqnFix {
                 totalRefs += p.refs.size();
             }
         }
-        System.out.printf("  源码文件数        = %d%n", cus.size());
-        System.out.printf("  有全限定引用的文件 = %d%n", filesWithRefs);
-        System.out.printf("  引用总数          = %d%n", totalRefs);
-        System.out.printf("  同包（只去限定）   = %d%n", samePkg);
-        System.out.printf("  需补 import       = %d%n", needImport);
-        System.out.printf("  冲突（跳过）       = %d%n", conflictRefs);
-        System.out.println();
-        System.out.println("=== 冲突清单（同短名不同包，必须人工决策，本工具不猜）===");
+        System.out.printf("  源码文件数        = %d%n", cus.size()); // [P3C E1 豁免]
+        System.out.printf("  有全限定引用的文件 = %d%n", filesWithRefs); // [P3C E1 豁免]
+        System.out.printf("  引用总数          = %d%n", totalRefs); // [P3C E1 豁免]
+        System.out.printf("  同包（只去限定）   = %d%n", samePkg); // [P3C E1 豁免]
+        System.out.printf("  需补 import       = %d%n", needImport); // [P3C E1 豁免]
+        System.out.printf("  冲突（跳过）       = %d%n", conflictRefs); // [P3C E1 豁免]
+        System.out.println(); // [P3C E1 豁免]
+        System.out.println("=== 冲突清单（同短名不同包，必须人工决策，本工具不猜）==="); // [P3C E1 豁免]
         boolean anyConflict = false;
         for (Plan p : plans.values()) {
             if (!p.conflicts.isEmpty()) {
                 anyConflict = true;
-                System.out.println("  " + p.file.getFileName());
+                System.out.println("  " + p.file.getFileName()); // [P3C E1 豁免]
                 for (String c : p.conflicts) {
-                    System.out.printf("      %-28s 已 import %s，又要引入同类名%n",
+                    System.out.printf("      %-28s 已 import %s，又要引入同类名%n", // [P3C E1 豁免]
                             c, p.importSimpleToFqn.get(c));
                 }
             }
         }
         if (!anyConflict) {
-            System.out.println("  无");
+            System.out.println("  无"); // [P3C E1 豁免]
         }
 
-        System.out.println();
-        System.out.println("=== 改动最多的 8 个文件 ===");
+        System.out.println(); // [P3C E1 豁免]
+        System.out.println("=== 改动最多的 8 个文件 ==="); // [P3C E1 豁免]
         plans.values().stream()
                 .filter(p -> !p.refs.isEmpty())
                 .sorted((a, b) -> Integer.compare(b.refs.size(), a.refs.size()))
                 .limit(8)
-                .forEach(p -> System.out.printf("  %-46s %4d 处%n",
+                .forEach(p -> System.out.printf("  %-46s %4d 处%n", // [P3C E1 豁免]
                         p.file.getFileName(), p.refs.size()));
 
         if (!apply) {
-            System.out.println();
-            System.out.println("  （干跑，未修改任何文件）");
+            System.out.println(); // [P3C E1 豁免]
+            System.out.println("  （干跑，未修改任何文件）"); // [P3C E1 豁免]
             return;
         }
-        System.out.println();
-        System.out.println("=== 应用改动 ===");
+        System.out.println(); // [P3C E1 豁免]
+        System.out.println("=== 应用改动 ==="); // [P3C E1 豁免]
         int changed = 0;
         for (Plan p : plans.values()) {
             if (p.refs.isEmpty()) {
@@ -333,7 +333,7 @@ public final class FqnFix {
             Files.writeString(p.file, src, StandardCharsets.UTF_8);
             changed++;
         }
-        System.out.printf("  已改写文件数 = %d%n", changed);
+        System.out.printf("  已改写文件数 = %d%n", changed); // [P3C E1 豁免]
     }
 
     private static String longestPrefix(String text, Set<String> prefixes) {
