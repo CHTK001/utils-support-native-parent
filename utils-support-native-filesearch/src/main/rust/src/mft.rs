@@ -572,6 +572,9 @@ pub fn collect(
             prefix = Some(text);
         }
     }
+    if std::env::var("MFT_DEBUG").is_ok() {
+        eprintln!("MFT_DEBUG root={:?} prefix={:?}", root, prefix);
+    }
 
     // 打开卷并读取引导扇区
     let mut file = std::fs::OpenOptions::new()
@@ -650,13 +653,12 @@ pub fn collect(
     }
     matched.sort_by_key(|(rec_num, _)| *rec_num);
 
-    // 只保留 max_results 条（与 walkdir 退路语义一致）
-    if max_results > 0 && matched.len() > max_results as usize {
-        matched.truncate(max_results as usize);
-    }
-
     // 每个目录路径只计算一次，文件直接复用前缀（避免 559K 条记录各自向上回溯父链）
     let mut path_cache: HashMap<u64, String> = HashMap::with_capacity(map.len());
+    let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
+    if std::env::var("MFT_DEBUG").is_ok() {
+        eprintln!("MFT_DEBUG prefix_lower={:?}", prefix_lower);
+    }
     let mut entries: Vec<SearchEntry> = Vec::new();
     for (_rec_num, info) in &matched {
         let path = match dir_full_path(&map, &mut path_cache, info.parent) {
@@ -664,11 +666,16 @@ pub fn collect(
             None => continue,
         };
         let path = format!("{}:/{}", drive, format!("{}/{}", path, info.name));
+        if std::env::var("MFT_DEBUG").is_ok() {
+            eprintln!("MFT_DEBUG path={:?}", path);
+        }
         let ext = match info.name.rfind('.') {
             Some(idx) if idx + 1 < info.name.len() => info.name[idx + 1..].to_ascii_lowercase(),
             _ => String::new(),
         };
-        let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
+        // root 是盘符子路径时，prefix 就是搜索范围的边界：前缀不命中的条目来自
+        // 临时卷上的其他位置，必须先筛选再截断（max_results），否则像 probe-dir 内
+        // 的文件只排在记录号靠后的位置，会被提前截断、一条也留不下。
         if let Some(pref) = &prefix_lower {
             if !path.to_ascii_lowercase().starts_with(pref) {
                 continue;
@@ -683,6 +690,15 @@ pub fn collect(
         if max_results > 0 && entries.len() >= max_results as usize {
             break;
         }
+    }
+
+    if std::env::var("MFT_DEBUG").is_ok() {
+        eprintln!(
+            "MFT_DEBUG matched_dir={:?} matched_file={:?} final_count={}",
+            map.len(),
+            matched.len(),
+            entries.len()
+        );
     }
 
     Ok(entries)
