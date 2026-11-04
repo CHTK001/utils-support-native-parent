@@ -45,3 +45,26 @@ __pycache__/
 # 本模块同样交付编好的动态库（cdylib），libdeflater / imagequant 若不做版本锁定，
 # CI 每次构建都会重新解析依赖，产物不可复现。理由同上面的 sysinformer。
 !utils-support-native-imageopt/src/main/rust/Cargo.lock
+# block: added by cleanup script 2026-11-04 10:30
+# ===== exceptions: dev snapshot / build / runtime junk must never enter git history =====
+*.out
+*.err
+*.err.txt
+*.jsonl
+*.tmp
+*.tmp.*
+**/.agentscope/**
+**/.tmp-*
+**/mft-*.out
+**/mft-*.err
+**/build0*.out
+**/build*.err.log
+**/heapdump*
+**/*_dump*
+**/*.md5
+**/checksum*
+**/_sweep.marker
+site-builder/
+pmt_proxy/
+node_modules/.tmp/
+
