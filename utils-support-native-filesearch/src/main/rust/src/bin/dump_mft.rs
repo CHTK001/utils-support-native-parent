@@ -2,7 +2,6 @@
 //!
 //! 用法: mftdump.exe <记录号>
 
-use std::fs::File;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -64,7 +63,7 @@ fn main() {
     f.seek(SeekFrom::Start(offset)).unwrap();
     f.read_exact(&mut rec).unwrap();
 
-    println!("record {} magic={} flags0x16=0x{:04X} attrs0x14={:d} u64_0x20=" {}{}{}",
+    println!("record {} magic={} flags0x16=0x{:04X} attrs0x14={} u64_0x20={}",
         rec_num,
         String::from_utf8_lossy(&rec[0..4]),
         u16_at(&rec, 0x16),
