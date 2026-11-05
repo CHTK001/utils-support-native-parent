@@ -1,8 +1,6 @@
 //! 调试探针：直调 mft::collect，旁路 lib.rs 的搜索 JSON 层。
 //!
 //! 用法: mftprobe.exe <扫描根目录> [最大返回数] [全局 glob 模式]
-//!
-//! 只在 MFT_DEBUG=1 时才向 stderr 输出中间状态。
 
 use file_search::mft::collect;
 

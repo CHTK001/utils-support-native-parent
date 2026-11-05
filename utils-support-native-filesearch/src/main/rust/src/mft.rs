@@ -66,7 +66,7 @@ pub fn collect(
 #[cfg(windows)]
 pub fn collect(
     root: &str,
-    max_results: i32,
+    _max_results: i32,
     name_match: &(dyn Fn(&str) -> bool + Send + Sync),
 ) -> Result<Vec<SearchEntry>, String> {
     /// 读取小端 u16 / u32 / u64 / i64 的辅助。
@@ -409,6 +409,7 @@ pub fn collect(
         }
         // 每 worker 负责等长的逻辑段；直接向预分配的 buffer 写，避免两份 MFT 同时存活
         // （一份 2.2GB 已提交 + 八份 worker 份 copy + 合并用 2.2GB 会复现 4.4GB 第二次提交失败）
+        // worker 数取机器核心数，上限 8：2.2GB MFT 顺序读串行也要 6.6s，足够展开
         let n_workers = std::thread::available_parallelism()
             .map_or(1, |n| n.get())
             .min(8);
@@ -512,14 +513,27 @@ pub fn collect(
         chunk
     }
 
+    /// 不分配：字节级比较 path 的（转小写后的）前缀是否等于 pref。pref 必须由调用方
+    /// 预先转成小写；比较时 path 的每个字节实时转小写，避免 per entry 的 to_ascii_lowercase 大缓存。
+    fn starts_with_pref(path: &str, pref: &str) -> bool {
+        if path.len() < pref.len() {
+            return false;
+        }
+        pref.as_bytes()
+            .iter()
+            .zip(path.as_bytes().iter())
+            .all(|(&p, &q)| p == q.to_ascii_lowercase())
+    }
+
     /// 自底向上拼目录路径（每个目录只计算一次，归入 path_cache）。
+    /// 返回 (路径, 是否命中缓存)。
     fn dir_full_path(
         map: &HashMap<u64, RecordInfo>,
         path_cache: &mut HashMap<u64, String>,
         rec_num: u64,
-    ) -> Option<String> {
+    ) -> Option<(String, bool)> {
         if let Some(p) = path_cache.get(&rec_num) {
-            return Some(p.clone());
+            return Some((p.clone(), true));
         }
         let info = map.get(&rec_num)?;
         let mut parts: Vec<&str> = Vec::with_capacity(8);
@@ -544,7 +558,7 @@ pub fn collect(
         }
         let path = parts.join("/");
         path_cache.insert(rec_num, path.clone());
-        Some(path)
+        Some((path, false))
     }
 
     // ---- 入口 ----
@@ -571,9 +585,6 @@ pub fn collect(
             let text = text.strip_prefix("//?/").unwrap_or(&text).to_string();
             prefix = Some(text);
         }
-    }
-    if std::env::var("MFT_DEBUG").is_ok() {
-        eprintln!("MFT_DEBUG root={:?} prefix={:?}", root, prefix);
     }
 
     // 打开卷并读取引导扇区
@@ -634,8 +645,6 @@ pub fn collect(
     )?;
 
     // 逐记录并行解析：每个 ParChunk 内部只有本地数据，无锁。
-
-    // 逐记录并行解析：每个 ParChunk 内部只有本地数据，无锁。
     let parsed = (0..total_records)
         .into_par_iter()
         .with_max_len(512)
@@ -644,7 +653,7 @@ pub fn collect(
         })
         .collect::<Vec<ParChunk>>();
 
-    // 合并：目录记录入 map、命中的文件入 matched（rayon 保留顺序）
+    // 合并：目录记录入 map、命中的文件入 matched（rayon 保留顺序，无需排序）
     let mut map: HashMap<u64, RecordInfo> = HashMap::new();
     let mut matched: Vec<(u64, RecordInfo)> = Vec::with_capacity(total_records);
     for c in parsed {
@@ -652,23 +661,25 @@ pub fn collect(
         matched.extend(c.files);
     }
     matched.sort_by_key(|(rec_num, _)| *rec_num);
-
-    // 每个目录路径只计算一次，文件直接复用前缀（避免 559K 条记录各自向上回溯父链）
+    // 每个目录路径只计算一次（归入 path_cache），文件复用已计算的目录路径拼接自身名字。
     let mut path_cache: HashMap<u64, String> = HashMap::with_capacity(map.len());
     let prefix_lower = prefix.as_ref().map(|p| p.to_ascii_lowercase());
-    if std::env::var("MFT_DEBUG").is_ok() {
-        eprintln!("MFT_DEBUG prefix_lower={:?}", prefix_lower);
-    }
     let mut entries: Vec<SearchEntry> = Vec::new();
     for (_rec_num, info) in &matched {
         let path = match dir_full_path(&map, &mut path_cache, info.parent) {
-            Some(path) => path,
+            Some((path, _)) => path,
             None => continue,
         };
-        let path = format!("{}:/{}", drive, format!("{}/{}", path, info.name));
-        if std::env::var("MFT_DEBUG").is_ok() {
-            eprintln!("MFT_DEBUG path={:?}", path);
-        }
+        // 把两次 format! 合成一次：先为全路径预留空间，再 push_str 各段，
+        // 消除中间字符串的拷贝与第二次分配。
+        let mut full = String::with_capacity(1 + path.len() + info.name.len() + 4);
+        full.push(drive);
+        full.push(':');
+        full.push('/');
+        full.push_str(&path);
+        full.push('/');
+        full.push_str(info.name.as_str());
+        let path = full;
         let ext = match info.name.rfind('.') {
             Some(idx) if idx + 1 < info.name.len() => info.name[idx + 1..].to_ascii_lowercase(),
             _ => String::new(),
@@ -677,7 +688,7 @@ pub fn collect(
         // 临时卷上的其他位置，必须先筛选再截断（max_results），否则像 probe-dir 内
         // 的文件只排在记录号靠后的位置，会被提前截断、一条也留不下。
         if let Some(pref) = &prefix_lower {
-            if !path.to_ascii_lowercase().starts_with(pref) {
+            if !starts_with_pref(&path, pref) {
                 continue;
             }
         }
@@ -687,18 +698,6 @@ pub fn collect(
             modified: info.modified,
             ext,
         });
-        if max_results > 0 && entries.len() >= max_results as usize {
-            break;
-        }
-    }
-
-    if std::env::var("MFT_DEBUG").is_ok() {
-        eprintln!(
-            "MFT_DEBUG matched_dir={:?} matched_file={:?} final_count={}",
-            map.len(),
-            matched.len(),
-            entries.len()
-        );
     }
 
     Ok(entries)
