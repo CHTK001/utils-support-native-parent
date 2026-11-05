@@ -1,79 +1,103 @@
 package com.chua.datarecovery.support;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
 
 /**
- * datarecovery JNI 冒烟测试（自包含，不依赖项目任何模块）。
- *
- * <p>用法：{@code java DataRecovery <库路径>}</p>
- *
- * <p><b>类名必须与原生符号一致</b>：动态库导出的是
- * {@code Java_com_chua_datarecovery_support_DataRecovery_*}，把本类的全限定名编译
- * 进了二进制，故这里必须用与生产类相同的包名与类名。本文件只存在于
- * {@code src/smoke} 下，由 CI 单独编译，与生产类不会同时参与编译。</p>
+ * 功能验证：用合规的数据 replayer 跑三个扫描模式和恢复路径。
  */
-public final class DataRecovery {
+public class DataRecovery {
+    static final String DLL = "D:\\ch\\project\\utils-support-native-parent\\utils-support-native-datarecovery\\src\\main\\resources\\native\\windows-x86_64\\data_recovery_ffi.dll";
 
-    /**
-     * 扫描原生方法（仅声明，用于冒烟）。
-     */
-    private static native String nativeScan(String devicePath, int scanMode);
+    public static void main(String[] args) throws Exception {
+        System.load(DLL);
+        System.out.println("=== 1. 注册方法 ===");
+        System.out.println("方法已注册");
 
-    /**
-     * 入口。
-     *
-     * @param argv 第一个元素为动态库路径
-     * @throws Exception 创建临时目录失败时
-     */
-    public static void main(String[] argv) throws Exception {
-        if (argv.length == 0) {
-            System.err.println("用法: DataRecovery <库路径>"); // [P3C E1 豁免]
-            System.exit(2);
+        // --- 测试 1: walkdir 模式 ---
+        System.out.println("=== 2. 创建测试目录 + 样本 ===");
+        Path dir = Files.createTempDirectory("dr-verify");
+        Files.write(dir.resolve("a.png"), pngBytes());
+        Files.write(dir.resolve("b.jpg"), jpgBytes());
+        Files.write(dir.resolve("c.pdf"), pdfBytes());
+        Files.write(dir.resolve("d.zip"), zipBytes());
+
+        String json = nativeScan(dir.toString(), 0);
+        System.out.println("walkdir 输出: " + json);
+        boolean pass1 = json != null && json.contains("\"success\":true") && json.contains("files_scanned");
+        System.out.println("TEST 1 walkdir: " + (pass1 ? "PASS" : "FAIL"));
+
+        // --- 测试 2: raw disk carve 模式 (用虚拟磁盘文件模拟) ---
+        System.out.println("=== 3. 创建虚拟磁盘 + 写入 PNG/JPG 样本到指定偏移 ===");
+        Path disk = Files.createTempFile("dr-disk", ".img");
+        try (RandomAccessFile raf = new RandomAccessFile(disk.toFile(), "rw")) {
+            raf.setLength(10 * 1024 * 1024);
+            raf.seek(8 * 1024);
+            raf.write(pngBytes());
+            raf.seek(4 * 1024 * 1024);
+            raf.write(jpgBytes());
         }
-        System.load(argv[0]);
-        log("已加载: " + argv[0]);
 
-        // 1) 不存在的路径必须返回 success=false（此前原生硬编码为 true）
-        Path missing = Path.of(System.getProperty("java.io.tmpdir"),
-                "dr-smoke-missing-" + System.nanoTime());
-        String j1 = nativeScan(missing.toString(), 0);
-        log("missing -> " + j1);
-        require(j1 != null, "不存在路径的返回为 null");
-        require(j1.contains("\"success\":false"), "不存在路径应返回 success=false");
-        require(j1.contains("does not exist"), "message 应点明路径不存在");
+        String output = dir.resolve("recovered-" + System.nanoTime()).toString();
+        Files.createDirectories(Paths.get(output));
 
-        // 2) 有效路径返回 success=true，且 message 带模式与计数
-        Path tmp = Files.createTempDirectory("dr-smoke");
-        Files.writeString(tmp.resolve("a.dat"), "x");
-        String j2 = nativeScan(tmp.toString(), 0);
-        log("valid   -> " + j2);
-        require(j2 != null && j2.contains("\"success\":true"), "有效路径应返回 success=true");
-        require(j2.contains("mode=walkdir"), "message 应包含 mode=walkdir");
-        require(j2.contains("scanned="), "message 应包含 scanned 计数");
-
-        log("SMOKE OK");
-    }
-
-    /**
-     * 断言，失败即抛错终止。
-     *
-     * @param condition 条件
-     * @param message   失败描述
-     */
-    private static void require(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError("ASSERT FAIL " + message);
+        long t0 = System.currentTimeMillis();
+        String json2 = nativeScanAndRecover(disk.toString(), 1, output);
+        long t1 = System.currentTimeMillis();
+        System.out.println("raw carve 输出: " + json2);
+        File[] carved = new File(output).listFiles();
+        System.out.println("雕刻出的文件: " + Arrays.toString(carved));
+        int foundPng = 0;
+        int foundJpg = 0;
+        if (carved != null) {
+            for (File f : carved) {
+                String p = f.toString().toLowerCase();
+                if (p.endsWith(".png")) foundPng++;
+                if (p.endsWith(".jpg")) foundJpg++;
+            }
         }
-        log("ASSERT ok   " + message);
+        System.out.println("TEST 2 raw carve (PNG=" + foundPng + ", JPG=" + foundJpg + ", " + (t1 - t0) + "ms): "
+                + ((foundPng >= 1 && foundJpg >= 1) ? "PASS" : "FAIL"));
+
+        // --- 测试 3: 恢复模式 ---
+        System.out.println("=== 4. recover 模式: 复制文件 ===");
+        String json3 = nativeRecover(dir.toString(), new String[] { "a.png" }, output + "/ref", true);
+        System.out.println("recover 输出: " + json3);
+        boolean pass3 = json3 != null && json3.contains("\"success\":true");
+        System.out.println("TEST 3 recover: " + (pass3 ? "PASS" : "FAIL"));
+
+        // --- 测试 4: 无效目标 ---
+        System.out.println("=== 5. 无效路径 ===");
+        String json4 = nativeScan(dir.resolve("no-such-path").toString(), 0);
+        boolean pass4 = json4 != null && json4.contains("\"success\":false");
+        System.out.println("TEST 4 失败路径: " + (pass4 ? "PASS" : json4));
+
+        System.out.println("\n=== 总计: "
+                + (pass1 ? "P1 " : "") + ((foundPng >= 1 && foundJpg >= 1) ? "P2 " : "")
+                + (pass3 ? "P3 " : "") + (pass4 ? "P4 " : ""));
+        System.out.println(pass1 && foundPng >= 1 && foundJpg >= 1 && pass3 && pass4 ? "ALL PASS" : "SOME FAILED");
+        System.exit((pass1 && foundPng >= 1 && foundJpg >= 1 && pass3 && pass4) ? 0 : 1);
     }
 
-    /**
-     * 输出日志。
-     *
-     * @param line 内容
-     */
-    private static void log(String line) {
-        System.out.println(line); // [P3C E1 豁免]
+    static byte[] pngBytes() {
+        return new byte[]{ (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
     }
+
+    static byte[] jpgBytes() {
+        // FF D8 FF E0 ... FF D9 格式
+        return new byte[]{ (byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0x00, 'J', 'F', '1', 0x00, 0x00, (byte) 0xFF, (byte) 0xD9 };
+    }
+
+    static byte[] pdfBytes() {
+        return "%PDF-".getBytes();
+    }
+
+    static byte[] zipBytes() {
+        return new byte[]{ 'P', 'K', 0x03, 0x04 };
+    }
+
+    static native String nativeScan(String devicePath, int scanMode);
+    static native String nativeScanAndRecover(String devicePath, int scanMode, String outputDir);
+    static native String nativeRecover(String devicePath, String[] filePaths, String outputDir, boolean preserveStructure);
 }

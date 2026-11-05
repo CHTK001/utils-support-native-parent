@@ -407,23 +407,23 @@ fn estimate_carved_size_at(reader: &mut DiskReader, offset: u64, sig: &FileSigna
             if data.is_empty() {
                 break;
             }
-            buf[..data.len()].copy_from_slice(&data);
             if let Some(ref footer) = sig.footer {
-                if data.len() >= footer.len() {
-                    let last_bytes = &data[data.len().saturating_sub(footer.len())..];
-                    if last_bytes == footer.as_ref() {
-                        return total_read + data.len() as u64;
-                    }
+                // 关键修复：footer 可以出现在缓冲区的任何位置，
+                // 特别是短文件（如 12 字节的 JPEG）的 FF D9 在初始 4096 窗口的第 10 字节，
+                // 旧版只在缓冲区末尾比较 footer，导致短文件永远检测不到结尾
+                if let Some(pos) = data.windows(footer.len()).position(|w| w == footer.as_ref()) {
+                    return total_read + pos as u64 + footer.len() as u64;
                 }
             }
+            buf[..data.len()].copy_from_slice(&data);
             total_read += data.len() as u64;
+            if data.len() < chunk_size {
+                // 不足完整 chunk 说明已读到文件/卷末尾，total_read 即真实尺寸
+                break;
+            }
         } else {
             break;
         }
-    }
-
-    if total_read < 4096 {
-        return 0;
     }
 
     if sig.footer.is_some() {
