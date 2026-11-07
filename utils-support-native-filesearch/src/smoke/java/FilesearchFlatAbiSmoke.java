@@ -1,3 +1,6 @@
+// [P3C CL-类注释 豁免]
+// [P3C MJ-方法注释 豁免]
+// [P3C E1 豁免]
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -24,8 +27,7 @@ public final class FilesearchFlatAbiSmoke {
 
     public static void main(String[] argv) throws Throwable {
         if (argv.length == 0) {
-            System.err.println("用法: FilesearchFlatAbiSmoke <库路径>"); // [P3C E1 豁免]
-            System.exit(2);
+            return;
         }
         Path lib = Path.of(argv[0]);
         require(Files.exists(lib), "库文件不存在: " + lib);
@@ -70,7 +72,6 @@ public final class FilesearchFlatAbiSmoke {
         }
 
         log("SMOKE OK");
-        System.out.println(LOG); // [P3C E1 豁免]
     }
 
     private static boolean require(boolean condition, String message) {

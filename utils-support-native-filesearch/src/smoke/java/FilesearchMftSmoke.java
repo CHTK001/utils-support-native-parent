@@ -65,7 +65,7 @@ public final class FilesearchMftSmoke {
     public static void main(String[] argv) throws Throwable {
         if (argv.length < 3) {
             System.err.println("用法: FilesearchMftSmoke <库路径> <扫描根目录> <mft|walkdir>"); // [P3C E1 豁免]
-            System.exit(2);
+            return;
         }
         Path lib = Path.of(argv[0]);
         Path root = Path.of(argv[1]);

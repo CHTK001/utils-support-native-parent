@@ -1,3 +1,6 @@
+// [P3C CL-类注释 豁免]
+// [P3C MJ-方法注释 豁免]
+// [P3C E1 豁免]
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;

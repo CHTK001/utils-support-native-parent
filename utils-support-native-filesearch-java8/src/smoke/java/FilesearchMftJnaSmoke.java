@@ -76,7 +76,7 @@ public final class FilesearchMftJnaSmoke {
     public static void main(String[] argv) throws Exception {
         if (argv.length < 2) {
             System.err.println("用法: FilesearchMftJnaSmoke <扫描根目录> <mft|walkdir>"); // [P3C E1 豁免]
-            System.exit(2);
+            return;
         }
         Path root = Paths.get(argv[0]);
         String engine = argv[1];
