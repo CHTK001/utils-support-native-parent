@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://www.w3.org/2001/XMLSchema-instance">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.chua</groupId>
+        <artifactId>utils-support-native-parent</artifactId>
+        <version>4.0.0.43</version>
+    </parent>
+    <artifactId>utils-support-native-rdp</artifactId>
+    <packaging>jar</packaging>
+    <name>Utils Support Native RDP</name>
+    <description>
+        RDP 远控原生库封装。核心流程：Java 侧通过 JNA 调用 FreeRDP 3.x 的 C 扩展 librdpj，对外暴露创建/销毁、连接/关闭、帧轮询（32 字节帧头 + BGRA 像素）、鼠标/键盘事件、状态/错误查询；配合 WebSocket 驱动浏览器 Canvas 帧。
+        注意：librdpj 不随 Maven 构建，由 build.sh/build.bat 在 Linux/macOS/Windows 上编译为 native/&lt;os&gt;-&lt;arch&gt;/librdpj.so / rdpj.dll / librdpj.dylib，托管到 /native/ 即可使用。实际 RDP 连接仅连通目标主机上的 RDP 服务器。
+    </description>
+
+    <properties>
+        <jna.version>5.19.1</jna.version>
+        <lombok.version>1.18.48</lombok.version>
+    </properties>
+
+    <dependencies>
+        <!-- NativeLoader / NativeUtils：随平台抽取 native/ 动态库并加载（该组件 4.0.0.43 未发布到本地仓库，
+        使用本地已发布的 4.0.0.50 版本） -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>4.0.0.50</version>
+        </dependency>
+        <!-- JNA（JDK 25 侧调度的中间态：不再需要 Panama/FFM） -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.16.0</version>
+                <configuration>
+                    <!-- 绑定类用到 JNA，最低要求 11；原在 utils 侧按 release 25 编译，
+                         不能沿用父 POM 默认的 target 1.8 -->
+                    <release>25</release>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
