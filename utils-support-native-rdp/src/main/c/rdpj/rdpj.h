@@ -99,6 +99,7 @@ RDPI_API const rdpj_frame *rdpj_last_frame(rdpj_handle handle);
 
 /* 输入：按键/鼠标 -> 返回 0 表示成功，-1 表示句柄/参数非法 */
 RDPI_API int rdpj_mouse(rdpj_handle handle, int32_t x, int32_t y, int32_t button, int32_t down);
+RDPI_API int rdpj_wheel(rdpj_handle handle, int32_t x, int32_t y, int32_t delta);
 RDPI_API int rdpj_key(rdpj_handle handle, uint16_t keysym, int32_t down);
 RDPI_API int rdpj_resize(rdpj_handle handle, uint32_t width, uint32_t height);
 

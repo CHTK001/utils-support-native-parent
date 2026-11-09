@@ -143,6 +143,10 @@ typedef struct rdpj_context {
     int32_t mouse_y;
     int32_t mouse_button;
     int mouse_down;
+    /** 滚轮(Java 侧 -> 原生泵) */
+    int32_t wheel_x;
+    int32_t wheel_y;
+    int32_t wheel_delta;
     /** 键盘（Java 侧 -> 此结构） */
     uint16_t keysym;
     int keysym_down;
@@ -547,15 +551,45 @@ RDPI_THREAD_FUNC rdpi_client_thread(void *arg)
         }
         /* 处理暂存的鼠标事件（x/y 为桌面像素坐标，按钮 1= 左 2= 右 4= 中） */
         if (ctx->mouse_x >= 0 && ctx->mouse_y >= 0) {
-            uint16_t flags = (uint16_t)(ctx->mouse_button & 0x07);
-            if (ctx->mouse_down) {
-                flags |= PTR_FLAGS_DOWN;
+            if (ctx->mouse_button == 4 || ctx->mouse_button == 5) {
+                /* 前端把滚轮编码成 button=4(down=向下)/5(向上) */
+                int scrollDown = (ctx->mouse_button == 4) ? ctx->mouse_down : !ctx->mouse_down;
+                uint16_t flags = (uint16_t)(PTR_FLAGS_WHEEL | (120 & 0x1FF));
+                if (!scrollDown) {
+                    flags |= PTR_FLAGS_WHEEL_NEGATIVE;
+                }
+                freerdp_input_send_mouse_event(context->input, flags,
+                                                (UINT16)ctx->mouse_x, (UINT16)ctx->mouse_y);
+            } else {
+                uint16_t flags = 0;
+                if (ctx->mouse_button == 1) {
+                    flags = PTR_FLAGS_BUTTON1;
+                } else if (ctx->mouse_button == 2) {
+                    flags = PTR_FLAGS_BUTTON2;
+                } else if (ctx->mouse_button == 3) {
+                    flags = PTR_FLAGS_BUTTON3;
+                }
+                if (ctx->mouse_down) {
+                    flags |= PTR_FLAGS_DOWN;
+                }
+                flags |= PTR_FLAGS_MOVE;
+                freerdp_input_send_mouse_event(context->input, flags,
+                                                (UINT16)ctx->mouse_x, (UINT16)ctx->mouse_y);
             }
-            flags |= PTR_FLAGS_MOVE;
-            freerdp_input_send_mouse_event(context->input, flags,
-                                            (UINT16)ctx->mouse_x, (UINT16)ctx->mouse_y);
             ctx->mouse_x = -1;
             ctx->mouse_y = -1;
+        }
+        /* 处理显式滚轮事件(rdpj_wheel) */
+        if (ctx->wheel_delta != 0) {
+            int32_t magnitude = ctx->wheel_delta < 0 ? -ctx->wheel_delta : ctx->wheel_delta;
+            uint16_t flags = (uint16_t)(PTR_FLAGS_WHEEL | ((uint16_t)magnitude & 0x1FF));
+            if (ctx->wheel_delta < 0) {
+                flags |= PTR_FLAGS_WHEEL_NEGATIVE;
+            }
+            freerdp_input_send_mouse_event(context->input, flags,
+                                            (UINT16)(ctx->wheel_x < 0 ? 0 : ctx->wheel_x),
+                                            (UINT16)(ctx->wheel_y < 0 ? 0 : ctx->wheel_y));
+            ctx->wheel_delta = 0;
         }
         /* 处理暂存的键盘事件 */
         if (ctx->keysym) {
@@ -612,6 +646,9 @@ RDPI_API void *rdpj_create(void)
     ctx->mouse_y   = -1;
     ctx->mouse_button = 0;
     ctx->mouse_down     = 0;
+    ctx->wheel_x        = -1;
+    ctx->wheel_y        = -1;
+    ctx->wheel_delta    = 0;
     ctx->keysym         = 0;
     ctx->keysym_down    = 0;
     ctx->running   = 0;
@@ -783,6 +820,19 @@ RDPI_API int rdpj_mouse(void *handle, int32_t x, int32_t y, int32_t button, int3
     ctx->mouse_y    = y;
     ctx->mouse_button = (uint32_t)button;
     ctx->mouse_down     = down;
+    return 0;
+}
+
+/* 滚轮(delta > 0 向上, < 0 向下; 每个刻度按 120 处理) */
+RDPI_API int rdpj_wheel(void *handle, int32_t x, int32_t y, int32_t delta)
+{
+    rdpj_context *ctx = (rdpj_context *)handle;
+    if (!ctx) {
+        return -1;
+    }
+    ctx->wheel_x     = x;
+    ctx->wheel_y     = y;
+    ctx->wheel_delta = delta;
     return 0;
 }
 

@@ -116,6 +116,17 @@ public final class RdpjBridge {
         int rdpj_mouse(Pointer handle, int x, int y, int button, boolean down);
 
         /**
+         * 滚轮事件（delta &gt; 0 向上滚动，&lt; 0 向下滚动）
+         *
+         * @param handle 句柄
+         * @param x X 坐标
+         * @param y Y 坐标
+         * @param delta 滚动量（正数向上，负数向下）
+         * @return 0 成功，-1 非法
+         */
+        int rdpj_wheel(Pointer handle, int x, int y, int delta);
+
+        /**
          * 键盘事件（keysym: RDP 扫描码）
          *
          * @param handle 句柄
@@ -181,6 +192,12 @@ public final class RdpjBridge {
     public static Rdpj instance() {
         if (!loaded) {
             load();
+        }
+        if (!loaded || rdpj == null) {
+            // 原生库缺失时给出可诊断的信息，而不是让调用方拿到 null 再撞 NPE
+            Throwable cause = loadError;
+            String detail = cause == null ? "未找到动态库" : cause.getMessage();
+            throw new IllegalStateException("RDP 原生库 librdpj 未加载（请确认 native/<os-arch>/ 下存在 librdpj.so / rdpj.dll / librdpj.dylib）: " + detail, cause);
         }
         return rdpj;
     }
