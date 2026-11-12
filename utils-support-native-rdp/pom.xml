@@ -29,6 +29,11 @@
             <artifactId>utils-support-native-loader</artifactId>
             <version>4.0.0.43</version>
         </dependency>
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-native-spi</artifactId>
+            <version>${utils.version}</version>
+        </dependency>
         <!-- JNA（JDK 25 侧调度的中间态：不再需要 Panama/FFM） -->
         <dependency>
             <groupId>net.java.dev.jna</groupId>

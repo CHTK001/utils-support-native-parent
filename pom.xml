@@ -11,6 +11,9 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- utils 侧 SPI 契约版本：native 模块实现该契约，调用方只依赖契约编译。
+             升级 utils 主线时只改这一处。 -->
+        <utils.version>4.0.0.50</utils.version>
     </properties>
 
     <modules>
