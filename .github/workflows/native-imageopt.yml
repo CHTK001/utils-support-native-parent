@@ -67,6 +67,7 @@ jobs:
             lib: libchua_native_imageopt.dylib
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash

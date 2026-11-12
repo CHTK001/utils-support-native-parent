@@ -26,6 +26,41 @@
 「无」表示当前没有任何 pom 声明依赖它（据全仓 pom 扫描）；这些模块仍可被应用直接引用，
 不代表已废弃。
 
+## 平台产物矩阵
+
+仓库内 `src/main/resources/native/<platform>/` 的实际情况（`✅` 已入库，`—` 未提供）：
+
+| 模块 | windows-x86_64 | linux-x86_64 | darwin-x86_64 | darwin-aarch64 | 构建入口 |
+|---|---|---|---|---|---|
+| datarecovery | ✅ | ✅ | ✅ | ✅ | `native-datarecovery.yml` |
+| ffmpeg | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| filesearch | ✅ | ✅ | ✅ | ✅ | `native-filesearch.yml` |
+| filestorage | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| headless | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| imageopt | ✅ | CI 回填 | CI 回填 | CI 回填 | `native-imageopt.yml` |
+| libjpeg-turbo | ✅ | ✅ | ✅ | ✅ | `native-libjpeg-turbo.yml` |
+| metrics | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| nmap | ✅ | ✅ | ✅ | ✅ | `native-nmap.yml` |
+| smb | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| sqlite | ✅ | ✅ | ✅ | ✅ | `native-sqlite.yml` |
+| sysinformer | ✅ | ✅ | ✅ | ✅ | `native-sysinformer.yml` |
+| video-codec | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| video-processor | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
+| rdp | ✅ | — | — | — | 无 CI（Java 桥仅实现 Windows） |
+| needle | — | — | — | — | 无 native 源码 |
+| cuda | — | — | — | — | 仅环境检测，无动态库 |
+
+`imageopt` 的 Linux/macOS 产物由 `native-imageopt.yml` 在四个平台分别构建，
+成功后回填到分支 `build/imageopt-native-artifacts`，合并回 `main` 后才会出现在上表的
+`src/main/resources/native/` 下。
+
+### 未完成项说明
+
+- **rdp**：`RdpjBridge` 硬编码 `rdpj.dll` 与 `native/rdpj/win32-x86-64/`，并在非 Windows 平台直接抛
+  `IOException`。只补 `.so`/`.dylib` 无法被 Java 侧加载，需先改造桥接层的库名与资源目录解析。
+- **needle**：仓库内没有 native 源码，能力来自上游 crate，不产出动态库。
+- **cuda**：只做运行时环境检测，不分发动库。
+
 ## 编译级别与运行时要求
 
 父 POM 未配置 `maven.compiler.release`，默认落到 `target 1.8`。整个仓库只维护两档：
