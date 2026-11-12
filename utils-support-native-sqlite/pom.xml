@@ -21,11 +21,16 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+        </dependency>
         <!-- FFM 绑定类 SqliteHookBridge 于 2026-09-29 从 utils-support-sqlite-starter
              迁入本模块（见 README 的迁移说明），需要 NativeLoader / NativeUtils。 -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-common-starter</artifactId>
+            <artifactId>utils-support-native-loader</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

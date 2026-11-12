@@ -33,10 +33,15 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+        </dependency>
         <!-- 绑定类用 NativeLoader / NativeUtils 定位并抽取动态库 -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-common-starter</artifactId>
+            <artifactId>utils-support-native-loader</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- 返回值是 JSON，供调用方解析；本项目统一用 Jackson 解析 JSON -->

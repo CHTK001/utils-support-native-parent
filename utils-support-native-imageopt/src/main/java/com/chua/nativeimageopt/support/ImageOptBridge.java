@@ -1,7 +1,7 @@
 package com.chua.nativeimageopt.support;
 
-import com.chua.common.support.utils.NativeLoader;
-import com.chua.common.support.utils.NativeUtils;
+import com.chua.nativelib.loader.NativeLoader;
+import com.chua.nativelib.loader.NativeUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.foreign.Arena;

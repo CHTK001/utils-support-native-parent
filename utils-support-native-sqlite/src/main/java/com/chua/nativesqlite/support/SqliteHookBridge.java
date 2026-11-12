@@ -1,7 +1,7 @@
 package com.chua.nativesqlite.support;
 
-import com.chua.common.support.utils.NativeLoader;
-import com.chua.common.support.utils.NativeUtils;
+import com.chua.nativelib.loader.NativeLoader;
+import com.chua.nativelib.loader.NativeUtils;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;

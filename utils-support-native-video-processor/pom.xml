@@ -15,7 +15,7 @@
         <!-- JNI 绑定类 VideoProcessorBridge 迁入本模块，需要 NativeLoader / NativeUtils -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-common-starter</artifactId>
+            <artifactId>utils-support-native-loader</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

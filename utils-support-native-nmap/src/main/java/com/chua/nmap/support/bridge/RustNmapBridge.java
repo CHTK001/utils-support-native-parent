@@ -2,8 +2,8 @@ package com.chua.nmap.support.bridge;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import com.chua.common.support.utils.NativeLoader;
-import com.chua.common.support.utils.NativeUtils;
+import com.chua.nativelib.loader.NativeLoader;
+import com.chua.nativelib.loader.NativeUtils;
 import lombok.extern.slf4j.Slf4j;
 
 /**

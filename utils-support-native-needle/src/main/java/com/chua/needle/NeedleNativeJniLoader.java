@@ -1,7 +1,7 @@
 package com.chua.needle;
 
-import com.chua.common.support.utils.NativeLoader;
-import com.chua.common.support.utils.NativeUtils;
+import com.chua.nativelib.loader.NativeLoader;
+import com.chua.nativelib.loader.NativeUtils;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;

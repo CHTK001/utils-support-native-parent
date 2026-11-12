@@ -1,7 +1,7 @@
 package com.chua.nativevideocodec.support;
 
-import com.chua.common.support.utils.NativeLoader;
-import com.chua.common.support.utils.NativeUtils;
+import com.chua.nativelib.loader.NativeLoader;
+import com.chua.nativelib.loader.NativeUtils;
 import java.nio.file.Path;
 
 /**
