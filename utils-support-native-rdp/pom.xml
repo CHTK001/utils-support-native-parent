@@ -34,6 +34,14 @@
             <artifactId>utils-support-native-spi</artifactId>
             <version>${utils.version}</version>
         </dependency>
+        <!-- Linux/macOS 运行库依赖（FreeRDP/X11/ffmpeg 等）放 resource 仓库，
+             native-parent 只保留最小的 librdpj 动态库与 rdpj.index。 -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-resource-rdp</artifactId>
+            <version>${project.version}</version>
+            <scope>runtime</scope>
+        </dependency>
         <!-- JNA（JDK 25 侧调度的中间态：不再需要 Panama/FFM） -->
         <dependency>
             <groupId>net.java.dev.jna</groupId>

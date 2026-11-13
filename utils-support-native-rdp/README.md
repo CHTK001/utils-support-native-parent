@@ -4,8 +4,11 @@ RDP 远控桥接库。Java 侧不接入 Guacamole，通过 JNA 调用平台自�
 FreeRDP 3.x），在主机侧连出到 RDP 服务器，远端桌面按帧推送给浏览器 Canvas，键鼠事件回传
 文本帧。
 
-本模块同时是 **RDP 原生库的唯一归属地**：`spring-support-server-starter` 通过 Maven 依赖
-本模块获得 `RdpjBridge` 与随包的 `rdpj.dll`，不再自带 `native/rdpj` 资源与桥接类副本。
+本模块只保留 **最小动态库** `librdpj`（Windows 为静态链接的 `rdpj.dll`）和
+`rdpj.index`；Linux/macOS 的 FreeRDP/OpenSSL/X11/ffmpeg 等运行库依赖放在
+`utils-support-resource-parent` 的 `utils-support-resource-rdp` 模块。`RdpjBridge`
+的解包逻辑不变：仍按 `rdpj.index` 从 classpath 的 `native/rdp/<platform>/` 读取，
+依赖由 resource jar 提供同名资源。
 
 ---
 
@@ -24,18 +27,28 @@ utils-support-native-rdp/
     │   └── rdpj.h                    # 与 rdpj.c 配套的头文件（注意：不是 DLL 的 ABI）
     ├── java/com/chua/nativerdp/support/
     │   └── RdpjBridge.java           # JNA 绑定 + classpath 解包/加载（与 DLL 的 ABI 一致）
-    └── resources/native/rdpj/win32-x86-64/
-        ├── rdpj.dll                  # 12,873,802 字节，静态链接 FreeRDP 3.32 / WinPR / OpenSSL / zlib
-        └── rdpj.index                # 资源清单（逐行列出需要解包的 DLL）
+    └── resources/native/rdp/
+        ├── linux-x86_64/librdpj.so
+        ├── darwin-aarch64/librdpj.dylib
+        ├── darwin-x86_64/librdpj.dylib
+        └── */rdpj.index               # 逐行列出需要解包的文件（含 resource 模块的依赖）
+```
+
+Linux/macOS 运行库依赖：
+
+```text
+utils-support-resource-parent/utils-support-resource-rdp
+└── src/main/resources/native/rdp/<platform>/<FreeRDP/X11/ffmpeg/...>
 ```
 
 ## 加载方式
 
 `RdpjBridge` 不直接 `System.loadLibrary`，按以下顺序解析：
 
-1. 系统属性 `chua.rdpj.dir` 或环境变量 `CHUA_RDPJ_DIR` 指定的目录（目录内需有 `rdpj.dll`）；
-2. classpath 资源 `native/rdpj/win32-x86-64/`，按 `rdpj.index` 解包到
-   `${java.io.tmpdir}/chua-rdpj/win32-x86-64/`，再 `Native.load(绝对路径, Rdpj.class)`。
+1. 系统属性 `chua.rdpj.dir` 或环境变量 `CHUA_RDPJ_DIR` 指定的目录（目录内需有对应平台库文件）；
+2. classpath 资源 `native/rdp/<platform>/`，按 `rdpj.index` 解包到
+   `${java.io.tmpdir}/chua-rdpj/<platform>/`，再 `Native.load(绝对路径, Rdpj.class)`。
+   Windows 走 `native/rdpj/win32-x86-64/`。
 
 加载前会调用 `kernel32!SetDllDirectoryW` 把解包目录加入 DLL 搜索路径，方便替换版原生库
 带上自己的依赖。加载失败不阻断 JVM 启动：`RdpjBridge.available()` 返回 `false`，

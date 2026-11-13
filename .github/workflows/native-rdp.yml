@@ -77,36 +77,15 @@ jobs:
         run: |
           bash utils-support-native-rdp/build.sh --offline
 
-      - name: Bundle native dependencies
-        run: |
-          TARGET_DIR="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}"
-          bash utils-support-native-rdp/scripts/bundle-unix-deps.sh "$TARGET_DIR" "${{ matrix.lib }}"
-          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
-          echo "TARGET_ABS=$(cd "$TARGET_DIR" && pwd)" >> "$GITHUB_ENV"
-
       - name: Verify artifact
         run: |
+          TARGET_DIR="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}"
           path="$TARGET_DIR/${{ matrix.lib }}"
           test -f "$path" || { echo "missing artifact: $path"; exit 1; }
           file "$path"
-          if [ "${{ matrix.os }}" = "linux" ]; then
-            for dep in libfreerdp3 libfreerdp-client3 libwinpr3 libssl libcrypto; do
-              ldd "$path" | grep -q "$TARGET_ABS/$dep" || {
-                echo "ASSERT FAIL dependency not bundled: $dep"
-                exit 1
-              }
-              echo "ASSERT ok   bundled $dep"
-            done
-          else
-            for dep in libfreerdp3 libfreerdp-client3 libwinpr3; do
-              otool -L "$path" | grep -q "@loader_path/$dep" || {
-                echo "ASSERT FAIL dependency not bundled: $dep"
-                otool -L "$path"
-                exit 1
-              }
-              echo "ASSERT ok   bundled $dep"
-            done
-          fi
+          # 运行库依赖在 utils-support-resource-rdp，native-parent 只保留最小动态库。
+          # 这里只校验构建产物本身；解包仍由 RdpjBridge 按 rdpj.index 完成。
+          test -f "$TARGET_DIR/rdpj.index" || { echo "missing rdpj.index: $TARGET_DIR"; exit 1; }
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
       - name: Check exports
