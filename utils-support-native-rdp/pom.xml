@@ -22,12 +22,11 @@
     </properties>
 
     <dependencies>
-        <!-- NativeLoader / NativeUtils：随平台抽取 native/ 动态库并加载（该组件 4.0.0.43 未发布到本地仓库，
-        使用本地已发布的 4.0.0.50 版本） -->
+        <!-- NativeLoader / NativeUtils：随平台抽取 native/ 动态库并加载 -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-loader</artifactId>
-            <version>4.0.0.43</version>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${utils.version}</version>
         </dependency>
         <dependency>
             <groupId>com.chua</groupId>

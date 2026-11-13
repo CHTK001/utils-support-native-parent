@@ -18,7 +18,7 @@ FreeRDP 3.x），在主机侧连出到 RDP 服务器，远端桌面按帧推送�
 utils-support-native-rdp/
 ├── build.sh                          # Linux/macOS 构建（gcc/clang，自动探测 pkg-config）
 ├── build.bat                         # Windows 构建（MSVC cl.exe，依赖 vcpkg）
-├── pom.xml                           # jna / jna-platform + utils-support-native-loader
+├── pom.xml                           # jna / jna-platform + utils-support-common-starter
 └── src/main
     ├── c/rdpj/
     │   ├── rdpj-win32.c              # 打出现行 rdpj.dll 的源码（Windows + FreeRDP 静态链接）
@@ -110,7 +110,7 @@ Java 侧通过 `/ws/ms/server/terminal/rdp` 创建 WebSocket 连接后交互。
 ```
 utils-support-native-rdp 4.0.0.43
 ├── jna 5.19.1 + jna-platform 5.19.1（使用方若声明更低版本，以使用方为准）
-└── utils-support-native-loader 4.0.0.43（native 家族通用的抽取/加载工具）
+└── utils-support-common-starter（原生库抽取/加载工具 NativeLoader / NativeUtils）
 ```
 
 使用方：`spring-support-parent-starter` 的 `spring-support-server-starter`，

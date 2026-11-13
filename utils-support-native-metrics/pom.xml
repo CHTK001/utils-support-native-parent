@@ -26,8 +26,8 @@
         <!-- FFM 绑定类 MetricsNativeLibrary 迁入本模块，需要 NativeLoader / NativeUtils -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-loader</artifactId>
-            <version>${project.version}</version>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${utils.version}</version>
         </dependency>
         <dependency>
             <groupId>com.chua</groupId>

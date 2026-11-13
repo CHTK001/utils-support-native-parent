@@ -17,7 +17,6 @@
     </properties>
 
     <modules>
-        <module>utils-support-native-loader</module>
         <module>utils-support-native-ffmpeg</module>
         <module>utils-support-native-sqlite</module>
         <module>utils-support-native-datarecovery</module>

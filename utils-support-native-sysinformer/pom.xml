@@ -41,8 +41,8 @@
         <!-- 绑定类用 NativeLoader / NativeUtils 定位并抽取动态库 -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-loader</artifactId>
-            <version>${project.version}</version>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${utils.version}</version>
         </dependency>
         <!-- 返回值是 JSON，供调用方解析；本项目统一用 Jackson 解析 JSON -->
         <dependency>

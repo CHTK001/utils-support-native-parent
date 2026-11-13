@@ -24,12 +24,18 @@
         <!-- JNI 绑定类 RustNmapBridge 迁入本模块，需要 NativeLoader / NativeUtils -->
         <dependency>
             <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-loader</artifactId>
-            <version>${project.version}</version>
+            <artifactId>utils-support-common-starter</artifactId>
+            <version>${utils.version}</version>
         </dependency>
         <dependency>
             <groupId>com.chua</groupId>
             <artifactId>utils-support-native-spi</artifactId>
+            <version>${utils.version}</version>
+        </dependency>
+        <!-- RustNmapScanner 的高层 API 依赖 common-starter（Wraps / @Spi / Jackson 传递依赖） -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-common-starter</artifactId>
             <version>${utils.version}</version>
         </dependency>
         <dependency>
