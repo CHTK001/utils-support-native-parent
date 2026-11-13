@@ -28,11 +28,6 @@
             <artifactId>utils-support-common-starter</artifactId>
             <version>${utils.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-spi</artifactId>
-            <version>${utils.version}</version>
-        </dependency>
         <!-- Linux/macOS 运行库依赖（FreeRDP/X11/ffmpeg 等）放 resource 仓库，
              native-parent 只保留最小的 librdpj 动态库与 rdpj.index。 -->
         <dependency>

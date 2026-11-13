@@ -17,11 +17,6 @@
             <artifactId>utils-support-common-starter</artifactId>
             <version>${utils.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.chua</groupId>
-            <artifactId>utils-support-native-spi</artifactId>
-            <version>${utils.version}</version>
-        </dependency>
     </dependencies>
     <build>
         <plugins>

@@ -17,7 +17,7 @@
 | `utils-support-native-libjpeg-turbo` | libjpeg-turbo TurboJPEG（SIMD JPEG 编解码，FFM） | **25** | `utils-support-image-starter` |
 | `utils-support-native-metrics` | 系统指标 Rust native 库（FFM） | **25** | `utils-support-metrics-starter` |
 | `utils-support-native-needle` | Needle 工具调用 / 结构化抽取引擎（cactus-compute，FFM） | **25** | `utils-support-deeplearning-needle-starter` |
-| `utils-support-native-nmap` | Nmap 集成 native 库（JNI） | 1.8 | `utils-support-nmap-starter` |
+| `utils-support-native-nmap` | Nmap 扫描 API + native 库（JNI），`NmapScanner` / `NmapSpi` | 1.8 | `utils-support-common-starter`（契约） |
 | `utils-support-native-smb` | SMB2/3 服务端 Rust native 库（smb-server crate，FFM） | **25** | `utils-support-smb-starter` |
 | `utils-support-native-sqlite` | SQLite update_hook 原生动态库（环形缓冲 + JSON 事件） | 1.8 | `utils-support-sqlite-starter`、`spring-api-support-system-starter` |
 | `utils-support-native-video-codec` | H.264/H.265/H.266 编解码（JNI） | 1.8 | `utils-support-example-starter` |
