@@ -559,6 +559,9 @@ try:
         gone = False
         for _ in range(20):
             time.sleep(0.25)
+            # Popen.poll() 会 reap 子进程；否则 POSIX 下已终止的进程会以 zombie
+            # 形式留在 /proc，os.kill(pid, 0) 仍然成功，被误判为“还活着”。
+            child.poll()
             if not _alive(cpid):
                 gone = True
                 break
