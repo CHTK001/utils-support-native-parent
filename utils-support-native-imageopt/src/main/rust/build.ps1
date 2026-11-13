@@ -43,14 +43,19 @@ if ($Toolchain) {
     Remove-Item Env:RUSTUP_TOOLCHAIN -ErrorAction SilentlyContinue
 }
 
-if ($RustTarget) {
-    Step "cargo build --release --target $RustTarget"
-    & cargo build --release --target $RustTarget
-} else {
-    Step "cargo build --release (host target)"
-    & cargo build --release
+Push-Location $RustDir
+try {
+    if ($RustTarget) {
+        Step "cargo build --release --target $RustTarget"
+        & cargo build --release --target $RustTarget
+    } else {
+        Step "cargo build --release (host target)"
+        & cargo build --release
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+} finally {
+    Pop-Location
 }
-if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 
 $ReleaseDir = if ($RustTarget) { Join-Path $RustDir "target\$RustTarget\release" } else { Join-Path $RustDir 'target\release' }
 $Built = Join-Path $ReleaseDir "$LibraryName.dll"
