@@ -43,11 +43,6 @@ jobs:
             os: darwin
             lib: librdpj.dylib
             smoke: true
-          - platform: darwin-x86_64
-            runs-on: macos-15
-            os: darwin
-            lib: librdpj.dylib
-            smoke: false
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 60
@@ -73,26 +68,9 @@ jobs:
           cc --version 2>/dev/null | head -1 || clang --version | head -1
           pkg-config --modversion freerdp3 freerdp-client3 winpr3 2>/dev/null || true
 
-      - name: Install Rosetta + x86_64 FreeRDP (darwin-x86_64)
-        if: matrix.platform == 'darwin-x86_64'
-        run: |
-          sudo softwareupdate --install-rosetta --agree-to-license
-          if [ ! -x /usr/local/bin/brew ]; then
-            arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-          fi
-          arch -x86_64 /usr/local/bin/brew install freerdp pkg-config
-
       - name: Build librdpj
-        if: matrix.platform != 'darwin-x86_64'
         run: |
           bash utils-support-native-rdp/build.sh --offline
-
-      - name: Build librdpj (darwin-x86_64 under Rosetta)
-        if: matrix.platform == 'darwin-x86_64'
-        run: |
-          export PATH="/usr/local/bin:$PATH"
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/opt/freerdp/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig"
-          MACHINE=x86_64 CC="clang -arch x86_64" arch -x86_64 bash utils-support-native-rdp/build.sh --offline
 
       - name: Verify artifact
         run: |
