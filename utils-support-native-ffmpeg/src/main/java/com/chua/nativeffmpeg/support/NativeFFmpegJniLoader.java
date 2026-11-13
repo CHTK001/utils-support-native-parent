@@ -7,6 +7,9 @@ import java.nio.file.Path;
 /**
  * Rust FFmpeg JNI 加载器。
  * 通过 NativeLoader 从 classpath 提取动态库并加载。
+ *
+ * @author CH
+ * @since 2026-11-13
  */
 final class NativeFFmpegJniLoader {
 

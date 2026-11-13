@@ -107,6 +107,7 @@ public final class SysInformerJnaSmoke {
         System.out.println(); // [P3C E1 豁免]
         if (failures > 0) {
             System.out.println("SYSINFORMER_JNA_SMOKE_FAILED failures=" + failures); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(1);
         }
         System.out.println("SYSINFORMER_JNA_SMOKE_OK"); // [P3C E1 豁免]

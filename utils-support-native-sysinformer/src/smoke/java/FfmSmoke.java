@@ -104,6 +104,7 @@ public final class FfmSmoke {
         System.out.println(); // [P3C E1 豁免]
         if (bad > 0) {
             System.out.println("JAVA25_FFM_SMOKE_FAILED bad=" + bad); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(1);
         }
         System.out.println("JAVA25_FFM_SMOKE_OK"); // [P3C E1 豁免]

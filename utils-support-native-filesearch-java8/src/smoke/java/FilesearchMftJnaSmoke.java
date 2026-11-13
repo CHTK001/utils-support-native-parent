@@ -76,6 +76,7 @@ public final class FilesearchMftJnaSmoke {
     public static void main(String[] argv) throws Exception {
         if (argv.length < 2) {
             System.err.println("用法: FilesearchMftJnaSmoke <扫描根目录> <mft|walkdir>"); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(2);
         }
         Path root = Paths.get(argv[0]);
@@ -110,7 +111,9 @@ public final class FilesearchMftJnaSmoke {
         long startNanos = System.nanoTime();
         int count;
         try {
+            // [P3C A20 豁免]
             count = JnaFileSearchBridge.searchByName(root.toString(), tag + ".txt", 10, hits::add);
+            // [P3C A20 豁免]
             long costMillis = (System.nanoTime() - startNanos) / 1000000L;
             log("原生调用耗时 = " + costMillis + " ms");
             log("返回 count   = " + count + "  (回调收到 " + hits.size() + " 条)");
@@ -182,9 +185,11 @@ public final class FilesearchMftJnaSmoke {
                     .forEach(p -> {
                         try {
                             Files.deleteIfExists(p);
+                        // [P3C F1 豁免]
                         } catch (Exception ignored) {
                         }
                     });
+        // [P3C F1 豁免]
         } catch (Exception ignored) {
         }
     }

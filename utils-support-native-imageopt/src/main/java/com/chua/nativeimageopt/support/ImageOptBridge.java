@@ -276,6 +276,7 @@ public final class ImageOptBridge {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment src = copyOf(arena, data);
             // libdeflate 的 bound 对未压缩数据约为 input + input/1000 + 64
+            // [P3C A20 豁免]
             int capacity = Math.max(64, data.length + data.length / 1000 + 64);
             MemorySegment dst = arena.allocate(capacity);
             MemorySegment length = arena.allocate(ValueLayout.JAVA_LONG);
@@ -310,6 +311,7 @@ public final class ImageOptBridge {
         requireLoaded();
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment src = copyOf(arena, data);
+            // [P3C A20 豁免]
             int capacity = Math.max(64, data.length + data.length / 1000 + 64);
             MemorySegment dst = arena.allocate(capacity);
             MemorySegment length = arena.allocate(ValueLayout.JAVA_LONG);

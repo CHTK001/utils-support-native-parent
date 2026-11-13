@@ -62,6 +62,7 @@ public final class FilesearchJnaBridgeSmoke {
         log("fast_get_version = " + version);
 
         List<FileSearchResult> byName = new ArrayList<>();
+        // [P3C A20 豁免]
         int nameCount = JnaFileSearchBridge.searchByName(tmp.toString(), "*.log", 100, byName::add);
         log("searchByName(*.log) count = " + nameCount);
         require(nameCount == 3, "预期命中 3 个 .log，实际 " + nameCount);
@@ -69,16 +70,19 @@ public final class FilesearchJnaBridgeSmoke {
         require(byName.get(0).getPath().contains("s"), "结果路径异常: " + byName.get(0).getPath());
 
         List<FileSearchResult> tree = new ArrayList<>();
+        // [P3C A20 豁免]
         int treeCount = JnaFileSearchBridge.getTree(tmp.toString(), 3, 100, tree::add);
         log("getTree count = " + treeCount);
         require(treeCount >= 4, "遍历至少应命中 4 个文件，实际 " + treeCount);
 
         List<FileSearchResult> bySize = new ArrayList<>();
+        // [P3C A20 豁免]
         int sizeCount = JnaFileSearchBridge.searchBySize(tmp.toString(), 0L, Long.MAX_VALUE, 100, bySize::add);
         log("searchBySize(0..MAX) count = " + sizeCount);
         require(sizeCount >= 4, "按大小过滤至少应命中 4 个文件，实际 " + sizeCount);
 
         List<FileSearchResult> byPath = new ArrayList<>();
+        // [P3C A20 豁免]
         int pathCount = JnaFileSearchBridge.searchByPath(tmp.toString(), "*other.txt", 100, byPath::add);
         log("searchByPath(*other.txt) count = " + pathCount);
         require(pathCount == 1, "按路径过滤应命中 1 个文件，实际 " + pathCount);

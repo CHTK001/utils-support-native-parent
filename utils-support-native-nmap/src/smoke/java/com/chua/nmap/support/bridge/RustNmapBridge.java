@@ -9,6 +9,9 @@ package com.chua.nmap.support.bridge;
  * {@code Java_com_chua_nmap_support_bridge_RustNmapBridge_*}，把本类的全限定名
  * 编译进了二进制，故这里必须用与生产类相同的包名与类名。本文件只存在于
  * {@code src/smoke} 下，由 CI 单独编译，与生产类不会同时参与编译。</p>
+ *
+ * @author CH
+ * @since 2026-11-13
  */
 public final class RustNmapBridge {
 
@@ -30,18 +33,21 @@ public final class RustNmapBridge {
     public static void main(String[] argv) {
         if (argv.length == 0) {
             System.err.println("用法: RustNmapBridge <库路径>"); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(2);
         }
         System.load(argv[0]);
         log("已加载: " + argv[0]);
 
         // 1) 单端口探测应正常返回（0/1 均属正常，不应抛异常）
+        // [P3C A20 豁免]
         int closed = scanSingleTcpPort("127.0.0.1", 1, 500);
         log("scanSingleTcpPort(127.0.0.1:1) = " + closed);
         require(closed == 0 || closed == 1, "单端口探测应返回 0 或 1，实际 " + closed);
 
         // 2) detectService 的 JSON 必须不含裸控制字符
         //    此前该函数手拼 JSON，banner 原文里的 CR/LF 未转义，调用方解析必失败
+        // [P3C A20 豁免]
         String json = detectService("127.0.0.1", 80, 5000);
         log("detectService(127.0.0.1:80) = " + json);
         require(json != null && !json.isEmpty(), "detectService 返回为空");

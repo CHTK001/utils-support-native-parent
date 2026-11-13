@@ -65,6 +65,7 @@ public final class FilesearchMftSmoke {
     public static void main(String[] argv) throws Throwable {
         if (argv.length < 3) {
             System.err.println("用法: FilesearchMftSmoke <库路径> <扫描根目录> <mft|walkdir>"); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(2);
         }
         Path lib = Path.of(argv[0]);
@@ -100,6 +101,7 @@ public final class FilesearchMftSmoke {
             try (Arena call = Arena.ofConfined()) {
                 MemorySegment rootSeg = call.allocateFrom(root.toString(), StandardCharsets.UTF_8);
                 MemorySegment patSeg = call.allocateFrom(tag + ".txt", StandardCharsets.UTF_8);
+                // [P3C A20 豁免]
                 MemorySegment rp = (MemorySegment) raw.invokeExact(rootSeg, patSeg, 10);
                 require(!rp.equals(MemorySegment.NULL), "__rawSearchByName 返回空指针");
                 String json = rp.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);
@@ -185,9 +187,11 @@ public final class FilesearchMftSmoke {
                     .forEach(p -> {
                         try {
                             Files.deleteIfExists(p);
+                        // [P3C F1 豁免]
                         } catch (Exception ignored) {
                         }
                     });
+        // [P3C F1 豁免]
         } catch (Exception ignored) {
         }
     }

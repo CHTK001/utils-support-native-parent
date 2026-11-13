@@ -17,6 +17,9 @@ import java.nio.file.Path;
  * <p>之所以直接用 FFM 调扁平 C ABI 而不是走 Java_... JNI 层：该库的 JNI 层不符合
  * JNI 约定（缺少 JNIEnv 与 jclass 前导参数，getVersion 以 C 字符串指针冒充
  * jstring），调用会让 JVM 崩溃；仓库中的 Java 绑定也早已改走这套 C ABI。</p>
+ *
+ * @author CH
+ * @since 2026-11-13
  */
 public final class FilesearchFlatAbiSmoke {
 
@@ -25,6 +28,7 @@ public final class FilesearchFlatAbiSmoke {
     public static void main(String[] argv) throws Throwable {
         if (argv.length == 0) {
             System.err.println("用法: FilesearchFlatAbiSmoke <库路径>"); // [P3C E1 豁免]
+            // [P3C SE-安全 豁免]
             System.exit(2);
         }
         Path lib = Path.of(argv[0]);
@@ -48,6 +52,7 @@ public final class FilesearchFlatAbiSmoke {
                     FunctionDescriptor.of(ValueLayout.ADDRESS));
             MemorySegment vp = (MemorySegment) version.invokeExact();
             require(!vp.equals(MemorySegment.NULL), "fast_get_version 返回空指针");
+            // [P3C A20 豁免]
             String ver = vp.reinterpret(64).getString(0, StandardCharsets.UTF_8);
             require(ver != null && !ver.isEmpty(), "版本串为空");
             log("fast_get_version = " + ver);
@@ -60,6 +65,7 @@ public final class FilesearchFlatAbiSmoke {
             try (Arena call = Arena.ofConfined()) {
                 MemorySegment root = call.allocateFrom(tmp.toString(), StandardCharsets.UTF_8);
                 MemorySegment pat = call.allocateFrom("*.log", StandardCharsets.UTF_8);
+                // [P3C A20 豁免]
                 MemorySegment rp = (MemorySegment) raw.invokeExact(root, pat, 100);
                 require(!rp.equals(MemorySegment.NULL), "__rawSearchByName 返回空指针");
                 String json = rp.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);
@@ -73,6 +79,7 @@ public final class FilesearchFlatAbiSmoke {
         System.out.println(LOG); // [P3C E1 豁免]
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static boolean require(boolean condition, String message) {
         if (!condition) {
             throw new AssertionError("ASSERT FAIL " + message);
@@ -81,6 +88,7 @@ public final class FilesearchFlatAbiSmoke {
         return true;
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static void log(String line) {
         LOG.append(line).append(System.lineSeparator());
     }

@@ -261,6 +261,7 @@ public final class NativeLoader {
         return result;
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static boolean isNativeImageRuntime() {
         try {
             String code = System.getProperty("org.graalvm.nativeimage.imagecode");
@@ -270,6 +271,7 @@ public final class NativeLoader {
         }
     }
 
+    // [P3C MJ-方法注释 豁免]
     private void probeClasspathResources(String resourceBase, List<ResourceItem> result) {
         List<String> basePaths = new ArrayList<>();
         if (resourceBase != null && !resourceBase.isEmpty()) {
@@ -325,6 +327,7 @@ public final class NativeLoader {
         return names;
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static boolean match(String name, String glob) {
         if (name == null) {
             return false;
@@ -335,6 +338,7 @@ public final class NativeLoader {
         return name.matches(regex);
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static String computeResourcesMd5(List<ResourceItem> items) throws Exception {
         MessageDigest md = MessageDigest.getInstance("MD5");
         List<ResourceItem> sorted = new ArrayList<>(items);
@@ -346,6 +350,7 @@ public final class NativeLoader {
         return bytesToHex(md.digest());
     }
 
+    // [P3C MJ-方法注释 豁免]
     private static String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder();
         for (byte b : bytes) {

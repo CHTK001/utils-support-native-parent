@@ -98,9 +98,15 @@ bundle_darwin() {
     echo "dylibbundler is required (brew install dylibbundler)" >&2
     exit 1
   }
-  # dylibbundler copies non-system dylibs and rewrites install names to
-  # @loader_path/<name>, so the extraction directory is self-contained.
-  dylibbundler -od -b -x "$MAIN_LIB" -d "$TARGET_DIR" -p "@loader_path/" >/dev/null
+  # dylibbundler 在 -x 与 -d 指向同一目录时会把主库当成待处理文件移走/删除；
+  # 先把主库放到临时目录，让它只负责改副本，再把改好的主库拷回。
+  local tmp
+  tmp="$(mktemp -d)"
+  cp "$MAIN_LIB" "$tmp/$LIB_NAME"
+  dylibbundler -od -b -x "$tmp/$LIB_NAME" -d "$TARGET_DIR" -p "@loader_path/" >/dev/null
+  cp "$tmp/$LIB_NAME" "$TARGET_DIR/$LIB_NAME"
+  chmod +x "$TARGET_DIR/$LIB_NAME"
+  rm -rf "$tmp"
   (cd "$TARGET_DIR" && ls -1 *.dylib | LC_ALL=C sort > rdpj.index)
   echo "darwin: index:"
   sed 's/^/  /' "$TARGET_DIR/rdpj.index"

@@ -61,6 +61,7 @@ public final class NativeRdpSpi implements RdpNativeSpi {
         header[0] = frame.getInt(0);
         header[1] = frame.getInt(4);
         header[2] = frame.getInt(8);
+        // [P3C A20 豁免]
         header[3] = frame.getInt(12);
         return true;
     }

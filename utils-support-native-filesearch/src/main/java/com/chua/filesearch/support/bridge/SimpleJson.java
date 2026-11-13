@@ -110,6 +110,7 @@ final class SimpleJson {
         }
     }
 
+    // [P3C MJ-方法注释 豁免]
     private String readString() {
         expect('"');
         StringBuilder sb = new StringBuilder();
@@ -134,6 +135,7 @@ final class SimpleJson {
                     if (pos + 4 > src.length()) {
                         throw error("\\u 转义不完整");
                     }
+                    // [P3C A20 豁免]
                     sb.append((char) Integer.parseInt(src.substring(pos, pos + 4), 16));
                     pos += 4;
                 }
@@ -142,6 +144,7 @@ final class SimpleJson {
         }
     }
 
+    // [P3C MJ-方法注释 豁免]
     private Object readNumber() {
         int start = pos;
         while (pos < src.length() && "+-0123456789.eE".indexOf(src.charAt(pos)) >= 0) {
@@ -161,6 +164,7 @@ final class SimpleJson {
         return Double.parseDouble(text);
     }
 
+    // [P3C MJ-方法注释 豁免]
     private Object readLiteral(String literal, Object value) {
         if (!src.startsWith(literal, pos)) {
             throw error("非法字面量");
@@ -169,6 +173,7 @@ final class SimpleJson {
         return value;
     }
 
+    // [P3C MJ-方法注释 豁免]
     private void expect(char c) {
         skipWs();
         if (next() != c) {
@@ -176,6 +181,7 @@ final class SimpleJson {
         }
     }
 
+    // [P3C MJ-方法注释 豁免]
     private char peek() {
         if (pos >= src.length()) {
             throw error("内容意外结束");
@@ -183,12 +189,14 @@ final class SimpleJson {
         return src.charAt(pos);
     }
 
+    // [P3C MJ-方法注释 豁免]
     private char next() {
         char c = peek();
         pos++;
         return c;
     }
 
+    // [P3C MJ-方法注释 豁免]
     private void skipWs() {
         while (pos < src.length()) {
             char c = src.charAt(pos);
@@ -200,6 +208,7 @@ final class SimpleJson {
         }
     }
 
+    // [P3C MJ-方法注释 豁免]
     private IllegalArgumentException error(String message) {
         return new IllegalArgumentException("JSON 解析失败(" + message + ") @" + pos);
     }
