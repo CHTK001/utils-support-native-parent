@@ -61,12 +61,12 @@ jobs:
         if: matrix.os == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config freerdp3-dev
+          sudo apt-get install -y build-essential pkg-config patchelf freerdp3-dev
 
       - name: Install FreeRDP 3.x (macOS)
         if: matrix.os == 'darwin'
         run: |
-          brew install freerdp pkg-config
+          brew install freerdp pkg-config dylibbundler
 
       - name: Toolchain / FreeRDP versions
         run: |
@@ -77,11 +77,36 @@ jobs:
         run: |
           bash utils-support-native-rdp/build.sh --offline
 
+      - name: Bundle native dependencies
+        run: |
+          TARGET_DIR="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}"
+          bash utils-support-native-rdp/scripts/bundle-unix-deps.sh "$TARGET_DIR" "${{ matrix.lib }}"
+          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+          echo "TARGET_ABS=$(cd "$TARGET_DIR" && pwd)" >> "$GITHUB_ENV"
+
       - name: Verify artifact
         run: |
-          path="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          path="$TARGET_DIR/${{ matrix.lib }}"
           test -f "$path" || { echo "missing artifact: $path"; exit 1; }
           file "$path"
+          if [ "${{ matrix.os }}" = "linux" ]; then
+            for dep in libfreerdp3 libfreerdp-client3 libwinpr3 libssl libcrypto; do
+              ldd "$path" | grep -q "$TARGET_ABS/$dep" || {
+                echo "ASSERT FAIL dependency not bundled: $dep"
+                exit 1
+              }
+              echo "ASSERT ok   bundled $dep"
+            done
+          else
+            for dep in libfreerdp3 libfreerdp-client3 libwinpr3; do
+              otool -L "$path" | grep -q "@loader_path/$dep" || {
+                echo "ASSERT FAIL dependency not bundled: $dep"
+                otool -L "$path"
+                exit 1
+              }
+              echo "ASSERT ok   bundled $dep"
+            done
+          fi
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
       - name: Check exports
@@ -134,8 +159,7 @@ jobs:
         run: |
           rm -rf stage
           mkdir -p "stage/native/rdp/${{ matrix.platform }}"
-          cp "$LIB_PATH" "stage/native/rdp/${{ matrix.platform }}/"
-          printf '%s\n' "${{ matrix.lib }}" > "stage/native/rdp/${{ matrix.platform }}/rdpj.index"
+          cp -R "$TARGET_DIR/." "stage/native/rdp/${{ matrix.platform }}/"
           ls -la "stage/native/rdp/${{ matrix.platform }}"
 
       - name: Upload native library
