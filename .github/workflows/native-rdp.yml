@@ -43,6 +43,11 @@ jobs:
             os: darwin
             lib: librdpj.dylib
             smoke: true
+          - platform: darwin-x86_64
+            runs-on: macos-15-intel
+            os: darwin
+            lib: librdpj.dylib
+            smoke: true
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 60
