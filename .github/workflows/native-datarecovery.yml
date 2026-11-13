@@ -148,7 +148,7 @@ jobs:
           javac -d target/smoke \
             utils-support-native-datarecovery/src/smoke/java/com/chua/datarecovery/support/DataRecovery.java
           java -Dstdout.encoding=UTF-8 -cp target/smoke \
-            com.chua.datarecovery.support.DataRecovery "$(pwd)/$LIB_PATH"
+            com.chua.datarecovery.support.DataRecovery "$LIB_PATH"
 
       - name: Stage artifact for upload
         run: |
