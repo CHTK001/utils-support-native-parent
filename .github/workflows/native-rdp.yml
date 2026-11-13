@@ -83,7 +83,7 @@ jobs:
           path="$TARGET_DIR/${{ matrix.lib }}"
           test -f "$path" || { echo "missing artifact: $path"; exit 1; }
           file "$path"
-          # 运行库依赖在 utils-support-resource-rdp，native-parent 只保留最小动态库。
+          # 运行库在同级资源制品 utils-support-resource-rdp，native-parent 只保留最小动态库。
           # 这里只校验构建产物本身；解包仍由 RdpjBridge 按 rdpj.index 完成。
           test -f "$TARGET_DIR/rdpj.index" || { echo "missing rdpj.index: $TARGET_DIR"; exit 1; }
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"

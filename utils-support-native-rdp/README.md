@@ -5,10 +5,11 @@ FreeRDP 3.x），在主机侧连出到 RDP 服务器，远端桌面按帧推送�
 文本帧。
 
 本模块只保留 **最小动态库** `librdpj`（Windows 为静态链接的 `rdpj.dll`）和
-`rdpj.index`；Linux/macOS 的 FreeRDP/OpenSSL/X11/ffmpeg 等运行库依赖放在
-`utils-support-resource-parent` 的 `utils-support-resource-rdp` 模块。`RdpjBridge`
-的解包逻辑不变：仍按 `rdpj.index` 从 classpath 的 `native/rdp/<platform>/` 读取，
-依赖由 resource jar 提供同名资源。
+`rdpj.index`。Linux/macOS 的 FreeRDP/OpenSSL/X11/ffmpeg 等运行库放在**同级资源制品**
+`utils-support-resource-parent` 的 `utils-support-resource-rdp`，与本模块并列部署，
+**不是本模块的 Maven 依赖**（resource 仓只放资源文件）。`RdpjBridge` 的解包逻辑不变：
+仍按 `rdpj.index` 从 classpath 的 `native/rdp/<platform>/` 读取，运行库由同级制品
+提供同名资源。
 
 ---
 
@@ -31,10 +32,10 @@ utils-support-native-rdp/
         ├── linux-x86_64/librdpj.so
         ├── darwin-aarch64/librdpj.dylib
         ├── darwin-x86_64/librdpj.dylib
-        └── */rdpj.index               # 逐行列出需要解包的文件（含 resource 模块的依赖）
+        └── */rdpj.index               # 逐行列出需要解包的文件（含同级 resource 制品提供的运行库）
 ```
 
-Linux/macOS 运行库依赖：
+Linux/macOS 运行库（同级资源制品，非依赖）：
 
 ```text
 utils-support-resource-parent/utils-support-resource-rdp
@@ -112,6 +113,8 @@ utils-support-native-rdp 4.0.0.43
 ├── jna 5.19.1 + jna-platform 5.19.1（使用方若声明更低版本，以使用方为准）
 └── utils-support-common-starter（原生库抽取/加载工具 NativeLoader / NativeUtils）
 ```
+
+Linux/macOS 运行库由同级资源制品 `utils-support-resource-rdp` 提供（并列部署，非依赖）。
 
 使用方：`spring-support-parent-starter` 的 `spring-support-server-starter`，
 依赖版本由该模块 `pom.xml` 的 `native.rdp.version` 指定（独立于 `utils.version`）。
