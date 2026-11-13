@@ -73,22 +73,28 @@ jobs:
           cc --version 2>/dev/null | head -1 || clang --version | head -1
           pkg-config --modversion freerdp3 freerdp-client3 winpr3 2>/dev/null || true
 
+      - name: Install Rosetta + x86_64 FreeRDP (darwin-x86_64)
+        if: matrix.platform == 'darwin-x86_64'
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license
+          if [ ! -x /usr/local/bin/brew ]; then
+            arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          arch -x86_64 /usr/local/bin/brew install freerdp pkg-config
+
       - name: Build librdpj
-        # darwin-x86_64 在 arm64 runner 上交叉编译；Homebrew freerdp 是 arm64，
-        # 直接链接会架构不匹配。该腿只做「源码能编过 + 产物存在」的构建验证，
-        # 不产出可加载的 x86_64 dylib（与其它 workflow 的 darwin-x86_64 口径一致）。
         if: matrix.platform != 'darwin-x86_64'
         run: |
           bash utils-support-native-rdp/build.sh --offline
 
-      - name: Build librdpj (darwin-x86_64 source check)
+      - name: Build librdpj (darwin-x86_64 under Rosetta)
         if: matrix.platform == 'darwin-x86_64'
         run: |
-          echo "darwin-x86_64 需要 x86_64 FreeRDP；当前 runner 只有 arm64 Homebrew，跳过产物构建"
-          echo "RDP_X86_64_SKIPPED"
+          export PATH="/usr/local/bin:$PATH"
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/opt/freerdp/lib/pkgconfig:/usr/local/opt/openssl@3/lib/pkgconfig"
+          MACHINE=x86_64 CC="clang -arch x86_64" arch -x86_64 bash utils-support-native-rdp/build.sh --offline
 
       - name: Verify artifact
-        if: matrix.platform != 'darwin-x86_64'
         run: |
           path="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
           test -f "$path" || { echo "missing artifact: $path"; exit 1; }
@@ -96,7 +102,6 @@ jobs:
           echo "LIB_PATH=$path" >> "$GITHUB_ENV"
 
       - name: Check exports
-        if: matrix.platform != 'darwin-x86_64'
         run: |
           LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
           sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
@@ -110,6 +115,17 @@ jobs:
             }
             echo "ASSERT ok   $sym"
           done
+
+      - name: Check architecture
+        run: |
+          file "$LIB_PATH"
+          case "${{ matrix.platform }}" in
+            linux-x86_64)   file "$LIB_PATH" | grep -qE 'ELF 64-bit.*x86-64' ;;
+            darwin-aarch64) lipo -archs "$LIB_PATH" | grep -q arm64 ;;
+            darwin-x86_64)  lipo -archs "$LIB_PATH" | grep -q x86_64 ;;
+            *) echo "unknown platform"; exit 1 ;;
+          esac
+          echo "ASSERT ok architecture ${{ matrix.platform }}"
 
       - name: Runtime smoke (dlopen + create/destroy)
         if: matrix.smoke
@@ -132,7 +148,6 @@ jobs:
           PY
 
       - name: Stage artifact for upload
-        if: matrix.platform != 'darwin-x86_64'
         run: |
           rm -rf stage
           mkdir -p "stage/native/rdp/${{ matrix.platform }}"
@@ -141,7 +156,6 @@ jobs:
           ls -la "stage/native/rdp/${{ matrix.platform }}"
 
       - name: Upload native library
-        if: matrix.platform != 'darwin-x86_64'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-rdp
