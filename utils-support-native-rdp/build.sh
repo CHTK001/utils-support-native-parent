@@ -94,19 +94,18 @@ mkdir -p "$TARGET_DIR"
 # ============================================================
 find_unix_sdk() {
   local c
-  # pkg-config（freerdp3 -> /usr/local/lib/freerdp3 等）
+  # pkg-config（freerdp3 -> /usr/lib/... + /usr/include/freerdp3 等）
+  # 注意：系统包的 include 与 lib 不在同一前缀，不能要求
+  # $libdir/include/freerdp/freerdp.h 存在；这里直接用 pkg-config 作为 SDK 来源。
   if command -v pkg-config >/dev/null 2>&1; then
     for spec in freerdp3 freerdp; do
       if pkg-config --atleast-version=3.0 "$spec" 2>/dev/null; then
-        c="$(pkg-config --variable=libdir "$spec" 2>/dev/null || echo "")"
-        if [ -n "$c" ] && { [ -f "$c/libfreerdp3.so" ] || [ -f "$c/libfreerdp3.dylib" ]; } && [ -f "$(pkg-config --variable=includedir "$spec")/freerdp/freerdp.h" ]; then
-          echo "$c"
-          return 0
-        fi
+        echo "pkg-config"
+        return 0
       fi
     done
   fi
-  # 常见目录
+  # 常见目录（自编译 SDK，include 与 lib 同前缀）
   for c in "/usr/local/freerdp" "/opt/freerdp" "/usr/lib/x86_64-linux-gnu/freerdp" "$HOME/.freerdp-sdk"; do
     if [ -f "$c/include/freerdp/freerdp.h" ] && { [ -f "$c/lib/libfreerdp3.so" ] || [ -f "$c/lib/libfreerdp3.dylib" ] || [ -f "$c/lib/libfreerdp3.lib" ]; }; then
       echo "$c"
@@ -153,14 +152,16 @@ if [ "$sdk" = "unknown" ] && [ "$OPTION_OFFLINE" -eq 0 ]; then
   echo "FreeRDP SDK 已构建: $sdk"
 fi
 
-# 确认必需的组件文件
-if [ ! -f "$sdk/include/freerdp/freerdp.h" ]; then
-  echo "不是 FreeRDP SDK: 找不到 $sdk/include/freerdp/freerdp.h" >&2
-  exit 1
-fi
-if [ ! -f "$sdk/lib/libfreerdp3.so" ] && [ ! -f "$sdk/lib/libfreerdp3.dylib" ]; then
-  echo "不是 FreeRDP SDK: 找不到 $sdk/lib/libfreerdp3* 库" >&2
-  exit 1
+# 确认必需的组件文件（pkg-config 模式由 pkg-config 自己校验）
+if [ "$sdk" != "pkg-config" ]; then
+  if [ ! -f "$sdk/include/freerdp/freerdp.h" ]; then
+    echo "不是 FreeRDP SDK: 找不到 $sdk/include/freerdp/freerdp.h" >&2
+    exit 1
+  fi
+  if [ ! -f "$sdk/lib/libfreerdp3.so" ] && [ ! -f "$sdk/lib/libfreerdp3.dylib" ]; then
+    echo "不是 FreeRDP SDK: 找不到 $sdk/lib/libfreerdp3* 库" >&2
+    exit 1
+  fi
 fi
 # ============================================================
 # 5. 编译 rdpj
