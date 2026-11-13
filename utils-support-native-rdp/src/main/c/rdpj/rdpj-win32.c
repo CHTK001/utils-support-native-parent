@@ -11,11 +11,32 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
+#else
+/* WinPR 在 POSIX 上提供 windows.h 的兼容层：HANDLE / CRITICAL_SECTION /
+ * CreateThread / WaitForMultipleObjects / Interlocked* 都可直接使用。 */
+#include <winpr/windows.h>
+#include <winpr/synch.h>
+#include <winpr/thread.h>
+#include <winpr/interlocked.h>
+#include <strings.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#define RDPJ_EXPORT __declspec(dllexport)
+#else
+#define RDPJ_EXPORT __attribute__((visibility("default")))
+#define _snprintf snprintf
+#define _strnicmp strncasecmp
+#ifndef ZeroMemory
+#define ZeroMemory(ptr, len) memset((ptr), 0, (len))
+#endif
+#endif
 
 /* windows.h 会连带引入 shellapi.h，把 NIIF_* 定义成宏；
  * 而 freerdp/rail.h 用同名枚举成员，两者在一个编译单元里冲突，
@@ -101,6 +122,7 @@ typedef struct RdpjContext {
 /* FreeRDP 客户端自身不初始化 Winsock（桌面客户端 wf_client.c 是自己调 WSAStartup），
  * 由 JVM 承载时必须由我们把 Winsock 拉起来，否则 getaddrinfo 连字面 IP 都会失败。
  * 进程级只需一次，之后不做 WSACleanup（DLL 卸载不影响 JVM 其它网络栈）。 */
+#ifdef _WIN32
 static volatile LONG g_wsaReady = 0;
 
 static void rdpj_wsa_init(void) {
@@ -112,6 +134,11 @@ static void rdpj_wsa_init(void) {
         InterlockedExchange(&g_wsaReady, 0);
     }
 }
+#else
+/* POSIX 由 libc 直接提供 socket/DNS，无需进程级初始化。 */
+static void rdpj_wsa_init(void) {
+}
+#endif
 
 static void rdpj_set_error(RdpjHandle* h, const char* text) {
     if (h == NULL || text == NULL) {
@@ -543,7 +570,7 @@ static void rdpj_entry_points(RDP_CLIENT_ENTRY_POINTS* entry) {
     entry->ClientStop = rdpj_client_stop;
 }
 
-__declspec(dllexport) void* rdpj_create(void) {
+RDPJ_EXPORT void* rdpj_create(void) {
     RdpjHandle* h = (RdpjHandle*) calloc(1, sizeof(RdpjHandle));
     RDP_CLIENT_ENTRY_POINTS entry = { 0 };
     RdpjContext* mc = NULL;
@@ -574,7 +601,7 @@ __declspec(dllexport) void* rdpj_create(void) {
     return h;
 }
 
-__declspec(dllexport) int rdpj_connect(void* handle, const char* host, int port,
+RDPJ_EXPORT int rdpj_connect(void* handle, const char* host, int port,
                                       const char* user, const char* password, const char* locale) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL || host == NULL || host[0] == '\0' || port <= 0 || port > 65535) {
@@ -608,7 +635,7 @@ __declspec(dllexport) int rdpj_connect(void* handle, const char* host, int port,
     return RDPJ_OK;
 }
 
-__declspec(dllexport) int rdpj_state(void* handle) {
+RDPJ_EXPORT int rdpj_state(void* handle) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return -2;
@@ -616,7 +643,7 @@ __declspec(dllexport) int rdpj_state(void* handle) {
     return (int) InterlockedCompareExchange(&h->state, 0, 0);
 }
 
-__declspec(dllexport) const char* rdpj_last_error(void* handle) {
+RDPJ_EXPORT const char* rdpj_last_error(void* handle) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return "RDP 句柄为空";
@@ -624,7 +651,7 @@ __declspec(dllexport) const char* rdpj_last_error(void* handle) {
     return h->error;
 }
 
-__declspec(dllexport) void* rdpj_last_frame(void* handle) {
+RDPJ_EXPORT void* rdpj_last_frame(void* handle) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL || InterlockedCompareExchange(&h->state, 1, 1) != 1) {
         return NULL;
@@ -635,7 +662,7 @@ __declspec(dllexport) void* rdpj_last_frame(void* handle) {
     return h->header;
 }
 
-__declspec(dllexport) int rdpj_frame(void* handle, void* buffer, int size, int* outLen) {
+RDPJ_EXPORT int rdpj_frame(void* handle, void* buffer, int size, int* outLen) {
     RdpjHandle* h = (RdpjHandle*) handle;
     int top;
     int bottom;
@@ -683,7 +710,7 @@ __declspec(dllexport) int rdpj_frame(void* handle, void* buffer, int size, int* 
     return bytes;
 }
 
-__declspec(dllexport) int rdpj_mouse(void* handle, int x, int y, int button, int down) {
+RDPJ_EXPORT int rdpj_mouse(void* handle, int x, int y, int button, int down) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return RDPJ_ERR_PARAM;
@@ -692,7 +719,7 @@ __declspec(dllexport) int rdpj_mouse(void* handle, int x, int y, int button, int
     return 0;
 }
 
-__declspec(dllexport) int rdpj_key(void* handle, short code, int down) {
+RDPJ_EXPORT int rdpj_key(void* handle, short code, int down) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return RDPJ_ERR_PARAM;
@@ -701,7 +728,7 @@ __declspec(dllexport) int rdpj_key(void* handle, short code, int down) {
     return 0;
 }
 
-__declspec(dllexport) int rdpj_wheel(void* handle, int x, int y, int delta) {
+RDPJ_EXPORT int rdpj_wheel(void* handle, int x, int y, int delta) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return RDPJ_ERR_PARAM;
@@ -710,7 +737,7 @@ __declspec(dllexport) int rdpj_wheel(void* handle, int x, int y, int delta) {
     return 0;
 }
 
-__declspec(dllexport) int rdpj_resize(void* handle, int width, int height) {
+RDPJ_EXPORT int rdpj_resize(void* handle, int width, int height) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL || width <= 0 || height <= 0) {
         return RDPJ_ERR_PARAM;
@@ -721,7 +748,7 @@ __declspec(dllexport) int rdpj_resize(void* handle, int width, int height) {
     return 0;
 }
 
-__declspec(dllexport) void rdpj_close(void* handle) {
+RDPJ_EXPORT void rdpj_close(void* handle) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return;
@@ -736,7 +763,7 @@ __declspec(dllexport) void rdpj_close(void* handle) {
     InterlockedExchange(&h->state, 2);
 }
 
-__declspec(dllexport) void rdpj_destroy(void* handle) {
+RDPJ_EXPORT void rdpj_destroy(void* handle) {
     RdpjHandle* h = (RdpjHandle*) handle;
     if (h == NULL) {
         return;

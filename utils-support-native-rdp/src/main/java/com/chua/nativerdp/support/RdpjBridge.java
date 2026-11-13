@@ -56,19 +56,25 @@ public final class RdpjBridge {
     public static final String DIR_ENV = "CHUA_RDPJ_DIR";
 
     /**
-     * 桥接库文件名
+     * 当前平台资源目录：Windows 沿用 JNA 的 win32-x86-64，Unix 用 linux-/darwin- + 架构。
      */
-    private static final String LIBRARY_NAME = "rdpj.dll";
+    private static final String PLATFORM_DIR = resolvePlatformDir();
 
     /**
-     * 资源清单文件名（逐行列出 DLL 文件名）
+     * 桥接库文件名
+     */
+    private static final String LIBRARY_NAME = Platform.isWindows()
+            ? "rdpj.dll" : (Platform.isMac() ? "librdpj.dylib" : "librdpj.so");
+
+    /**
+     * 资源清单文件名（逐行列出需要解包的文件名）
      */
     private static final String INDEX_NAME = "rdpj.index";
 
     /**
      * 资源根目录
      */
-    private static final String RESOURCE_ROOT = "/native/rdpj/win32-x86-64/";
+    private static final String RESOURCE_ROOT = "/native/rdpj/" + PLATFORM_DIR + "/";
 
     /**
      * 单例（延迟初始化）
@@ -81,6 +87,18 @@ public final class RdpjBridge {
     private static volatile String loadError;
 
     private RdpjBridge() {
+    }
+
+    /**
+     * 解析当前平台的 native 资源目录。
+     *
+     * @return 目录名，如 win32-x86-64 / linux-x86_64 / darwin-aarch64
+     */
+    private static String resolvePlatformDir() {
+        if (Platform.isWindows()) {
+            return "win32-x86-64";
+        }
+        return (Platform.isMac() ? "darwin-" : "linux-") + Platform.ARCH;
     }
 
     /**
@@ -139,17 +157,15 @@ public final class RdpjBridge {
      * @throws IOException 原生库缺失或解包失败
      */
     private static Rdpj load() throws IOException {
-        if (!Platform.isWindows()) {
-            throw new IOException("随包仅提供 Windows x86_64 的 " + LIBRARY_NAME
-                    + "（当前平台 " + Platform.RESOURCE_PREFIX + "）");
-        }
         File dir = resolveDir();
         File library = new File(dir, LIBRARY_NAME);
         if (!library.isFile()) {
             throw new IOException("未找到 " + library.getAbsolutePath());
         }
-        // 把原生库目录加入 DLL 搜索路径，供 FreeRDP 依赖解析
-        Kernel32.INSTANCE.SetDllDirectoryW(new WString(dir.getAbsolutePath()));
+        if (Platform.isWindows()) {
+            // 把原生库目录加入 DLL 搜索路径，供 FreeRDP 依赖解析
+            Kernel32.INSTANCE.SetDllDirectoryW(new WString(dir.getAbsolutePath()));
+        }
         Map<String, Object> options = new HashMap<>(4);
         options.put(Library.OPTION_STRING_ENCODING, "UTF-8");
         options.put(Library.OPTION_ALLOW_OBJECTS, Boolean.TRUE);
@@ -185,7 +201,7 @@ public final class RdpjBridge {
      */
     private static File extractResources() throws IOException {
         File base = new File(System.getProperty("java.io.tmpdir"), "chua-rdpj");
-        File dir = new File(base, "win32-x86-64");
+        File dir = new File(base, PLATFORM_DIR);
         List<String> names = readIndex();
         if (names.isEmpty()) {
             throw new IOException("缺少原生库资源清单 " + RESOURCE_ROOT + INDEX_NAME);
@@ -223,6 +239,7 @@ public final class RdpjBridge {
             if (in == null) {
                 return names;
             }
+            // [P3C A20 豁免]
             byte[] buffer = new byte[8192];
             StringBuilder text = new StringBuilder();
             int read;

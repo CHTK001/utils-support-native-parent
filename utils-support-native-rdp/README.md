@@ -45,19 +45,21 @@ utils-support-native-rdp/
 
 需要 **FreeRDP 3.x 开发包**（`freerdp/freerdp.h` + `libfreerdp3.so/.lib/.dylib` + `winpr`）。
 
-### Windows（当前唯一产出）
+### Windows
 
 产物 `rdpj.dll` 的完整构建步骤（MSYS2 mingw64 + FreeRDP 3.32.1 静态编译）见
 `src/main/c/rdpj/README-win32.md`。要点是 `-D__STDC_NO_THREADS__=1`、`-DFREERDP_EXPORTS`、
 静态链接 FreeRDP/WinPR/OpenSSL/zlib，最终只依赖 Windows 系统 DLL。
 
-### Linux / macOS（未产出）
+### Linux / macOS
 
-`build.sh` 会尝试 pkg-config 探测或从源码拉取 FreeRDP 3.3.0 编译到 `/tmp/freerdp-sdk`，
-输出 `src/main/resources/native/linux-x86_64/librdpj.so` / `darwin-*/librdpj.dylib`。
-**这两条路径目前没有可用的 C 实现**：`rdpj.c` 的导出符号（`rdpj_status` / `rdpj_errno`）
-与 Windows 版不同，且 `RdpjBridge` 只解包 `win32-x86-64`，非 Windows 平台会直接给出
-“随包仅提供 Windows x86_64”的加载失败原因。
+`build.sh` 使用 `rdpj-win32.c`（WinPR 兼容层让同一份源码在 POSIX 上编译），
+通过 pkg-config 探测 FreeRDP 3.x，输出
+`src/main/resources/native/linux-x86_64/librdpj.so` /
+`darwin-*/librdpj.dylib`。CI：`.github/workflows/native-rdp.yml`。
+
+Linux 依赖 `freerdp3-dev`，macOS 依赖 `brew install freerdp`；产物默认动态链接
+FreeRDP，部署机需具备对应的 `libfreerdp3` / `libfreerdp-client3` / `libwinpr3`。
 
 ### 清理
 
@@ -78,11 +80,12 @@ Java 侧通过 `/ws/ms/server/terminal/rdp` 创建 WebSocket 连接后交互。
 
 ## 当前状态
 
-- 已产出：Windows x86_64 的 `rdpj.dll`（静态链接 FreeRDP 3.32.1），随本模块 jar 分发。
-- 已实现：C 源码（`rdpj-win32.c`）、JNA 桥接（`RdpjBridge`）、后端 WebSocket 处理器
-  （`RdpDirectWebSocketHandler` 逐帧推送 + 键鼠回传 + 连接清理）+ 直连页
-  `/ms/server/remote/rdp-direct.html`。
-- 未完成：Linux / macOS 原生库；`rdpj.h` 仍是跨平台旧 ABI，与 `rdpj.dll` 不一致。
+- 已产出：Windows x86_64 的 `rdpj.dll`（静态链接 FreeRDP 3.32.1），随本模块 jar 分发；
+  Linux x86_64 / macOS aarch64 由 GitHub Actions 构建 `librdpj.so` / `librdpj.dylib`。
+- 已实现：C 源码（`rdpj-win32.c`，Windows/POSIX 共用）、JNA 桥接（`RdpjBridge`）、
+  后端 WebSocket 处理器（`RdpDirectWebSocketHandler` 逐帧推送 + 键鼠回传 + 连接清理）
+  + 直连页 `/ms/server/remote/rdp-direct.html`。
+- macOS x86_64 暂无托管 Intel runner，CI 只做源码构建检查，未产出 dylib。
 
 ## 占位错误约定
 

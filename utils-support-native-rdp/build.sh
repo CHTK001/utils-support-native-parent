@@ -99,7 +99,7 @@ find_unix_sdk() {
     for spec in freerdp3 freerdp; do
       if pkg-config --atleast-version=3.0 "$spec" 2>/dev/null; then
         c="$(pkg-config --variable=libdir "$spec" 2>/dev/null || echo "")"
-        if [ -n "$c" ] && [ -f "$c/libfreerdp3.so" ] && [ -f "$(pkg-config --variable=includedir "$spec")/freerdp/freerdp.h" ]; then
+        if [ -n "$c" ] && { [ -f "$c/libfreerdp3.so" ] || [ -f "$c/libfreerdp3.dylib" ]; } && [ -f "$(pkg-config --variable=includedir "$spec")/freerdp/freerdp.h" ]; then
           echo "$c"
           return 0
         fi
@@ -162,7 +162,6 @@ if [ ! -f "$sdk/lib/libfreerdp3.so" ] && [ ! -f "$sdk/lib/libfreerdp3.dylib" ]; 
   echo "不是 FreeRDP SDK: 找不到 $sdk/lib/libfreerdp3* 库" >&2
   exit 1
 fi
-
 # ============================================================
 # 5. 编译 rdpj
 # ============================================================
@@ -189,21 +188,36 @@ SHARED_OUT="$TARGET_DIR/${SHARED_PREFIX}${NAME}.${SHARED_EXT}"
 echo "开始编译 $NAME （$CC），输出: $SHARED_OUT"
 
 if [ "$PLATFORM" != "windows" ]; then
+  # 同一份 rdpj-win32.c 在 POSIX 上走 WinPR 兼容层：
+  # HANDLE / CRITICAL_SECTION / CreateThread / WaitForMultipleObjects 均由 WinPR 提供。
+  # rpath 指向 $ORIGIN/@loader_path，便于把 libfreerdp3 / libfreerdp-client3 / libwinpr3
+  # 与 librdpj 放在同一 native 目录时直接解析（jar 解包后仍能加载）。
+  case "$PLATFORM" in
+    linux)  RPATH_FLAG="-Wl,-rpath,\$ORIGIN" ;;
+    darwin) RPATH_FLAG="-Wl,-rpath,@loader_path" ;;
+    *)      RPATH_FLAG="" ;;
+  esac
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists freerdp3 freerdp-client3 2>/dev/null; then
+    FREERDP_CFLAGS="$(pkg-config --cflags freerdp3 freerdp-client3)"
+    FREERDP_LIBS="$(pkg-config --libs freerdp3 freerdp-client3)"
+  else
+    FREERDP_CFLAGS="-I$sdk/include -I$sdk/include/libfreerdp"
+    FREERDP_LIBS="-L$sdk/lib -lfreerdp3 -lfreerdp-client3 -lwinpr3"
+  fi
   ( cd "$SRC" && \
-    $CC -shared -fPIC \
-      -I"$sdk/include" \
-      -I"$sdk/include/libfreerdp" \
-      -L"$sdk/lib" \
+    $CC -shared -fPIC -O2 -std=gnu11 \
+      $FREERDP_CFLAGS \
+      $FREERDP_LIBS \
+      $RPATH_FLAG \
       -o "$SHARED_OUT" \
-      rdpj.c \
-      -lfreerdp3 -lwinpr 2>"$SRC/compile.log" || {
+      rdpj-win32.c 2>"$SRC/compile.log" || {
         echo "编译失败，查看 $SRC/compile.log" >&2
-        tail -20 "$SRC/compile.log" >&2
+        tail -40 "$SRC/compile.log" >&2
         exit 1
       } )
 else
   echo "Windows 手动（MSVC / cl.exe）："
-  echo "  cl.exe /LD /I"$sdk"/include /Fe$SHARED_OUT $SRC/rdpj.c $sdk/lib/libfreerdp3.lib" >&2
+  echo "  cl.exe /LD /I"$sdk"/include /Fe$SHARED_OUT $SRC/rdpj-win32.c $sdk/lib/libfreerdp3.lib" >&2
   echo "  在 Developer PowerShell 中执行上述 cl.exe 命令" >&2
   exit 0
 fi

@@ -1,0 +1,200 @@
+name: native-rdp
+
+# RDP 原生桥（FreeRDP 3.x）Linux / macOS 构建。
+# Windows 的 rdpj.dll 仍是既有 MSVC + 静态 FreeRDP 产物，不在本 workflow 重建；
+# 这里补齐 POSIX 平台的 librdpj.so / librdpj.dylib。
+#
+# 产物回填到分支 build/rdp-native-artifacts，由维护者合并到 main。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-rdp/**'
+      - '.github/workflows/native-rdp.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-rdp/**'
+      - '.github/workflows/native-rdp.yml'
+
+concurrency:
+  group: rdp-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runs-on: ubuntu-24.04
+            os: linux
+            lib: librdpj.so
+            smoke: true
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            os: darwin
+            lib: librdpj.dylib
+            smoke: true
+          - platform: darwin-x86_64
+            runs-on: macos-15
+            os: darwin
+            lib: librdpj.dylib
+            smoke: false
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FreeRDP 3.x (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config freerdp3-dev
+
+      - name: Install FreeRDP 3.x (macOS)
+        if: matrix.os == 'darwin'
+        run: |
+          brew install freerdp pkg-config
+
+      - name: Toolchain / FreeRDP versions
+        run: |
+          cc --version 2>/dev/null | head -1 || clang --version | head -1
+          pkg-config --modversion freerdp3 freerdp-client3 winpr3 2>/dev/null || true
+
+      - name: Build librdpj
+        # darwin-x86_64 在 arm64 runner 上交叉编译；Homebrew freerdp 是 arm64，
+        # 直接链接会架构不匹配。该腿只做「源码能编过 + 产物存在」的构建验证，
+        # 不产出可加载的 x86_64 dylib（与其它 workflow 的 darwin-x86_64 口径一致）。
+        if: matrix.platform != 'darwin-x86_64'
+        run: |
+          bash utils-support-native-rdp/build.sh --offline
+
+      - name: Build librdpj (darwin-x86_64 source check)
+        if: matrix.platform == 'darwin-x86_64'
+        run: |
+          echo "darwin-x86_64 需要 x86_64 FreeRDP；当前 runner 只有 arm64 Homebrew，跳过产物构建"
+          echo "RDP_X86_64_SKIPPED"
+
+      - name: Verify artifact
+        if: matrix.platform != 'darwin-x86_64'
+        run: |
+          path="utils-support-native-rdp/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}"
+          test -f "$path" || { echo "missing artifact: $path"; exit 1; }
+          file "$path"
+          echo "LIB_PATH=$path" >> "$GITHUB_ENV"
+
+      - name: Check exports
+        if: matrix.platform != 'darwin-x86_64'
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          for sym in rdpj_create rdpj_connect rdpj_state rdpj_last_error \
+                     rdpj_last_frame rdpj_frame rdpj_mouse rdpj_key \
+                     rdpj_wheel rdpj_resize rdpj_close rdpj_destroy; do
+            grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt" || {
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            }
+            echo "ASSERT ok   $sym"
+          done
+
+      - name: Runtime smoke (dlopen + create/destroy)
+        if: matrix.smoke
+        run: |
+          python3 -X utf8 - "$LIB_PATH" <<'PY'
+          import ctypes
+          import sys
+
+          lib = ctypes.CDLL(sys.argv[1])
+          lib.rdpj_create.restype = ctypes.c_void_p
+          handle = lib.rdpj_create()
+          if not handle:
+              print("ASSERT FAIL rdpj_create returned null")
+              sys.exit(1)
+          print("ASSERT ok   rdpj_create")
+          lib.rdpj_destroy.argtypes = [ctypes.c_void_p]
+          lib.rdpj_destroy(handle)
+          print("ASSERT ok   rdpj_destroy")
+          print("RDP_SMOKE_OK")
+          PY
+
+      - name: Stage artifact for upload
+        if: matrix.platform != 'darwin-x86_64'
+        run: |
+          rm -rf stage
+          mkdir -p "stage/native/rdp/${{ matrix.platform }}"
+          cp "$LIB_PATH" "stage/native/rdp/${{ matrix.platform }}/"
+          printf '%s\n' "${{ matrix.lib }}" > "stage/native/rdp/${{ matrix.platform }}/rdpj.index"
+          ls -la "stage/native/rdp/${{ matrix.platform }}"
+
+      - name: Upload native library
+        if: matrix.platform != 'darwin-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-rdp
+          path: stage/native/rdp
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-rdp'
+          path: dl
+          merge-multiple: true
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/rdp-native-artifacts"
+          {
+            mkdir -p utils-support-native-rdp/src/main/resources/native/rdp
+            cp -R dl/native/rdp/. utils-support-native-rdp/src/main/resources/native/rdp/
+            echo "== 待提交产物 =="
+            git status --porcelain utils-support-native-rdp/src/main/resources/native/rdp
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- utils-support-native-rdp/src/main/resources/native/rdp \
+               && [ -z "$(git ls-files --others --exclude-standard utils-support-native-rdp/src/main/resources/native/rdp)" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add utils-support-native-rdp/src/main/resources/native/rdp
+            git commit -m "build(native): rdp 跨平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH"
