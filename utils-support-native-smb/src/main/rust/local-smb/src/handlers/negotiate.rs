@@ -100,25 +100,18 @@ pub async fn handle(
         };
 
         // ENCRYPTION_CAPABILITIES — smbj 0.14 only recognises types 0x0001..0x0005.
-        // We previously advertised SIGNING (0x0008) which smbj rejected with NPE.
-        let encryption_caps = EncryptionCapabilities {
-            cipher_count: 1,
-            ciphers: vec![EncryptionCapabilities::CIPHER_AES_128_GCM],
-        };
-        let encryption_data = {
-            use binrw::BinWrite;
-            let mut c = std::io::Cursor::new(Vec::new());
-            BinWrite::write(&encryption_caps, &mut c).expect("encryption negotiate context encodes");
-            c.into_inner()
-        };
-        let encryption_ctx = NegotiateContext {
-            context_type: NegotiateContext::TYPE_ENCRYPTION,
-            data_length: encryption_data.len() as u16,
-            reserved: 0,
-            data: encryption_data,
-        };
+        // We previously advertised SIGNING (0x0008) which smbj rejected with NPE;
+        // then AES-128-GCM which smbj accepts and starts encrypting — but this
+        // server does NOT implement SMB2_TRANSFORM_HEADER request decryption, so
+        // every in-session request arrives as `FD SMB` encrypted frame and the
+        // dispatcher drops it (no response -> client timeout).
+        //
+        // 2026-11-13 修复：不支持加密就不发 ENCRYPTION context（smbj 0.14 对
+        // 空 cipher 列表会抛 "does not contain exactly 1 cipher"，所以不能发
+        // count=0 的 context，只能整个省略）。smbj 未见到该 context 时
+        // cipherId=null -> supportsEncryption()=false -> 仅用签名。
 
-        let ctxs = vec![preauth_ctx, encryption_ctx];
+        let ctxs = vec![preauth_ctx];
         if let Err(e) = NegotiateContext::encode_list(&ctxs, &mut contexts_bytes) {
             tracing::error!(error = %e, "encode_list failed");
             return HandlerResponse::err(ntstatus::STATUS_INVALID_PARAMETER);
