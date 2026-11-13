@@ -175,7 +175,9 @@ jobs:
           BRANCH="build/rdp-native-artifacts"
           {
             mkdir -p utils-support-native-rdp/src/main/resources/native/rdp
-            cp -R dl/native/rdp/. utils-support-native-rdp/src/main/resources/native/rdp/
+            # 上传时 path=stage/native/rdp，artifact 根就是 <platform>/...，
+            # 因此直接拷 dl/. 到 native/rdp/，不要再拼一层 native/rdp。
+            cp -R dl/. utils-support-native-rdp/src/main/resources/native/rdp/
             echo "== 待提交产物 =="
             git status --porcelain utils-support-native-rdp/src/main/resources/native/rdp
             git config user.name "github-actions[bot]"
