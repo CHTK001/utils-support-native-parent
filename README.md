@@ -153,6 +153,15 @@ mvn clean install
 | Linux x86_64 | `linux-x86_64` | `build-linux.sh` | [BUILD-LINUX.md](BUILD-LINUX.md) |
 | macOS (osxcross) | `darwin-aarch64` / `darwin-x86_64` | `build-macos.sh` | [BUILD-MACOS.md](BUILD-MACOS.md) |
 
+### 非 Java 源码
+
+`utils-support-parent-starter` 原则上保持纯 Java；`safetensors-starter` 的 `python_service/` 因是模块核心能力保留在原位。其它语言的服务源码放在本仓 `tools/python/`：
+
+| 目录 | 来源 | 说明 |
+|------|------|------|
+| `tools/python/mage/` | 原 mage-starter `scripts/server.py` | Mage 自部署推理服务 |
+| `tools/python/legacy/` | 原 openai-starter `fix_probe.py` | 历史补丁脚本，仅留档 |
+
 macOS 示例（需 Linux 主机 + osxcross）：
 
 ```bash
