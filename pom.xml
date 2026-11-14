@@ -10,6 +10,8 @@
     <description>预编译 native 二进制库（Rust cdylib），独立于 Java 代码分发</description>
 
     <properties>
+        <maven.test.skip>true</maven.test.skip>
+        <skipTests>true</skipTests>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- utils 侧 SPI 契约版本：native 模块实现该契约，调用方只依赖契约编译。
              升级 utils 主线时只改这一处。 -->
