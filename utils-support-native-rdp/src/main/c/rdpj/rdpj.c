@@ -1,4 +1,4 @@
-﻿/**
+/**
  * rdpj — RDP Java Bridge (FreeRDP 3.x) 实现
  *
  * 把 FreeRDP 图形客户端简化为一个"无窗口帧发生器"：
