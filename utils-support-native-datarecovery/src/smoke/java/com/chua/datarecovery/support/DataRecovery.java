@@ -71,8 +71,12 @@ public class DataRecovery {
         if (carved != null) {
             for (File f : carved) {
                 String p = f.toString().toLowerCase();
-                if (p.endsWith(".png")) foundPng++;
-                if (p.endsWith(".jpg")) foundJpg++;
+                if (p.endsWith(".png")) {
+                    foundPng++;
+                }
+                if (p.endsWith(".jpg")) {
+                    foundJpg++;
+                }
             }
         }
         // [P3C E1 豁免]

@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -74,6 +75,11 @@ public final class RustFileSearchBridge {
      * 加载锁
      */
     private static final Object LOCK = new Object();
+
+    /**
+     * glob -> 正则 编译缓存：同一 glob 模式反复搜索时避免重复 Pattern.compile [P3C]
+     */
+    private static final Map<String, Pattern> GLOB_PATTERN_CACHE = new ConcurrentHashMap<>();
 
     /**
      * 按名称搜索（返回 JSON）的句柄
@@ -508,6 +514,17 @@ public final class RustFileSearchBridge {
      * @return 正则
      */
     private static Pattern globToPattern(String glob) {
+        // [P3C] 同一 glob 模式只编译一次，避免每次搜索都重复 Pattern.compile
+        return GLOB_PATTERN_CACHE.computeIfAbsent(glob, RustFileSearchBridge::compileGlobToRegex);
+    }
+
+    /**
+     * 把 glob 模式转换为正则字符串并编译。
+     *
+     * @param glob glob 模式
+     * @return 正则
+     */
+    private static Pattern compileGlobToRegex(String glob) {
         StringBuilder sb = new StringBuilder("^");
         for (char c : glob.toCharArray()) {
             switch (c) {
