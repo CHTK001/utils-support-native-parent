@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.chua</groupId>
         <artifactId>utils-support-core-parent</artifactId>
-        <version>4.0.0.42</version>
+        <version>4.0.0.50</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>utils-support-common-starter</artifactId>
@@ -16,14 +16,6 @@
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-    <repositories>
-        <repository>
-            <id>local-vector-api</id>
-            <url>file://${user.home}/.m2/repository</url>
-            <releases><enabled>true</enabled></releases>
-            <snapshots><enabled>false</enabled></snapshots>
-        </repository>
-    </repositories>
     <build>
         <plugins>
             <plugin>
@@ -55,6 +47,13 @@
                         <arg>--enable-preview</arg>
                         <arg>-proc:full</arg>
                         <arg>-parameters</arg>
+                        <!--
+                          向量 API 由 JDK 自带的 jdk.incubator.vector 模块提供（VectorMath 唯一引用点），
+                          不再依赖外部 com.chua.jdk:vector-api 制品（该制品只存在于个别机器的本地仓库，
+                          不是可发布依赖）。本模块的 compilerArgs 覆盖了父 POM pluginManagement 的同名列表，
+                          故此处必须显式再声明一次。
+                        -->
+                        <arg>--add-modules=jdk.incubator.vector</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
@@ -69,12 +68,6 @@
     </build>
     <dependencies>
         <dependency>
-            <groupId>com.chua.jdk</groupId>
-            <artifactId>vector-api</artifactId>
-            <version>4.0.0.42</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version>
@@ -87,6 +80,18 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
+        </dependency>
+        <!--
+            Eclipse Collections：collection.wrap 包的默认集合后端（降低内存）。
+            作为普通依赖引入，保证默认可解析；若下游显式排除，后端 SPI 会自动回退 JDK 实现。
+        -->
+        <dependency>
+            <groupId>org.eclipse.collections</groupId>
+            <artifactId>eclipse-collections-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.collections</groupId>
+            <artifactId>eclipse-collections</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

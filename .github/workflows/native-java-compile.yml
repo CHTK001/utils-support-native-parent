@@ -36,6 +36,12 @@ name: native-java-compile
 #   **同一 GAV 坐标，两份不同字节。** 本机验证用的是本地那份，CI 解析到的
 #   是远端那份，CI 全绿也不能证明本机验证的结论。
 #
+# **2026-11-24 更新**：上面的 42 对比已成历史。现在 CI 不再从远端解析
+# `common-starter` —— `src/ci-fixture/` 提供**与根 pom `<utils.version>`
+# 同版本**的夹具（依赖 jar + 自身 pom + 父链两个 pom，取自本机构建的那份
+# 字节），版本号在运行时从根 pom 派生，不再硬编码。升级 utils.version 时
+# 必须同步刷新 ci-fixture，否则夹具步会直接报错拦截（见下方 install 步）。
+#
 # 因此编译步骤对失败做**分类**：全是依赖解析失败 -> warning + 摘要声明
 # 「Java 侧无法验证」且不把 job 弄红；出现任何其他失败（编译错误等）
 # -> job 变红。让环境阻塞长期挂红灯，只会让人学会忽略红灯。
@@ -173,22 +179,37 @@ jobs:
         # 4.0.0.42（与本机字节不同），影响所有解析该坐标的人，且不可逆 ——
         # 需要单独的决策，不该由 CI 改动顺手做掉。夹具方案效果相同、
         # 零外部影响、可逆（删一个目录即可）。
+        #
+        # **2026-11-24 修复连续红灯**：夹具曾固定在 4.0.0.42，而根 pom 的
+        # utils.version 已升到 4.0.0.50，16 个模块全部解析
+        # common-starter:4.0.0.50 失败（aliyun 403 / github-resource 401 /
+        # central 无此坐标），本 workflow 自 2026-11-13 起每次必红。
+        # 现夹具版本改由 utils.version 推导，夹具文件同步刷新为 4.0.0.50。
         run: |
           set -euo pipefail
+          # 夹具版本跟随根 pom 的 <utils.version>。升级 utils.version 时
+          # **必须同步刷新 src/ci-fixture/**（换成本机新构建的 jar+pom，
+          # 文件名带同一版本号）；缺文件时此处直接拦截，不带病进编译步。
+          UTILS_VER=$(sed -n 's/.*<utils\.version>\([^<]*\)<\/utils\.version>.*/\1/p' pom.xml | head -n1)
+          [ -n "$UTILS_VER" ] || { echo "::error title=无法从根 pom 解析 utils.version::"; exit 1; }
+          echo "夹具版本（utils.version）= $UTILS_VER"
           FX=utils-support-native-sysinformer/src/ci-fixture
-          GAV=utils-support-common-starter-4.0.0.42
-          for f in "$GAV.jar" "$GAV.pom"; do
-            [ -f "$FX/$f" ] || { echo "缺少夹具 $FX/$f"; exit 1; }
+          GAV=utils-support-common-starter-$UTILS_VER
+          for f in "$GAV.jar" "$GAV.pom" \
+                   "utils-support-core-parent-$UTILS_VER.pom" \
+                   "utils-support-parent-starter-$UTILS_VER.pom"; do
+            [ -f "$FX/$f" ] || { echo "::error title=ci-fixture 与 utils.version 不一致::缺少 $FX/$f —— 请用本机新构建的构件刷新 ci-fixture"; exit 1; }
             echo "  夹具 $f  $(wc -c < "$FX/$f") 字节  md5=$(md5sum "$FX/$f" | cut -d' ' -f1)"
           done
-          REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42"
+          REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/$UTILS_VER"
           [ -d "$REP" ] && rm -rf "$REP"
 
           # ---- 装入全部夹具：依赖 jar + **父链 pom** ------------------
           #
           # 为什么要父链：`common-starter` 的 parent 是
-          # `utils-support-core-parent`，再上是 `utils-support-parent-starter`。
-          # 只装依赖本身时，Maven 仍要去远端解析这两个父 pom，
+          # `utils-support-core-parent`，再上是 `utils-support-parent-starter`
+          # （三个构件随 utils.version 同版本演进）。只装依赖本身时，
+          # Maven 仍要去远端解析这两个父 pom，
           # 于是又撞上 aliyun 的 403，报 `core-parent:pom ... (absent)`。
           #
           # **纯 pom 构件必须同时给 `-Dfile`**。2026-10-03 踩过：
@@ -197,7 +218,7 @@ jobs:
           # 表现出来就是「构件明明装了却说 absent」这种极难定位的现象。
           install_fixture() {
             local art="$1" jar="$2"
-            local pom="$FX/$art-4.0.0.42.pom"
+            local pom="$FX/$art-$UTILS_VER.pom"
             [ -f "$pom" ] || { echo "::error title=缺少夹具 pom::$pom"; exit 1; }
             if [ -f "$jar" ]; then
               mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.1:install-file \
@@ -213,11 +234,12 @@ jobs:
           install_fixture utils-support-core-parent ""
           install_fixture utils-support-parent-starter ""
 
+          # 校验装入的 jar 与提交的夹具字节一致（防止被远端解析结果覆盖）。
           GOT=$(wc -c < "$REP/$GAV.jar")
           echo "  安装后 jar 大小 = $GOT"
-          [ "$GOT" = "4558874" ] || {
-            echo "::error title=装入的夹具不是预期那份::实际 $GOT 字节，期望 4558874"; exit 1; }
-          echo "FIXTURE_INSTALLED"
+          [ "$GOT" = "$(wc -c < "$FX/$GAV.jar")" ] || {
+            echo "::error title=装入的夹具与提交的夹具不一致::装入 $GOT 字节 / 提交 $(wc -c < "$FX/$GAV.jar") 字节"; exit 1; }
+          echo "FIXTURE_INSTALLED version=$UTILS_VER"
 
       - name: Java 侧编译（native-parent 全反应堆）
         if: steps.creds.outputs.have == 'yes'
@@ -261,6 +283,17 @@ jobs:
           # 不是凭想象列的 —— 第二版就是因为漏了 `[Help 1]`（无 `->` 前缀）
           # 与 `mvn <args> -rf` 而再次误判。用合成日志测不出这类缺口，
           # 因为合成日志里根本没有这些行。
+          #
+          # **2026-11-24 第三次误判（连续红灯的另一半根因）**：失败时 Maven
+          # 还会打**反应堆摘要**，同样以 [ERROR] 开头（run 日志原文）：
+          #   [ERROR] utils-support-native-ffmpeg ........ FAILURE [  3.637 s]
+          #   [ERROR] BUILD FAILURE
+          # 这两行也不是实质错误 —— 实质错误是紧随其后的三行：
+          #   [ERROR] Failed to execute goal ...: Could not collect dependencies ...
+          #   [ERROR] Failed to read artifact descriptor for com.chua:...
+          #   [ERROR] 	Caused by: The following artifacts could not be resolved: ...
+          # 漏剔它们则 ERR 恒比 DEPR 多 2，「全是依赖问题」照样判成 FAIL。
+          # 本段清单同样取自真实失败日志，非凭空想象。
           grep '^\[ERROR\]' /tmp/mvn.log \
             | grep -vE '^\[ERROR\][[:space:]]*$' \
             | grep -vE '\[Help [0-9]+\]' \
@@ -269,6 +302,8 @@ jobs:
             | grep -vE 'For more information about the errors' \
             | grep -vE 'After correcting the problems' \
             | grep -vE 'mvn <args> -rf' \
+            | grep -vE '^\[ERROR\] BUILD (FAILURE|SUCCESS)' \
+            | grep -vE '\.{4,} FAILURE' \
             > /tmp/err-real.txt || true
           ERR=$(wc -l < /tmp/err-real.txt | tr -d ' ')
           DEPR=$(grep -cE 'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable|Could not collect dependencies|DependencyResolutionException' /tmp/err-real.txt || true)
@@ -328,6 +363,8 @@ jobs:
         run: |
           set -uo pipefail
           MOD=utils-support-native-sysinformer
+          # 夹具/坐标版本与全反应堆步同源：从根 pom 派生，勿硬编码。
+          UTILS_VER=$(sed -n 's/.*<utils\.version>\([^<]*\)<\/utils\.version>.*/\1/p' pom.xml | head -n1)
           LIB=$MOD/src/main/resources/native/linux-x86_64/libsysinformer.so
           [ -f "$LIB" ] || { echo "找不到入库产物 $LIB"; exit 1; }
 
@@ -349,6 +386,8 @@ jobs:
               | grep -vE 'For more information about the errors' \
               | grep -vE 'After correcting the problems' \
               | grep -vE 'mvn <args> -rf' \
+              | grep -vE '^\[ERROR\] BUILD (FAILURE|SUCCESS)' \
+              | grep -vE '\.{4,} FAILURE' \
               > /tmp/ffmerr.txt || true
             n=$(wc -l < /tmp/ffmerr.txt | tr -d ' ')
             d=$(grep -cE 'Could not resolve|Could not transfer|absent|Failed to read artifact descriptor|Non-resolvable|Could not collect dependencies|DependencyResolutionException' /tmp/ffmerr.txt || true)
@@ -375,9 +414,9 @@ jobs:
               echo "---- /tmp/ffmmvn.log 末尾 40 行 ----"
               tail -40 /tmp/ffmmvn.log
               echo "---- 该坐标在本地仓库的现状 ----"
-              ls -l "${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42" 2>&1 || true
+              ls -l "${HOME}/.m2/repository/com/chua/utils-support-common-starter/$UTILS_VER" 2>&1 || true
               echo "---- 该坐标的 _remote.repositories 内容 ----"
-              cat "${HOME}/.m2/repository/com/chua/utils-support-common-starter/4.0.0.42/_remote.repositories" 2>&1 || true
+              cat "${HOME}/.m2/repository/com/chua/utils-support-common-starter/$UTILS_VER/_remote.repositories" 2>&1 || true
               exit 0
             fi
             echo "::error title=FfmSmoke 前置编译失败（非依赖解析问题）::"
@@ -424,13 +463,15 @@ jobs:
                 echo ""
                 echo "编译已实际执行，失败的**全部**错误都是 \`com.chua\` 构件无法从远端解析。"
                 echo "已实测："
-                echo "- \`com.chua\` 下 420 个坐标中 **386 个 jar** 的 \`_remote.repositories\`"
-                echo "  仓库 id 为空，即由本机 \`mvn install\` 装入 \`D:\\maven-repo\`，从未发布到任何远端；"
-                echo "- \`utils-support-common-starter:4.0.0.42\` 本机 jar"
-                echo "  sha1 \`8d2d6db0…\` 与远端 GitHub Packages 的 \`05fa2221…\` **不是同一份字节**。"
+                echo "- \`com.chua\` 构件从未发布到任何远端：本机 \`mvn install\` 装入"
+                echo "  \`D:\\maven-repo\`，\`_remote.repositories\` 仓库 id 为空；"
+                echo "- CI 侧由 \`src/ci-fixture/\` 提供**与根 pom utils.version 同版本**的"
+                echo "  夹具（本机构建的那份字节）。走到本分支说明夹具与 utils.version"
+                echo "  脱节了 —— 多半是升版后忘了刷新 ci-fixture，或出现了夹具未覆盖的新构件。"
                 echo ""
-                echo "因此本机验证与 CI 解析到的不是同一个东西 —— **CI 全绿也不能证明本机结论**。"
-                echo "Java 侧代码当前**未被任何自动化覆盖**。要真正关闭，需先把构件发布到远端。"
+                echo "处置：用本机新构建的 jar+pom 刷新 \`src/ci-fixture/\`（文件名带同一版本号，"
+                echo "含 \`utils-support-core-parent\` 与 \`utils-support-parent-starter\` 两个父链 pom），"
+                echo "或把构件正式发布到远端。在那之前，Java 侧编译在 CI 上**未被覆盖**。"
               else
                 echo "编译**失败**且不属于依赖解析问题，详见日志。"
               fi
@@ -440,11 +481,11 @@ jobs:
                 echo "**已执行并通过**（\`JAVA25_FFM_SMOKE_OK\`）"
                 echo "—— 未验项 #2 **关闭**：Java 25 Panama FFM 绑定从此有 CI 回归网。"
                 echo ""
-                echo "它靠仓库内的 \`src/ci-fixture/utils-support-common-starter-4.0.0.42.jar\`"
+                echo "它靠仓库内 \`src/ci-fixture/\` 下与 utils.version 同版本的夹具 jar"
                 echo "（本机构建，未发布到任何远端；远端那份缺 \`NativeLoader\` 编不过）。"
-                echo "所以**全反应堆编译**仍被同一类问题阻塞（其余模块还需要"
-                echo "别的、同样只存在于本机的 \`com.chua\` 构件），"
-                echo "但**本模块已可验证** —— 这两件事不矛盾。"
+                echo "全反应堆 15 个有 com.chua 依赖的模块也**全部且仅**依赖"
+                echo "\`utils-support-common-starter:${utils.version}\`，所以编译与冒烟同源："
+                echo "夹具在，两者都过；夹具与 utils.version 脱节，两者同拦。"
               elif grep -q 'FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS' /tmp/ffmmvn.log 2>/dev/null; then
                 echo "### Java 25 FFM 绑定端到端冒烟"
                 echo "**已纳入 CI，但因同一个环境阻塞未能执行**（依赖的 com.chua 构件远端不存在）。"
