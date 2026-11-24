@@ -34,19 +34,21 @@ jobs:
           - platform: linux-x86_64
             runs-on: ubuntu-22.04
             rid: linux-x64
-            lib_names: 'libNativeHost.so libSkiaSharp.so libHarfBuzzSharp.so'
+            # NativeAOT 动态库产物不带 lib 前缀（_UseNativeLibPrefix 未开启）：
+            # linux 输出 NativeHost.so，macOS 输出 NativeHost.dylib，Windows 输出 NativeHost.dll。
+            lib_names: 'NativeHost.so libSkiaSharp.so libHarfBuzzSharp.so'
             smoke: true
           - platform: darwin-aarch64
             runs-on: macos-15
             rid: osx-arm64
-            lib_names: 'libNativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
+            lib_names: 'NativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
             smoke: true
           - platform: darwin-x86_64
             # macos-15 是 arm64 机型，osx-x64 走交叉编译；无 x64 JVM 做冒烟，
             # 这一腿只校验产物存在、架构与导出符号（与 native-nmap 同口径）。
             runs-on: macos-15
             rid: osx-x64
-            lib_names: 'libNativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
+            lib_names: 'NativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
             smoke: false
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
@@ -81,7 +83,7 @@ jobs:
           dest="utils-support-native-papersharp/src/main/resources/native/${{ matrix.platform }}"
           mkdir -p "$dest" stage/native/${{ matrix.platform }}
           for f in ${{ matrix.lib_names }}; do
-            test -f "$RUNNER_TEMP/publish/$f" || { echo "missing publish output: $f"; exit 1; }
+            test -f "$RUNNER_TEMP/publish/$f" || { echo "missing publish output: $f"; ls -la "$RUNNER_TEMP/publish" || true; exit 1; }
             cp "$RUNNER_TEMP/publish/$f" "$dest"/
             cp "$RUNNER_TEMP/publish/$f" stage/native/${{ matrix.platform }}/
           done
