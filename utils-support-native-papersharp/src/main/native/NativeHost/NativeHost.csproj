@@ -6,7 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishAot>true</PublishAot>
-    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- JVM 内嵌原生库不得依赖宿主 ICU：libicu 缺失时 .NET FailFast 直接 abort 宿主
+         JVM 进程（linux 精简容器实测 exit 134）。文字 shaping 由 Skia/HarfBuzz 按字体
+         数据完成，不经过 .NET 全球化，invariant 不影响渲染结果。 -->
+    <InvariantGlobalization>true</InvariantGlobalization>
     <RootNamespace>PaperSharp.NativeHost</RootNamespace>
   </PropertyGroup>
 
