@@ -67,15 +67,27 @@ jobs:
         run: dotnet --version
 
       # .NET AOT 在 linux 上需要 clang 与 zlib 头文件；runner 镜像通常已带，缺了再装。
+      # patchelf 用于给主库补 $ORIGIN RUNPATH（见下一步）。
       - name: Install linux AOT prerequisites
         if: runner.os == 'Linux'
         run: |
           dpkg -s zlib1g-dev >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+          dpkg -s patchelf >/dev/null 2>&1 || sudo apt-get install -y patchelf
 
       - name: Publish (Native AOT)
         run: |
           cd utils-support-native-papersharp/src/main/native/NativeHost
           dotnet publish NativeHost.csproj -c Release -r ${{ matrix.rid }} -o "$RUNNER_TEMP/publish"
+
+      # NativeAOT 的 linux 动态库默认不带 DT_RUNPATH。宿主是 JVM 时，.NET 运行时按名字
+      # dlopen("libSkiaSharp.so") 只搜系统路径，找不到与主库同目录提取的依赖库
+      # （CI 冒烟实证：version 可调、首次渲染即 DllNotFoundException）。补 $ORIGIN
+      # RUNPATH 后，依赖解析覆盖主库自身所在目录，JVM 内嵌场景开箱即用。
+      - name: Add $ORIGIN RUNPATH to main library (linux)
+        if: runner.os == 'Linux'
+        run: |
+          patchelf --add-rpath '$ORIGIN' "$RUNNER_TEMP/publish/NativeHost.so"
+          echo "RUNPATH: $(patchelf --print-rpath "$RUNNER_TEMP/publish/NativeHost.so")"
 
       - name: Stage native libraries
         run: |
