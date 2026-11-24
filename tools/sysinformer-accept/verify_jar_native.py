@@ -32,6 +32,7 @@
 """
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import zipfile
@@ -44,6 +45,31 @@ TARGETS = [
     ("darwin-aarch64", "libsysinformer.dylib"),
 ]
 
+# 交付 jar 的版本**从模块 pom 派生**，不硬编码。
+# 教训：这里曾写死 4.0.0.42，模块版本随根 pom 升到 4.0.0.43 后，
+# 打包产物变成 -4.0.0.43.jar，本核对在 CI 上必报「找不到 jar」——
+# 而且这一步此前从未真正跑到过（编译步长期红把它挡住了），于是一直没暴露。
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+
+
+def _module_version(pom_rel):
+    """模块的有效版本：有 <parent> 取父 pom 版本（Maven 继承口径），
+    否则取自身第一个 <version>。"""
+    with open(os.path.join(ROOT, pom_rel), encoding="utf-8") as f:
+        pom = f.read()
+    m = re.search(r"(?s)<parent>.*?</parent>", pom)
+    if m and "<version>" in m.group(0):
+        return re.search(r"<version>([^<]+)</version>", m.group(0)).group(1)
+    m = re.search(r"<version>([^<]+)</version>", pom)
+    if m:
+        return m.group(1)
+    raise SystemExit(f"  无法从 {pom_rel} 解析模块版本")
+
+
+_VER = _module_version("utils-support-native-sysinformer/pom.xml")
+_VER_J8 = _module_version("utils-support-native-sysinformer-java8/pom.xml")
+
 # **两个交付物**都要查。
 #
 # java8 模块用 `<resource><directory>../utils-support-native-sysinformer/
@@ -54,10 +80,10 @@ TARGETS = [
 # 旧库，而**编译、单测、冒烟都发现不了**（它们读 target/classes）。
 JARS = [
     ("utils-support-native-sysinformer",
-     "utils-support-native-sysinformer-4.0.0.42.jar",
+     f"utils-support-native-sysinformer-{_VER}.jar",
      "com/chua/nativesysinformer/support/SysInformerNative.class"),
     ("utils-support-native-sysinformer-java8",
-     "utils-support-native-sysinformer-java8-4.0.0.42.jar",
+     f"utils-support-native-sysinformer-java8-{_VER_J8}.jar",
      "com/chua/nativesysinformer/java8/SysInformerJna.class"),
 ]
 # 兼容旧调用：默认 jar 现在是"两个"，DEFAULT_JAR 保留指向第一个
