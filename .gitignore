@@ -68,3 +68,8 @@ site-builder/
 pmt_proxy/
 node_modules/.tmp/
 
+# .NET（NativeHost 等 AOT 工程）构建中间产物。
+# 注意不要写宽泛的 **/bin/：Rust 的 src/bin/ 是源码目录（filesearch 已有先例）。
+**/obj/
+utils-support-native-papersharp/src/main/native/NativeHost/bin/
+

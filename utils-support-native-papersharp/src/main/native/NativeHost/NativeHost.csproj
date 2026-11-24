@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <RootNamespace>PaperSharp.NativeHost</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 整装不裁剪：PaperSharp 与 AngleSharp(+Css) 保留反射面，规避 trim 误裁；
+         SkiaSharp 原生库随包分发。上游未做过 Native AOT，若未来启用裁剪需先补 trimmer 警告清理。 -->
+    <TrimmerRootAssembly Include="PaperSharp" />
+    <TrimmerRootAssembly Include="AngleSharp" />
+    <TrimmerRootAssembly Include="AngleSharp.Css" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PaperSharp" Version="1.0.5" />
+  </ItemGroup>
+
+</Project>

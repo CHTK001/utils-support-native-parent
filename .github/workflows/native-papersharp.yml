@@ -1,0 +1,199 @@
+name: native-papersharp
+
+# 四平台 .NET 10 Native AOT 构建 + 导出符号断言 + FFM 运行时冒烟（自包含，无项目依赖）。
+# 产物回填到分支 build/papersharp-native-artifacts，由维护者合并到 main。
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'utils-support-native-papersharp/**'
+      - '.github/workflows/native-papersharp.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-papersharp/**'
+      - '.github/workflows/native-papersharp.yml'
+
+concurrency:
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消。
+  group: papersharp-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            rid: win-x64
+            lib_names: 'NativeHost.dll libSkiaSharp.dll libHarfBuzzSharp.dll'
+            smoke: true
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            rid: linux-x64
+            lib_names: 'libNativeHost.so libSkiaSharp.so libHarfBuzzSharp.so'
+            smoke: true
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            rid: osx-arm64
+            lib_names: 'libNativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
+            smoke: true
+          - platform: darwin-x86_64
+            # macos-15 是 arm64 机型，osx-x64 走交叉编译；无 x64 JVM 做冒烟，
+            # 这一腿只校验产物存在、架构与导出符号（与 native-nmap 同口径）。
+            runs-on: macos-15
+            rid: osx-x64
+            lib_names: 'libNativeHost.dylib libSkiaSharp.dylib libHarfBuzzSharp.dylib'
+            smoke: false
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Toolchain version
+        run: dotnet --version
+
+      # .NET AOT 在 linux 上需要 clang 与 zlib 头文件；runner 镜像通常已带，缺了再装。
+      - name: Install linux AOT prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          dpkg -s zlib1g-dev >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish (Native AOT)
+        run: |
+          cd utils-support-native-papersharp/src/main/native/NativeHost
+          dotnet publish NativeHost.csproj -c Release -r ${{ matrix.rid }} -o "$RUNNER_TEMP/publish"
+
+      - name: Stage native libraries
+        run: |
+          set -e
+          dest="utils-support-native-papersharp/src/main/resources/native/${{ matrix.platform }}"
+          mkdir -p "$dest" stage/native/${{ matrix.platform }}
+          for f in ${{ matrix.lib_names }}; do
+            test -f "$RUNNER_TEMP/publish/$f" || { echo "missing publish output: $f"; exit 1; }
+            cp "$RUNNER_TEMP/publish/$f" "$dest"/
+            cp "$RUNNER_TEMP/publish/$f" stage/native/${{ matrix.platform }}/
+          done
+          ls -la "$dest"
+
+      - name: Check exports and architecture
+        run: |
+          # 与 native-nmap 同口径：不用 nm 断言（Windows Git Bash 的 nm 读不出 PE 符号表、
+          # 剥符号的 Linux 构建报 no symbols）。用 tr 把二进制按标识符切段做整 token 匹配。
+          # Mach-O 的 C 符号带一个前导下划线（dyld 解析时剥掉），故匹配集合
+          # 并入「去掉一个前导下划线」的形式，同一份清单四平台通用。
+          lib=$(ls utils-support-native-papersharp/src/main/resources/native/${{ matrix.platform }}/*NativeHost* | head -1)
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$lib" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          NEED="papersharp_version papersharp_render_pdf papersharp_render_image \
+                papersharp_render_svg papersharp_render_ico papersharp_free"
+          for sym in $NEED; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+
+          if [ "${{ matrix.platform }}" = "darwin-x86_64" ]; then
+            lipo -info "$lib"
+            lipo -archs "$lib" | grep -q x86_64 || { echo "ASSERT FAIL not x86_64"; exit 1; }
+            echo "ASSERT ok   mach-o x86_64"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: matrix.smoke
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Runtime smoke (FFM, no project deps)
+        if: matrix.smoke
+        run: |
+          javac -d "$RUNNER_TEMP/smoke" \
+            utils-support-native-papersharp/src/smoke/java/com/chua/papersharp/support/PapersharpSmoke.java
+          java --enable-native-access=ALL-UNNAMED -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 \
+            -cp "$RUNNER_TEMP/smoke" com.chua.papersharp.support.PapersharpSmoke \
+            "$(pwd)/utils-support-native-papersharp/src/main/resources/native/${{ matrix.platform }}"
+
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: papersharp-${{ matrix.platform }}
+          path: stage/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'papersharp-*'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/papersharp-native-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          set +o pipefail
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/papersharp-native-artifacts"
+          {
+            mkdir -p utils-support-native-papersharp/src/main/resources/native
+            cp -R dl/. utils-support-native-papersharp/src/main/resources/native/
+            echo "== 待提交产物 =="
+            git status --porcelain utils-support-native-papersharp/src/main/resources/native
+            git config user.name "github-actions[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            if git diff --quiet -- utils-support-native-papersharp/src/main/resources/native \
+               && [ -z "$(git ls-files --others --exclude-standard \
+                    utils-support-native-papersharp/src/main/resources/native)" ]; then
+              echo "产物与仓库一致，无需提交"
+              exit 0
+            fi
+            git add utils-support-native-papersharp/src/main/resources/native
+            git commit -m "build(native): papersharp 四平台产物"
+            echo "== push branch $BRANCH =="
+            git push --force "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$BRANCH"
+          } 2>&1 | tee "$LOG"
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            msg=$(tail -c 1200 "$LOG" | tr -d '\r' | tr '\n' '%0A')
+            echo "::error title=回填失败（exit $code）::$msg"
+            exit "$code"
+          fi
+          echo "产物已推送到 $BRANCH，等待维护者合并"
