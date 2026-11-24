@@ -484,7 +484,7 @@ jobs:
                 echo "它靠仓库内 \`src/ci-fixture/\` 下与 utils.version 同版本的夹具 jar"
                 echo "（本机构建，未发布到任何远端；远端那份缺 \`NativeLoader\` 编不过）。"
                 echo "全反应堆 15 个有 com.chua 依赖的模块也**全部且仅**依赖"
-                echo "\`utils-support-common-starter:${utils.version}\`，所以编译与冒烟同源："
+                echo "\`utils-support-common-starter:\${utils.version}\`，所以编译与冒烟同源："
                 echo "夹具在，两者都过；夹具与 utils.version 脱节，两者同拦。"
               elif grep -q 'FFM_SMOKE_BLOCKED_BY_MISSING_ARTIFACTS' /tmp/ffmmvn.log 2>/dev/null; then
                 echo "### Java 25 FFM 绑定端到端冒烟"
