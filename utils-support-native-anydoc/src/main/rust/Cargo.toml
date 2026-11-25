@@ -1,0 +1,16 @@
+[package]
+name = "anydoc-ffi"
+version = "0.1.0"
+edition = "2024"
+description = "C-ABI dynamic library wrapper around firecrawl anydoc"
+
+[lib]
+name = "anydoc_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+anydoc = "0.2.5"
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

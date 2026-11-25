@@ -1,0 +1,268 @@
+name: native-anydoc
+
+# anydoc_ffi（Rust cdylib，基于 crates.io anydoc 0.2.5）四平台交叉编译
+# + 导出符号断言 + 运行时 dlopen 冒烟。自包含，无项目依赖。
+#
+# 平台矩阵与 native-sqlite 同构：Windows 走 MSVC host 工具链，
+# linux 走 gnu，darwin 在 arm64 runner 上原生编 aarch64、交叉编 x86_64
+# （Apple 通用 SDK 支持 clang -arch 交叉，cdylib 由 rustc 驱动链接）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_back:
+        description: '构建通过后把四平台产物提交回仓库（默认否）'
+        required: false
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'utils-support-native-anydoc/**'
+      - '.github/workflows/native-anydoc.yml'
+  pull_request:
+    paths:
+      - 'utils-support-native-anydoc/**'
+      - '.github/workflows/native-anydoc.yml'
+
+concurrency:
+  # group 带上事件类型：push 与 workflow_dispatch 落在不同的组，手动触发的 run
+  # 就不会被随后的 push 取消（同 native-sqlite 的教训）。
+  group: anydoc-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x86_64
+            runs-on: windows-2022
+            triple: x86_64-pc-windows-msvc
+            lib: anydoc_ffi.dll
+            # `file` 对 PE 的描述串
+            file_expect: 'PE32\+.*x86-64'
+            smoke: true
+          - platform: linux-x86_64
+            runs-on: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+            lib: libanydoc_ffi.so
+            file_expect: 'ELF 64-bit.*x86-64'
+            smoke: true
+          - platform: darwin-x86_64
+            # arm64 runner 交叉编 x86_64 dylib；runner 上的 python 是 arm64，
+            # 装不上 x86_64 dylib，这一腿只做架构与导出断言
+            runs-on: macos-15
+            triple: x86_64-apple-darwin
+            lib: libanydoc_ffi.dylib
+            file_expect: 'Mach-O 64-bit.*x86_64'
+            smoke: false
+          - platform: darwin-aarch64
+            runs-on: macos-15
+            triple: aarch64-apple-darwin
+            lib: libanydoc_ffi.dylib
+            # `file` 把 arm64 写成 arm64，目录名归一化为 aarch64
+            file_expect: 'Mach-O 64-bit.*arm64'
+            smoke: true
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # 锁定 stable + 目标三元组。macos 镜像可能只有 rustup 没有默认工具链，
+        # 统一 install + default；Cargo.lock 已入库，依赖解析可复现。
+        run: |
+          set -e
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.triple }}
+          rustc --version
+          cargo --version
+
+      - name: Build (cargo release, cdylib)
+        run: |
+          cargo build --release --target ${{ matrix.triple }} \
+            --manifest-path utils-support-native-anydoc/src/main/rust/Cargo.toml
+
+      - name: Stage artifact into resources
+        run: |
+          LIB="utils-support-native-anydoc/target/${{ matrix.triple }}/release/${{ matrix.lib }}"
+          test -f "$LIB" || { echo "ASSERT FAIL missing artifact: $LIB"; exit 1; }
+          mkdir -p "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}"
+          cp "$LIB" "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}/"
+          echo "LIB_PATH=utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}" >> "$GITHUB_ENV"
+          ls -la "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}"
+
+      - name: Check architecture
+        # 直读容器头而不是信扩展名：库名与实际架构不符时，只有二进制头说了算。
+        run: |
+          file "$LIB_PATH"
+          file "$LIB_PATH" | grep -qE '${{ matrix.file_expect }}' \
+            || { echo "ASSERT FAIL architecture mismatch, expected /${{ matrix.file_expect }}/"; exit 1; }
+          echo "ASSERT ok   architecture"
+          case "${{ matrix.triple }}" in
+            *apple-darwin) lipo -info "$LIB_PATH"; lipo -archs "$LIB_PATH" ;;
+          esac
+
+      - name: Check exports
+        # 不用 nm：Windows Git Bash 的 nm 不解析 PE/COFF（stderr 写 "no symbols"
+        # 退出码却为 0）。对二进制做「整 token 精确匹配」：tr 把所有非标识符
+        # 字节替换成换行，每行一个完整标识符，grep -qxF 整行相等。
+        # LC_ALL=C 对 tr/sort 必须加（macOS BSD tr 在 UTF-8 locale 下遇非法
+        # 多字节序列会报错）。Mach-O 的 C 符号带前导下划线，匹配集合并入
+        # 「去掉一个前导下划线」的形式。
+        run: |
+          LC_ALL=C tr -c 'A-Za-z0-9_' '\n' < "$LIB_PATH" | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols.txt"
+          sed -e 's/^_//' "$RUNNER_TEMP/symbols.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_norm.txt"
+          cat "$RUNNER_TEMP/symbols.txt" "$RUNNER_TEMP/symbols_norm.txt" \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/symbols_match.txt"
+          {
+            echo "### ${{ matrix.platform }} 导出的标识符（前 40 个，共 $(wc -l < "$RUNNER_TEMP/symbols.txt") 个）"
+            echo '```'
+            head -40 "$RUNNER_TEMP/symbols.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          for sym in anydoc_version anydoc_convert_file anydoc_convert_bytes \
+                     anydoc_last_error anydoc_free_string; do
+            if grep -qxF -- "$sym" "$RUNNER_TEMP/symbols_match.txt"; then
+              echo "ASSERT ok   export $sym"
+            else
+              echo "ASSERT FAIL missing export: $sym"
+              exit 1
+            fi
+          done
+
+      - name: Runtime smoke (ctypes: dlopen + version + rtf convert + error path)
+        # 整 token 匹配只证明名字在文件里；这一步证明库能加载、符号能解析、
+        # 函数可调用且行为正确（与 native-sqlite 的 NULL-guard 冒烟同思路，
+        # anydoc 走真实转换断言）。
+        if: matrix.smoke != false
+        run: |
+          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          "$PY" - "$LIB_PATH" <<'PY'
+          import ctypes, sys
+
+          lib_path = sys.argv[1]
+          try:
+              lib = ctypes.CDLL(lib_path)
+          except OSError as exc:
+              print(f"ASSERT FAIL dlopen: {exc}")
+              sys.exit(1)
+          print(f"ASSERT ok   dlopen {lib_path}")
+
+          lib.anydoc_version.restype = ctypes.c_char_p
+          lib.anydoc_last_error.restype = ctypes.c_char_p
+          lib.anydoc_convert_bytes.restype = ctypes.c_char_p
+          lib.anydoc_convert_bytes.argtypes = [
+              ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_char_p]
+          lib.anydoc_free_string.argtypes = [ctypes.c_void_p]
+
+          ver = lib.anydoc_version()
+          print(f"VERSION={ver!r}")
+          if not ver or b"anydoc" not in ver:
+              print("ASSERT FAIL version string")
+              sys.exit(1)
+
+          rtf = b"{\\rtf1\\ansi Hello from anydoc CI smoke}"
+          md = lib.anydoc_convert_bytes(rtf, len(rtf), None)
+          if not md:
+              print(f"ASSERT FAIL convert_bytes(rtf): {lib.anydoc_last_error()!r}")
+              sys.exit(1)
+          print(f"MD={md!r}")
+          if b"Hello from anydoc" not in md:
+              print("ASSERT FAIL markdown output mismatch")
+              sys.exit(1)
+          lib.anydoc_free_string(md)
+
+          garbage = bytes([0, 1, 2]) + b"garbage"
+          bad = lib.anydoc_convert_bytes(garbage, len(garbage), None)
+          if bad:
+              lib.anydoc_free_string(bad)
+              print("ASSERT FAIL garbage input unexpectedly converted")
+              sys.exit(1)
+          err = lib.anydoc_last_error()
+          print(f"ERR={err!r}")
+          if not err or b"unrecognized" not in err:
+              print("ASSERT FAIL last_error message")
+              sys.exit(1)
+
+          print("ANYDOC_SMOKE_OK")
+          PY
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-anydoc
+          path: utils-support-native-anydoc/src/main/resources/native
+          if-no-files-found: error
+
+  collect:
+    name: commit artifacts back
+    needs: build
+    # always() 保证部分平台失败时成功平台的产物仍能回填。
+    if: >-
+      always()
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.commit_back))
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-anydoc'
+          path: dl
+          merge-multiple: true
+      - name: Report build outcome per platform
+        run: |
+          {
+            echo "### 已回填的产物"
+            echo '```'
+            find dl -name '*.so' -o -name '*.dylib' -o -name '*.dll' 2>/dev/null | sed 's#^dl/##' || true
+            echo '```'
+            echo ""
+            echo "build job: ${{ needs.build.result }}；产物推送到分支 \`build/anydoc-native-artifacts\`，请维护者合并回 main。"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Place artifacts and push branch
+        env:
+          ARTIFACT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 与 native-sqlite 同口径：保留 set +e 以便失败时打出日志，
+          # 末尾显式 exit "$rc" 透传真实退出码，push 失败必须让 job 变红。
+          set +e
+          LOG="$RUNNER_TEMP/commit.log"
+          BRANCH="build/anydoc-native-artifacts"
+          REPO_DIR="utils-support-native-anydoc/src/main/resources/native"
+          {
+            mkdir -p "$REPO_DIR"
+            cp -R dl/. "$REPO_DIR/"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$REPO_DIR"
+            if git diff --cached --quiet; then
+              echo "产物与仓库一致，无需提交"
+            else
+              echo "产物有变化（入库产物与本次源码构建不一致）："
+              git diff --cached --stat
+              git commit -m "由 native-anydoc workflow 自动回填多平台动态库"
+              git push --force \
+                "https://x-access-token:${ARTIFACT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+                "HEAD:refs/heads/${BRANCH}"
+            fi
+          } 2>&1 | tee "$LOG"
+          rc=${PIPESTATUS[0]}
+          echo "----- 提交结果（退出码 $rc）-----"
+          cat "$LOG"
+          exit "$rc"

@@ -45,6 +45,10 @@ __pycache__/
 # 本模块同样交付编好的动态库（cdylib），libdeflater / imagequant 若不做版本锁定，
 # CI 每次构建都会重新解析依赖，产物不可复现。理由同上面的 sysinformer。
 !utils-support-native-imageopt/src/main/rust/Cargo.lock
+# 例外：utils-support-native-anydoc 的 Cargo.lock **必须入库**
+# anydoc 0.2.5 及其传递依赖均为开放版本范围，锁文件不入库则 CI 每次构建
+# 都会重新解析依赖，产物不可复现。理由同 sysinformer / imageopt。
+!utils-support-native-anydoc/src/main/rust/Cargo.lock
 # block: added by cleanup script 2026-11-04 10:30
 # ===== exceptions: dev snapshot / build / runtime junk must never enter git history =====
 *.out

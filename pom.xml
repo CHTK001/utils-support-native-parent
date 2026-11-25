@@ -39,6 +39,7 @@
         <module>utils-support-native-imageopt</module>
         <module>utils-support-native-rdp</module>
         <module>utils-support-native-papersharp</module>
+        <module>utils-support-native-anydoc</module>
 </modules>
 
     <repositories>
