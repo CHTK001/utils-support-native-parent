@@ -93,15 +93,38 @@ jobs:
         run: |
           cargo build --release --target ${{ matrix.triple }} \
             --manifest-path utils-support-native-anydoc/src/main/rust/Cargo.toml
+          # cargo 的 target 目录在 **manifest 所在 crate 根**，即
+          # utils-support-native-anydoc/src/main/rust/target/，不是模块目录
+          # utils-support-native-anydoc/target/（后者是 maven 的 target/）。
+          # 写错会让四个平台全部停在「missing artifact」。
+          LIB="utils-support-native-anydoc/src/main/rust/target/${{ matrix.triple }}/release/${{ matrix.lib }}"
+          test -f "$LIB" || {
+            echo "ASSERT FAIL missing artifact: $LIB"
+            find utils-support-native-anydoc -name '${{ matrix.lib }}' -print || true
+            exit 1
+          }
+          echo "CARGO_LIB=$LIB" >> "$GITHUB_ENV"
+          ls -la "$LIB"
 
       - name: Stage artifact into resources
         run: |
-          LIB="utils-support-native-anydoc/target/${{ matrix.triple }}/release/${{ matrix.lib }}"
+          LIB="$CARGO_LIB"
           test -f "$LIB" || { echo "ASSERT FAIL missing artifact: $LIB"; exit 1; }
           mkdir -p "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}"
           cp "$LIB" "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}/"
           echo "LIB_PATH=utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}/${{ matrix.lib }}" >> "$GITHUB_ENV"
           ls -la "utils-support-native-anydoc/src/main/resources/native/${{ matrix.platform }}"
+
+      - name: Stage artifact for upload
+        # 只上传本平台这一份产物。若上传整个 resources/native 目录，四个
+        # artifact 都会带上 checkout 里已入库的其它平台二进制，
+        # download-artifact 的 merge-multiple 会让同名文件互相覆盖，
+        # 顺序不定 → 回填分支可能把旧二进制当成新产物提交回去。
+        run: |
+          rm -rf stage
+          mkdir -p stage/native/${{ matrix.platform }}
+          cp "$LIB_PATH" stage/native/${{ matrix.platform }}/
+          ls -la stage/native/${{ matrix.platform }}
 
       - name: Check architecture
         # 直读容器头而不是信扩展名：库名与实际架构不符时，只有二进制头说了算。
@@ -220,7 +243,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-anydoc
-          path: utils-support-native-anydoc/src/main/resources/native
+          path: stage/native
           if-no-files-found: error
 
   collect:
