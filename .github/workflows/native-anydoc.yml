@@ -143,17 +143,29 @@ jobs:
             fi
           done
 
-      - name: Runtime smoke (ctypes: dlopen + version + rtf convert + error path)
+      - name: 'Runtime smoke (ctypes: dlopen + version + rtf convert + error path)'
         # 整 token 匹配只证明名字在文件里；这一步证明库能加载、符号能解析、
         # 函数可调用且行为正确（与 native-sqlite 的 NULL-guard 冒烟同思路，
         # anydoc 走真实转换断言）。
+        # 注意：heredoc 里的 Python 正文保持纯 ASCII——脚本经 bash 送入
+        # `python -` 的 stdin，源码默认按 UTF-8 解析，但 Windows runner 的
+        # locale 未必是 UTF-8，中文注释有被按 cp1252/cp936 误解码而抛
+        # UnicodeDecodeError 的风险。以下两条约定写在这里而不写进脚本：
+        #   1) convert 返回库堆上的裸指针，restype 必须是 c_void_p，让原始
+        #      地址原样交给 anydoc_free_string；若用 c_char_p，ctypes 会把
+        #      返回值复制成 Python bytes，free 那个副本是未定义行为。
+        #   2) 输入侧用 c_char_p 收 bytes（长度另参传入，内容中的 NUL 不会被
+        #      截断，Rust 按 len 读）；路径先 absolute 化，消除 Windows
+        #      LoadLibraryEx 与 Unix dlopen 对相对路径解析的差异。
         if: matrix.smoke != false
         run: |
           if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
           "$PY" - "$LIB_PATH" <<'PY'
-          import ctypes, sys
+          import ctypes, os, sys
 
-          lib_path = sys.argv[1]
+          # Absolute path: GITHUB_ENV carries a relative path, and Windows
+          # LoadLibraryEx resolves relative separators differently from dlopen.
+          lib_path = os.path.abspath(sys.argv[1])
           try:
               lib = ctypes.CDLL(lib_path)
           except OSError as exc:
@@ -161,11 +173,14 @@ jobs:
               sys.exit(1)
           print(f"ASSERT ok   dlopen {lib_path}")
 
+          # restype=c_void_p keeps the library's own pointer so it reaches
+          # anydoc_free_string unchanged; c_char_p would copy into Python bytes.
           lib.anydoc_version.restype = ctypes.c_char_p
           lib.anydoc_last_error.restype = ctypes.c_char_p
-          lib.anydoc_convert_bytes.restype = ctypes.c_char_p
+          lib.anydoc_convert_bytes.restype = ctypes.c_void_p
           lib.anydoc_convert_bytes.argtypes = [
-              ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_char_p]
+              ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p]
+          lib.anydoc_free_string.restype = None
           lib.anydoc_free_string.argtypes = [ctypes.c_void_p]
 
           ver = lib.anydoc_version()
@@ -175,20 +190,21 @@ jobs:
               sys.exit(1)
 
           rtf = b"{\\rtf1\\ansi Hello from anydoc CI smoke}"
-          md = lib.anydoc_convert_bytes(rtf, len(rtf), None)
-          if not md:
+          md_ptr = lib.anydoc_convert_bytes(rtf, len(rtf), None)
+          if not md_ptr:
               print(f"ASSERT FAIL convert_bytes(rtf): {lib.anydoc_last_error()!r}")
               sys.exit(1)
+          md = ctypes.string_at(md_ptr)
           print(f"MD={md!r}")
+          lib.anydoc_free_string(md_ptr)
           if b"Hello from anydoc" not in md:
               print("ASSERT FAIL markdown output mismatch")
               sys.exit(1)
-          lib.anydoc_free_string(md)
 
           garbage = bytes([0, 1, 2]) + b"garbage"
-          bad = lib.anydoc_convert_bytes(garbage, len(garbage), None)
-          if bad:
-              lib.anydoc_free_string(bad)
+          bad_ptr = lib.anydoc_convert_bytes(garbage, len(garbage), None)
+          if bad_ptr:
+              lib.anydoc_free_string(bad_ptr)
               print("ASSERT FAIL garbage input unexpectedly converted")
               sys.exit(1)
           err = lib.anydoc_last_error()
