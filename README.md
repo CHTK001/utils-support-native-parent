@@ -6,6 +6,7 @@
 
 | 模块 | 说明 | JDK | 被以下模块声明依赖 |
 |---|---|---|---|
+| `utils-support-native-anydoc` | anydoc 文档解析（doc/docx/pdf/ppt/pptx/rtf/epub/xlsx/csv 等 14 种 → Markdown，C-ABI + FFM） | **25** | 无 |
 | `utils-support-native-cuda` | CUDA 运行时库（cudart/cublas/cudnn）环境检测与自动安装 | 1.8 | 无 |
 | `utils-support-native-datarecovery` | 数据恢复 Rust native 库（JNI） | 1.8 | `utils-support-datarecovery-starter` |
 | `utils-support-native-ffmpeg` | FFmpeg RTMP native 库（JNI，`RegisterNatives`） | 1.8 | `utils-support-ffmpeg-rust-starter` |
@@ -32,6 +33,7 @@
 
 | 模块 | windows-x86_64 | linux-x86_64 | darwin-x86_64 | darwin-aarch64 | 构建入口 |
 |---|---|---|---|---|---|
+| anydoc | ✅ | ✅ | ✅ | ✅ | `native-anydoc.yml` |
 | datarecovery | ✅ | ✅ | ✅ | ✅ | `native-datarecovery.yml` |
 | ffmpeg | ✅ | ✅ | ✅ | ✅ | `native-matrix.yml` |
 | filesearch | ✅ | ✅ | ✅ | ✅ | `native-filesearch.yml` |
@@ -54,6 +56,11 @@
 成功后回填到分支 `build/imageopt-native-artifacts`，合并回 `main` 后才会出现在上表的
 `src/main/resources/native/` 下。
 
+`anydoc` 的四平台产物由 `native-anydoc.yml` 各自构建（导出符号断言 + 架构校验 +
+ctypes 运行时冒烟），回填分支 `build/anydoc-native-artifacts` 后人工合并回 `main`。
+`darwin-x86_64` 腿的冒烟按矩阵 `smoke: false` 跳过（`macos-15` 是 arm64 runner，
+x86_64 dylib 无法 dlopen），属设计内。
+
 ### 未完成项说明
 
 - **rdp**：`RdpjBridge` 硬编码 `rdpj.dll` 与 `native/rdpj/win32-x86-64/`，并在非 Windows 平台直接抛
@@ -68,7 +75,7 @@
 | 档位 | 适用 | 模块 |
 |---|---|---|
 | **1.8**（父 POM 默认） | 纯 Java / 传统 JNI（`native` 方法）/ JNA 绑定，无新语法 | cuda、datarecovery、ffmpeg、filesearch-java8、filestorage、headless、nmap、sqlite、video-codec、video-processor |
-| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | filesearch、imageopt、libjpeg-turbo、metrics、needle、smb、uia、wechat |
+| **25**（模块内显式配置） | 使用 `java.lang.foreign`（FFM，JDK 22+）或 `record`，或需 `--enable-preview` | anydoc、filesearch、imageopt、libjpeg-turbo、metrics、needle、smb、uia、wechat |
 
 **引用 25 档模块的应用运行时必须是 JDK 25**（CI 亦为 temurin 25）；1.8 档模块可运行于更早的 JDK。
 新增 native 模块时请按此二选一，不要引入第三档。
@@ -188,6 +195,7 @@ export OSXCROSS_ROOT=/opt/osxcross
 | cuda | ⬜ 未测 | 无 DLL，仅 CUDA 环境检测脚本 |
 | filestorage | ⬜ 未测 | DLL 存在但为 C-style exports，无 JNI 符号 |
 | imageopt | ✅ 由 CI 覆盖 | 四个平台各自跑 `native-imageopt.yml` 的 FFM 冒烟：deflate→JDK `Inflater` 字节级往返、量化→索引回查调色板、`ERR_TOO_SMALL` 契约、参数校验 |
+| anydoc | ✅ 6/6 + CI | 本机 JDK 25 FFM 探针（`AnydocBridgeProbe`）：经 `NativeLoader` 抽取加载、version、RTF 字节自动探测、CSV 显式命名、文件路径转换、垃圾输入报错；CI 三腿另跑 ctypes 冒烟 |
 
 **已测：23/23 PASS · 待桥接：headless、filestorage · 环境检测：cuda**
 
