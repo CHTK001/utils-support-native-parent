@@ -75,6 +75,10 @@ docker build -t anydoc-ffi:linux-x86_64 \
 - `native-anydoc` workflow（GitHub Actions）：四平台交叉编译 +
   导出符号断言 + 架构校验 + ctypes 运行时冒烟（dlopen → version →
   RTF 转换 → 错误路径），产物回填分支 `build/anydoc-native-artifacts`。
+- **`darwin-x86_64` 的冒烟按矩阵 `smoke: false` 跳过，属设计内**：
+  GitHub 的 `macos-15` 是 arm64 runner，x86_64 dylib 在上面无法 dlopen
+  （架构不匹配），该腿只做构建 + 架构校验 + 导出符号断言。其运行时正确性
+  由 `darwin-aarch64`（同源码同工具链）与 linux/windows 两腿的冒烟共同覆盖。
 - 本机（Windows x86_64）已按同一 C-ABI 用 JDK 25 FFM 探针完成 6/6 断言
   （version / RTF 字节自动探测 / CSV 显式命名 / 文件路径转换 /
   垃圾输入报错 / 非法格式名报错）。
