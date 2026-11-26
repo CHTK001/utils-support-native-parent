@@ -197,7 +197,15 @@ jobs:
           echo "夹具版本（utils.version）= $UTILS_VER"
           FX=utils-support-native-sysinformer/src/ci-fixture
           GAV=utils-support-common-starter-$UTILS_VER
+          OSGI_GAV=utils-support-osgi-bundle-starter-$UTILS_VER
+          # **2026-11-26**：4.0.0.51 的 common-starter pom 新增了一条 com.chua 依赖
+          # `utils-support-osgi-bundle-starter`（OSGi 契约，0211 sync 引入），
+          # 它同样只在 GitHub Packages 之外无处可得（aliyun 404 / github 401）。
+          # 只装 common-starter 时，`mvn package` 会在**交付物核对**步因解析不到
+          # 该坐标而失败 —— 而全反应堆编译步把它归为「环境阻塞」只打 warning，
+          # 于是一个真实缺口被伪装成「环境问题」。故它必须一并作为夹具。
           for f in "$GAV.jar" "$GAV.pom" \
+                   "$OSGI_GAV.jar" "$OSGI_GAV.pom" \
                    "utils-support-core-parent-$UTILS_VER.pom" \
                    "utils-support-parent-starter-$UTILS_VER.pom"; do
             [ -f "$FX/$f" ] || { echo "::error title=ci-fixture 与 utils.version 不一致::缺少 $FX/$f —— 请用本机新构建的构件刷新 ci-fixture"; exit 1; }
