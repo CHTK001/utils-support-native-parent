@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.chua</groupId>
         <artifactId>utils-support-core-parent</artifactId>
-        <version>4.0.0.50</version>
+        <version>4.0.0.51</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>utils-support-common-starter</artifactId>
@@ -67,6 +67,14 @@
         </plugins>
     </build>
     <dependencies>
+        <!-- OSGi 插件契约（BundleApplication / BundleContext / OsgiLauncher 等）位于
+             utils-support-osgi-bundle-starter（零依赖契约模块，本模块经 OsgiServiceResolver
+             等引用这些契约，依赖方向 common -> osgi-bundle，不构成环） -->
+        <dependency>
+            <groupId>com.chua</groupId>
+            <artifactId>utils-support-osgi-bundle-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -105,11 +113,13 @@
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-core</artifactId>
         </dependency>
+        <!--
+            zip4j：ZipExtractor（Extractor SPI 的 "zip" 唯一实现）用于解压，
+            支持带密码保护的 ZIP。版本由根 POM dependencyManagement 统一管理。
+        -->
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>6.1.3</version>
-            <scope>test</scope>
+            <groupId>net.lingala.zip4j</groupId>
+            <artifactId>zip4j</artifactId>
         </dependency>
     </dependencies>
 </project>

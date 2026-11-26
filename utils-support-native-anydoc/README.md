@@ -15,6 +15,8 @@ Java FFM / Python ctypes / C / C# 等原生消费。
 utils-support-native-anydoc/
 ├─ pom.xml                                  # Java 25，FFM 绑定层
 ├─ src/main/java/com/chua/anydoc/support/AnydocBridge.java
+├─ src/main/java/com/chua/anydoc/support/NativeAnydocSpi.java   # AnydocSpi 的 native 实现
+├─ src/main/resources/META-INF/services/com.chua.common.support.nativeapi.AnydocSpi
 ├─ src/main/rust/                           # Rust cdylib 源码（anydoc_ffi）
 │  ├─ Cargo.toml                            # 依赖 crates.io anydoc = "0.2.5"
 │  ├─ Cargo.lock                            # 入库，保证 CI 产物可复现
@@ -44,8 +46,35 @@ utils-support-native-anydoc/
 
 ## Java 用法（JDK 25 FFM）
 
+JVM 需加 `--enable-native-access=ALL-UNNAMED`。
+
+### 首选：SPI 契约（上层只依赖接口，不出现实现类名）
+
+契约 `com.chua.common.support.nativeapi.AnydocSpi` 在 `utils-support-common-starter`，
+实现 `NativeAnydocSpi` 在本模块并以 `@Spi("native")` + `META-INF/services` 注册：
+
 ```java
-// JVM 需加 --enable-native-access=ALL-UNNAMED
+import com.chua.common.support.nativeapi.AnydocSpi;
+import com.chua.common.support.nativeapi.NativeServices;
+
+// 未引入本模块、或原生库加载失败时返回 null，不会把 NoClassDefFoundError 抛给业务
+AnydocSpi anydoc = NativeServices.get(AnydocSpi.class);
+if (anydoc == null) {
+    // 按能力不可用降级
+}
+String version = anydoc.version();                              // anydoc-ffi 0.1.0 (anydoc 0.2.5)
+String auto    = anydoc.convertBytes(docx, null);               // 自动探测
+String csvMd   = anydoc.convertBytes(csvBytes, "csv");          // 无签名格式显式命名
+String fileMd  = anydoc.convertFile(Path.of("slide.pptx"));     // 按路径
+```
+
+契约与其余 native 模块同形：`load()` / `isLoaded()` / `default available()` /
+`getLoadError()` / `lastError()`。`NativeServices.get()` 只在 `available()` 为真时返回实例，
+加载失败原因用桥接层 `AnydocBridge.getLoadError()` 取。
+
+### 直接用法（同模块内，或明确要绑死本模块时）
+
+```java
 if (AnydocBridge.isAvailable()) {
     String version = AnydocBridge.version();
     byte[] docx = Files.readAllBytes(Path.of("contract.docx"));

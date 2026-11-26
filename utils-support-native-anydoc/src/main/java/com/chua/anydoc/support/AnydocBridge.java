@@ -79,6 +79,11 @@ public final class AnydocBridge {
     private static volatile boolean available;
 
     /**
+     * 最近一次加载失败原因，加载成功后清空。
+     */
+    private static volatile Throwable loadError;
+
+    /**
      * {@code anydoc_version} 句柄。
      */
     private static volatile MethodHandle versionHandle;
@@ -143,9 +148,11 @@ public final class AnydocBridge {
                         FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.ADDRESS,
                                 ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
                 available = true;
+                loadError = null;
                 log.debug("anydoc_ffi 原生库已加载并完成 5 个导出绑定");
             } catch (Throwable e) {
                 available = false;
+                loadError = e;
                 log.warn("anydoc 文档解析原生库不可用，文档转 Markdown 能力降级: {}", e.toString());
             } finally {
                 resolved = true;
@@ -161,6 +168,26 @@ public final class AnydocBridge {
      */
     public static boolean isAvailable() {
         return load();
+    }
+
+    /**
+     * 原生库是否已加载成功。
+     *
+     * <p>只读取加载结果，不触发加载；需要惰性加载时用 {@link #isAvailable()}。</p>
+     *
+     * @return 已加载返回 true，否则 false
+     */
+    public static boolean isLoaded() {
+        return available;
+    }
+
+    /**
+     * 原生库加载失败原因。
+     *
+     * @return 失败异常；加载成功返回 null
+     */
+    public static Throwable getLoadError() {
+        return loadError;
     }
 
     /**

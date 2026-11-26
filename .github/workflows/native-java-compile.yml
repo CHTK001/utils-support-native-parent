@@ -185,6 +185,8 @@ jobs:
         # common-starter:4.0.0.50 失败（aliyun 403 / github-resource 401 /
         # central 无此坐标），本 workflow 自 2026-11-13 起每次必红。
         # 现夹具版本改由 utils.version 推导，夹具文件同步刷新为 4.0.0.50。
+        # **2026-11-26**：common-starter 新增 nativeapi/AnydocSpi 契约，utils.version
+        # 随之升到 4.0.0.51，夹具同步刷新为 4.0.0.51（jar 内已含该接口）。
         run: |
           set -euo pipefail
           # 夹具版本跟随根 pom 的 <utils.version>。升级 utils.version 时
