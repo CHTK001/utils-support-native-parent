@@ -17,6 +17,12 @@
 
 `mvn -o -q compile -DskipTests` EXIT=0；编码 `BOM=0 / U+FFFD=0`；产物坐标与平台标签不得随意更改（上层按坐标+classifier 加载）。
 
+## 原生产物与 CI（`native-*.yml`）
+
+- 四平台产物一律以 CI 构建为准：工作流在对应 runner 上 build → 架构/导出符号校验 → 运行时冒烟 → 回填分支 `build/<模块>-native-artifacts`（`git push --force`，**不改 main**）；main 上的 `src/main/resources/native/` 由人工从该分支 checkout 后提交。
+- **不要用字节/hash 比对判断「产物是否有更新」**：lld 用真实时钟写链接时间戳，同源码重编必然字节不同。实测两次 CI 的 Windows DLL 同尺寸、仅 24 字节不同 = COFF `TimeDateStamp`（+ 数据段内嵌 3 处副本）与 CodeView `RSDS` 的 PDB GUID，功能等价。判定「有没有真变化」看源提交与架构/导出符号断言，不看 hash。
+- 冒烟步骤由矩阵 `smoke:` 控制：arm64 runner 无法 dlopen x86_64 dylib，`darwin-x86_64` 腿跳过冒烟属设计内，不是漏测。
+
 ## 提交
 
 只提交自己的文件；产物变更必须标注需要同步发布的上层模块。
