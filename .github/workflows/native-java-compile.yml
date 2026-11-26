@@ -213,6 +213,10 @@ jobs:
           done
           REP="${HOME}/.m2/repository/com/chua/utils-support-common-starter/$UTILS_VER"
           [ -d "$REP" ] && rm -rf "$REP"
+          # osgi 夹具同版本目录也清一遍：`setup-java` 命中 ~/.m2 缓存时，
+          # 上一轮可能已留下同坐标的旧字节，不清理则「装入」变成覆盖旧值。
+          OREP="${HOME}/.m2/repository/com/chua/utils-support-osgi-bundle-starter/$UTILS_VER"
+          [ -d "$OREP" ] && rm -rf "$OREP"
 
           # ---- 装入全部夹具：依赖 jar + **父链 pom** ------------------
           #
@@ -241,6 +245,7 @@ jobs:
           }
 
           install_fixture utils-support-common-starter "$FX/$GAV.jar"
+          install_fixture utils-support-osgi-bundle-starter "$FX/$OSGI_GAV.jar"
           install_fixture utils-support-core-parent ""
           install_fixture utils-support-parent-starter ""
 
@@ -249,6 +254,10 @@ jobs:
           echo "  安装后 jar 大小 = $GOT"
           [ "$GOT" = "$(wc -c < "$FX/$GAV.jar")" ] || {
             echo "::error title=装入的夹具与提交的夹具不一致::装入 $GOT 字节 / 提交 $(wc -c < "$FX/$GAV.jar") 字节"; exit 1; }
+          OGOT=$(wc -c < "$OREP/$OSGI_GAV.jar")
+          echo "  安装后 osgi jar 大小 = $OGOT"
+          [ "$OGOT" = "$(wc -c < "$FX/$OSGI_GAV.jar")" ] || {
+            echo "::error title=装入的 osgi 夹具与提交的夹具不一致::装入 $OGOT 字节 / 提交 $(wc -c < "$FX/$OSGI_GAV.jar") 字节"; exit 1; }
           echo "FIXTURE_INSTALLED version=$UTILS_VER"
 
       - name: Java 侧编译（native-parent 全反应堆）
