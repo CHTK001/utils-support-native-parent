@@ -81,6 +81,26 @@ FreeRDP，部署机需具备对应的 `libfreerdp3` / `libfreerdp-client3` / `li
 ./build.sh --clean
 ```
 
+## 通过 OSGi 安装
+
+在仓库根目录执行 `mvn -pl utils-support-native-rdp -Posgi clean package -DskipTests`，
+生成 `utils-support-native-rdp/target/utils-support-native-rdp-4.0.0.43-osgi.jar`。
+在插件管理中上传这个带 `-osgi` 后缀的产物并启动，符号名为 `native-rdp-spi`。
+普通 Maven 依赖仍使用原坐标，不使用此 classifier。
+
+该 bundle 包含本模块的实现、原生资源与隔离的 JNA；不打包公共 SPI 契约，
+由宿主提供 `RdpNativeSpi`。`META-INF/extensions` 索引用于宿主 OSGi SPI 发布器注册及撤销实现。
+宿主需要启用 `plugin.osgi.server.enabled`，并保留默认开启的 SPI 发布器。
+宿主部署包必须包含 `HostSpiRegistryBridge` 及调用它的 `BundleSpiAutoPublisher`；
+旧发布器只能让 shell 的 `invoke` 看到服务，业务侧 `NativeServices.get(...)` 仍会判定未部署。
+重启后保留安装状态需配置 `plugin.osgi.storage-clean=none`，且存储目录必须保持不变。
+
+安装验收应通过 OSGi shell 执行
+`impls com.chua.common.support.nativeapi.RdpNativeSpi` 及
+`invoke com.chua.common.support.nativeapi.RdpNativeSpi available`，后者应返回 `true`。
+仅有 bundle 的 ACTIVE 状态不能证明原生库可用。停止或卸载后，宿主中的对应 SPI 服务应消失。
+此插件提供 RDP 客户端能力；目标主机仍须有可访问的 RDP 服务和有效登录凭据。
+
 ## 帧约定（Java ↔ C）
 
 Java 侧通过 `/ws/ms/server/terminal/rdp` 创建 WebSocket 连接后交互。
